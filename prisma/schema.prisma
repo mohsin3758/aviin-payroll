@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id                  String   @id @default(cuid())
+  name                String
+  address             String?
+  pan                 String?
+  tan                 String?
+  gstin               String?
+  pfNumber            String?
+  esiNumber           String?
+  state               String   @default("Maharashtra")
+  financialYearStart  String   @default("2025-04-01")
+  payrollMonth        Int      @default(4)
+  payrollYear         Int      @default(2025)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employees           Employee[]
+  payrollRuns         PayrollRun[]
+}
+
+model Employee {
+  id                  String   @id @default(cuid())
+  companyId           String
+  employeeCode        String   @unique
+  firstName           String
+  lastName            String?
+  email               String
+  phone               String?
+  dateOfJoining       DateTime
+  dateOfExit          DateTime?
+  designation         String
+  department          String
+  state               String   @default("Maharashtra")
+  panNumber           String?
+  aadhaarNumber       String?
+  bankName            String?
+  bankAccountNumber   String?
+  bankIfsc            String?
+  uanNumber           String?
+  esiNumber           String?
+  pfApplicable        Boolean  @default(true)
+  esiApplicable       Boolean  @default(true)
+  ptApplicable        Boolean  @default(true)
+  lwfApplicable       Boolean  @default(true)
+  taxRegime           String   @default("new") // "new" or "old"
+  gender              String   @default("male")
+  dateOfBirth         DateTime?
+  bloodGroup          String?
+  emergencyContact    String?
+  currentAddress      String?
+  permanentAddress    String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  company             Company  @relation(fields: [companyId], references: [id])
+  salaryStructure     SalaryStructure?
+  attendance          Attendance[]
+  leaveApplications   LeaveApplication[]
+  leaveBalances       LeaveBalance[]
+  payrollDetails      PayrollDetail[]
+}
+
+model SalaryStructure {
+  id                  String   @id @default(cuid())
+  employeeId          String   @unique
+  effectiveDate       DateTime @default(now())
+  basic               Float    // monthly
+  dearnessAllowance   Float    @default(0)
+  houseRentAllowance  Float
+  conveyanceAllowance Float    @default(1600)
+  medicalAllowance    Float    @default(1250)
+  specialAllowance    Float
+  overtimeAllowance   Float    @default(0)
+  bonus               Float    @default(0)
+  otherEarnings       Float    @default(0)
+  employerPF          Float    @default(0) // for CTC display
+  employerESI         Float    @default(0) // for CTC display
+  gratuity            Float    @default(0) // for CTC display
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+}
+
+model Attendance {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  date                DateTime
+  punchIn             DateTime?
+  punchOut            DateTime?
+  punchInMethod       String?  // "face", "manual", "login"
+  punchOutMethod      String?
+  faceVerified        Boolean  @default(false)
+  faceConfidence      Float?
+  status              String   @default("absent") // "present", "absent", "half-day", "holiday", "weekly-off"
+  totalHours          Float?   // calculated as punchOut - punchIn
+  notes               String?
+  ipAddress           String?
+  deviceInfo          String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, date])
+}
+
+model LeaveType {
+  id                  String   @id @default(cuid())
+  name                String   // "Casual Leave", "Sick Leave", "Earned Leave", etc.
+  shortCode           String   // "CL", "SL", "EL"
+  totalDays           Float    // annual entitlement
+  isCarryForward      Boolean  @default(true)
+  maxCarryForward     Float    @default(0)
+  isPaid              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+
+  leaveBalances       LeaveBalance[]
+  leaveApplications   LeaveApplication[]
+}
+
+model LeaveBalance {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  leaveTypeId         String
+  year                Int
+  totalAllocated      Float
+  used                Float    @default(0)
+  carryForwarded      Float    @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+  leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([employeeId, leaveTypeId, year])
+}
+
+model LeaveApplication {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  leaveTypeId         String
+  startDate           DateTime
+  endDate             DateTime
+  totalDays           Float
+  reason              String?
+  status              String   @default("pending") // "pending", "approved", "rejected", "cancelled"
+  approvedBy          String?
+  approvedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+  leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id])
+}
+
+model PayrollRun {
+  id                  String   @id @default(cuid())
+  companyId           String
+  month               Int      // 1-12
+  year                Int
+  status              String   @default("draft") // "draft", "processed", "paid"
+  totalEmployees      Int      @default(0)
+  totalGrossSalary    Float    @default(0)
+  totalDeductions     Float    @default(0)
+  totalNetSalary      Float    @default(0)
+  totalEmployerPF     Float    @default(0)
+  totalEmployerESI    Float    @default(0)
+  totalEmployeePF     Float    @default(0)
+  totalEmployeeESI    Float    @default(0)
+  totalTDS            Float    @default(0)
+  totalPT             Float    @default(0)
+  totalLWF            Float    @default(0)
+  processedAt         DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  company             Company  @relation(fields: [companyId], references: [id])
+  details             PayrollDetail[]
+
+  @@unique([companyId, month, year])
+}
+
+model PayrollDetail {
+  id                  String   @id @default(cuid())
+  payrollRunId        String
+  employeeId          String
+  daysInMonth         Int
+  presentDays         Float
+  paidDays            Float
+  // Earnings
+  basic               Float
+  dearnessAllowance   Float
+  houseRentAllowance  Float
+  conveyanceAllowance Float
+  medicalAllowance    Float
+  specialAllowance    Float
+  overtimeAllowance   Float
+  bonus               Float
+  otherEarnings       Float
+  totalEarnings       Float
+  // Deductions
+  employeePF          Float
+  employerPF          Float
+  employeeESI         Float
+  employerESI         Float
+  tds                 Float
+  professionalTax     Float
+  lwf                 Float
+  tardinessDeduction  Float    @default(0)
+  otherDeductions     Float    @default(0)
+  totalDeductions     Float
+  // Net
+  netSalary           Float
+  // CTC
+  grossSalary         Float
+  ctc                 Float
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  payrollRun          PayrollRun @relation(fields: [payrollRunId], references: [id])
+  employee            Employee   @relation(fields: [employeeId], references: [id])
+}

@@ -1,0 +1,1035 @@
+     1→'use client';
+     2→
+     3→import React, { useCallback, useEffect, useMemo, useState } from 'react';
+     4→import { toast } from 'sonner';
+     5→import {
+     6→  CalendarDays,
+     7→  CheckCircle2,
+     8→  FilterIcon,
+     9→  Leaf,
+    10→  Plus,
+    11→  RotateCcw,
+    12→  Search,
+    13→  Trash2,
+    14→  XCircle,
+    15→} from 'lucide-react';
+    16→
+    17→import { usePayrollStore } from '@/store/payroll-store';
+    18→
+    19→import {
+    20→  Card,
+    21→  CardContent,
+    22→  CardDescription,
+    23→  CardHeader,
+    24→  CardTitle,
+    25→} from '@/components/ui/card';
+    26→import {
+    27→  Table,
+    28→  TableBody,
+    29→  TableCell,
+    30→  TableHead,
+    31→  TableHeader,
+    32→  TableRow,
+    33→} from '@/components/ui/table';
+    34→import { Button } from '@/components/ui/button';
+    35→import {
+    36→  Dialog,
+    37→  DialogContent,
+    38→  DialogDescription,
+    39→  DialogFooter,
+    40→  DialogHeader,
+    41→  DialogTitle,
+    42→} from '@/components/ui/dialog';
+    43→import { Input } from '@/components/ui/input';
+    44→import { Label } from '@/components/ui/label';
+    45→import {
+    46→  Select,
+    47→  SelectContent,
+    48→  SelectItem,
+    49→  SelectTrigger,
+    50→  SelectValue,
+    51→} from '@/components/ui/select';
+    52→import { Badge } from '@/components/ui/badge';
+    53→import { Progress } from '@/components/ui/progress';
+    54→import {
+    55→  AlertDialog,
+    56→  AlertDialogAction,
+    57→  AlertDialogCancel,
+    58→  AlertDialogContent,
+    59→  AlertDialogDescription,
+    60→  AlertDialogFooter,
+    61→  AlertDialogHeader,
+    62→  AlertDialogTitle,
+    63→} from '@/components/ui/alert-dialog';
+    64→import { Skeleton } from '@/components/ui/skeleton';
+    65→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+    66→import { Textarea } from '@/components/ui/textarea';
+    67→
+    68→// ---------- Types ----------
+    69→
+    70→interface Employee {
+    71→  id: string;
+    72→  firstName: string;
+    73→  lastName: string;
+    74→  employeeCode: string;
+    75→  [key: string]: unknown;
+    76→}
+    77→
+    78→interface LeaveType {
+    79→  id: string;
+    80→  name: string;
+    81→  code: string;
+    82→  [key: string]: unknown;
+    83→}
+    84→
+    85→interface LeaveApplication {
+    86→  id: string;
+    87→  employeeId: string;
+    88→  leaveTypeId: string;
+    89→  startDate: string;
+    90→  endDate: string;
+    91→  totalDays: number;
+    92→  reason: string | null;
+    93→  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+    94→  createdAt: string;
+    95→  approvedAt: string | null;
+    96→  approvedBy: string | null;
+    97→  employee: { firstName: string; lastName: string; employeeCode: string };
+    98→  leaveType: LeaveType;
+    99→}
+   100→
+   101→interface LeaveBalance {
+   102→  id: string;
+   103→  employeeId: string;
+   104→  leaveTypeId: string;
+   105→  year: number;
+   106→  allocated: number;
+   107→  used: number;
+   108→  available: number;
+   109→  carryForward: number;
+   110→  leaveType: LeaveType;
+   111→  [key: string]: unknown;
+   112→}
+   113→
+   114→// ---------- Helpers ----------
+   115→
+   116→function formatDate(dateStr: string) {
+   117→  const d = new Date(dateStr);
+   118→  return d.toLocaleDateString('en-IN', {
+   119→    day: '2-digit',
+   120→    month: 'short',
+   121→    year: 'numeric',
+   122→  });
+   123→}
+   124→
+   125→function calcBusinessDays(start: string, end: string): number {
+   126→  const s = new Date(start);
+   127→  const e = new Date(end);
+   128→  if (e < s) return 0;
+   129→  const diffMs = Math.abs(e.getTime() - s.getTime());
+   130→  return Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1;
+   131→}
+   132→
+   133→function getBalanceColor(available: number, allocated: number): string {
+   134→  if (allocated <= 0) return 'text-muted-foreground';
+   135→  const pct = (available / allocated) * 100;
+   136→  if (pct > 50) return 'text-emerald-600 dark:text-emerald-400';
+   137→  if (pct >= 25) return 'text-amber-600 dark:text-amber-400';
+   138→  return 'text-red-600 dark:text-red-400';
+   139→}
+   140→
+   141→function getProgressColor(available: number, allocated: number): string {
+   142→  if (allocated <= 0) return '[&>[data-slot=progress-indicator]]:bg-muted-foreground';
+   143→  const pct = (available / allocated) * 100;
+   144→  if (pct > 50) return '[&>[data-slot=progress-indicator]]:bg-emerald-500';
+   145→  if (pct >= 25) return '[&>[data-slot=progress-indicator]]:bg-amber-500';
+   146→  return '[&>[data-slot=progress-indicator]]:bg-red-500';
+   147→}
+   148→
+   149→function getBalanceBorderColor(available: number, allocated: number): string {
+   150→  if (allocated <= 0) return 'border-border';
+   151→  const pct = (available / allocated) * 100;
+   152→  if (pct > 50) return 'border-emerald-200 dark:border-emerald-800';
+   153→  if (pct >= 25) return 'border-amber-200 dark:border-amber-800';
+   154→  return 'border-red-200 dark:border-red-800';
+   155→}
+   156→
+   157→const statusConfig: Record<
+   158→  string,
+   159→  { label: string; className: string }
+   160→> = {
+   161→  pending: {
+   162→    label: 'Pending',
+   163→    className:
+   164→      'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+   165→  },
+   166→  approved: {
+   167→    label: 'Approved',
+   168→    className:
+   169→      'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+   170→  },
+   171→  rejected: {
+   172→    label: 'Rejected',
+   173→    className:
+   174→      'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-red-200 dark:border-red-800',
+   175→  },
+   176→  cancelled: {
+   177→    label: 'Cancelled',
+   178→    className:
+   179→      'bg-gray-100 text-gray-700 dark:bg-gray-800/40 dark:text-gray-400 border-gray-200 dark:border-gray-700',
+   180→  },
+   181→};
+   182→
+   183→// ---------- Component ----------
+   184→
+   185→export default function LeavesView() {
+   186→  const { refreshKey, selectedEmployeeId } = usePayrollStore();
+   187→
+   188→  // ---- Data state ----
+   189→  const [employees, setEmployees] = useState<Employee[]>([]);
+   190→  const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
+   191→  const [applications, setApplications] = useState<LeaveApplication[]>([]);
+   192→  const [balances, setBalances] = useState<LeaveBalance[]>([]);
+   193→  const [allBalances, setAllBalances] = useState<LeaveBalance[]>([]);
+   194→
+   195→  // ---- Loading state ----
+   196→  const [loadingEmployees, setLoadingEmployees] = useState(true);
+   197→  const [loadingTypes, setLoadingTypes] = useState(true);
+   198→  const [loadingApplications, setLoadingApplications] = useState(true);
+   199→  const [loadingBalances, setLoadingBalances] = useState(true);
+   200→  const [loadingAllBalances, setLoadingAllBalances] = useState(true);
+   201→  const [submitting, setSubmitting] = useState(false);
+   202→  const [actioning, setActioning] = useState(false);
+   203→
+   204→  // ---- Filter state ----
+   205→  const [filterEmployee, setFilterEmployee] = useState<string>('all');
+   206→  const [filterStatus, setFilterStatus] = useState<string>('all');
+   207→
+   208→  // ---- Dialog state ----
+   209→  const [applyOpen, setApplyOpen] = useState(false);
+   210→  const [confirmOpen, setConfirmOpen] = useState(false);
+   211→  const [confirmAction, setConfirmAction] = useState<{
+   212→    type: 'approve' | 'reject' | 'cancel';
+   213→    id: string;
+   214→  } | null>(null);
+   215→
+   216→  // ---- Form state ----
+   217→  const [formEmployee, setFormEmployee] = useState('');
+   218→  const [formLeaveType, setFormLeaveType] = useState('');
+   219→  const [formStartDate, setFormStartDate] = useState('');
+   220→  const [formEndDate, setFormEndDate] = useState('');
+   221→  const [formReason, setFormReason] = useState('');
+   222→
+   223→  const currentYear = new Date().getFullYear();
+   224→
+   225→  // ---- Computed total days ----
+   226→  const totalDays = useMemo(() => {
+   227→    if (!formStartDate || !formEndDate) return 0;
+   228→    return calcBusinessDays(formStartDate, formEndDate);
+   229→  }, [formStartDate, formEndDate]);
+   230→
+   231→  // ---- Fetch employees ----
+   232→  const fetchEmployees = useCallback(async () => {
+   233→    setLoadingEmployees(true);
+   234→    try {
+   235→      const res = await fetch('/api/employees');
+   236→      if (!res.ok) throw new Error('Failed to fetch employees');
+   237→      const data = await res.json();
+   238→      setEmployees(data);
+   239→    } catch (err) {
+   240→      console.error(err);
+   241→      toast.error('Failed to load employees');
+   242→    } finally {
+   243→      setLoadingEmployees(false);
+   244→    }
+   245→  }, []);
+   246→
+   247→  // ---- Fetch leave types ----
+   248→  const fetchLeaveTypes = useCallback(async () => {
+   249→    setLoadingTypes(true);
+   250→    try {
+   251→      const res = await fetch('/api/leaves?types=true');
+   252→      if (!res.ok) throw new Error('Failed to fetch leave types');
+   253→      const data = await res.json();
+   254→      setLeaveTypes(data);
+   255→    } catch (err) {
+   256→      console.error(err);
+   257→      toast.error('Failed to load leave types');
+   258→    } finally {
+   259→      setLoadingTypes(false);
+   260→    }
+   261→  }, []);
+   262→
+   263→  // ---- Fetch applications ----
+   264→  const fetchApplications = useCallback(async () => {
+   265→    setLoadingApplications(true);
+   266→    try {
+   267→      const params = new URLSearchParams();
+   268→      if (filterEmployee && filterEmployee !== 'all') {
+   269→        params.set('employeeId', filterEmployee);
+   270→      }
+   271→      if (filterStatus && filterStatus !== 'all') {
+   272→        params.set('status', filterStatus);
+   273→      }
+   274→      params.set('year', String(currentYear));
+   275→      const res = await fetch(`/api/leaves?${params.toString()}`);
+   276→      if (!res.ok) throw new Error('Failed to fetch applications');
+   277→      const data = await res.json();
+   278→      setApplications(data);
+   279→    } catch (err) {
+   280→      console.error(err);
+   281→      toast.error('Failed to load leave applications');
+   282→    } finally {
+   283→      setLoadingApplications(false);
+   284→    }
+   285→  }, [filterEmployee, filterStatus, currentYear]);
+   286→
+   287→  // ---- Fetch balance for selected employee ----
+   288→  const fetchBalances = useCallback(async () => {
+   289→    const empId = filterEmployee !== 'all' ? filterEmployee : selectedEmployeeId;
+   290→    if (!empId) {
+   291→      setBalances([]);
+   292→      setLoadingBalances(false);
+   293→      return;
+   294→    }
+   295→    setLoadingBalances(true);
+   296→    try {
+   297→      const res = await fetch(
+   298→        `/api/leaves/balance?employeeId=${empId}&year=${currentYear}`
+   299→      );
+   300→      if (!res.ok) throw new Error('Failed to fetch balances');
+   301→      const data = await res.json();
+   302→      setBalances(data);
+   303→    } catch (err) {
+   304→      console.error(err);
+   305→      toast.error('Failed to load leave balances');
+   306→    } finally {
+   307→      setLoadingBalances(false);
+   308→    }
+   309→  }, [filterEmployee, selectedEmployeeId, currentYear]);
+   310→
+   311→  // ---- Fetch all employees balances ----
+   312→  const fetchAllBalances = useCallback(async () => {
+   313→    setLoadingAllBalances(true);
+   314→    try {
+   315→      const allData: LeaveBalance[] = [];
+   316→      for (const emp of employees) {
+   317→        const res = await fetch(
+   318→          `/api/leaves/balance?employeeId=${emp.id}&year=${currentYear}`
+   319→        );
+   320→        if (res.ok) {
+   321→          const data = await res.json();
+   322→          allData.push(...data);
+   323→        }
+   324→      }
+   325→      setAllBalances(allData);
+   326→    } catch (err) {
+   327→      console.error(err);
+   328→      toast.error('Failed to load all employee balances');
+   329→    } finally {
+   330→      setLoadingAllBalances(false);
+   331→    }
+   332→  }, [employees, currentYear]);
+   333→
+   334→  // ---- Effects ----
+   335→  useEffect(() => {
+   336→    fetchEmployees();
+   337→    fetchLeaveTypes();
+   338→  }, [fetchEmployees, fetchLeaveTypes]);
+   339→
+   340→  useEffect(() => {
+   341→    fetchApplications();
+   342→  }, [fetchApplications, refreshKey]);
+   343→
+   344→  useEffect(() => {
+   345→    fetchBalances();
+   346→  }, [fetchBalances, refreshKey]);
+   347→
+   348→  useEffect(() => {
+   349→    if (employees.length > 0) {
+   350→      fetchAllBalances();
+   351→    }
+   352→  }, [employees, fetchAllBalances, refreshKey]);
+   353→
+   354→  // ---- Form reset ----
+   355→  const resetForm = useCallback(() => {
+   356→    setFormEmployee('');
+   357→    setFormLeaveType('');
+   358→    setFormStartDate('');
+   359→    setFormEndDate('');
+   360→    setFormReason('');
+   361→  }, []);
+   362→
+   363→  // ---- Apply for leave ----
+   364→  const handleApply = useCallback(async () => {
+   365→    if (!formEmployee) {
+   366→      toast.error('Please select an employee');
+   367→      return;
+   368→    }
+   369→    if (!formLeaveType) {
+   370→      toast.error('Please select a leave type');
+   371→      return;
+   372→    }
+   373→    if (!formStartDate || !formEndDate) {
+   374→      toast.error('Please select start and end dates');
+   375→      return;
+   376→    }
+   377→    if (new Date(formEndDate) < new Date(formStartDate)) {
+   378→      toast.error('End date cannot be before start date');
+   379→      return;
+   380→    }
+   381→
+   382→    setSubmitting(true);
+   383→    try {
+   384→      const res = await fetch('/api/leaves', {
+   385→        method: 'POST',
+   386→        headers: { 'Content-Type': 'application/json' },
+   387→        body: JSON.stringify({
+   388→          employeeId: formEmployee,
+   389→          leaveTypeId: formLeaveType,
+   390→          startDate: formStartDate,
+   391→          endDate: formEndDate,
+   392→          reason: formReason || null,
+   393→        }),
+   394→      });
+   395→      if (!res.ok) {
+   396→        const err = await res.json();
+   397→        throw new Error(err.error || 'Failed to apply for leave');
+   398→      }
+   399→      toast.success('Leave application submitted successfully');
+   400→      setApplyOpen(false);
+   401→      resetForm();
+   402→      fetchApplications();
+   403→      fetchBalances();
+   404→      fetchAllBalances();
+   405→    } catch (err) {
+   406→      console.error(err);
+   407→      toast.error(err instanceof Error ? err.message : 'Failed to apply for leave');
+   408→    } finally {
+   409→      setSubmitting(false);
+   410→    }
+   411→  }, [
+   412→    formEmployee,
+   413→    formLeaveType,
+   414→    formStartDate,
+   415→    formEndDate,
+   416→    formReason,
+   417→    resetForm,
+   418→    fetchApplications,
+   419→    fetchBalances,
+   420→    fetchAllBalances,
+   421→  ]);
+   422→
+   423→  // ---- Confirm action (approve / reject / cancel) ----
+   424→  const openConfirm = useCallback(
+   425→    (type: 'approve' | 'reject' | 'cancel', id: string) => {
+   426→      setConfirmAction({ type, id });
+   427→      setConfirmOpen(true);
+   428→    },
+   429→    []
+   430→  );
+   431→
+   432→  const handleConfirmAction = useCallback(async () => {
+   433→    if (!confirmAction) return;
+   434→    const { type, id } = confirmAction;
+   435→    setActioning(true);
+   436→    try {
+   437→      if (type === 'cancel') {
+   438→        const res = await fetch(`/api/leaves/${id}`, { method: 'DELETE' });
+   439→        if (!res.ok) throw new Error('Failed to cancel leave');
+   440→        toast.success('Leave application cancelled');
+   441→      } else {
+   442→        const res = await fetch(`/api/leaves/${id}`, {
+   443→          method: 'PUT',
+   444→          headers: { 'Content-Type': 'application/json' },
+   445→          body: JSON.stringify({ status: type === 'approve' ? 'approved' : 'rejected' }),
+   446→        });
+   447→        if (!res.ok) throw new Error(`Failed to ${type} leave`);
+   448→        toast.success(`Leave application ${type === 'approve' ? 'approved' : 'rejected'}`);
+   449→      }
+   450→      setConfirmOpen(false);
+   451→      setConfirmAction(null);
+   452→      fetchApplications();
+   453→      fetchBalances();
+   454→      fetchAllBalances();
+   455→    } catch (err) {
+   456→      console.error(err);
+   457→      toast.error(err instanceof Error ? err.message : 'Action failed');
+   458→    } finally {
+   459→      setActioning(false);
+   460→    }
+   461→  }, [confirmAction, fetchApplications, fetchBalances, fetchAllBalances]);
+   462→
+   463→  // ---- Get employee name helper ----
+   464→  const getEmployeeName = useCallback(
+   465→    (empId: string) => {
+   466→      const emp = employees.find((e) => e.id === empId);
+   467→      return emp ? `${emp.firstName} ${emp.lastName}` : empId;
+   468→    },
+   469→    [employees]
+   470→  );
+   471→
+   472→  // ---- Current balance employee id ----
+   473→  const balanceEmployeeId =
+   474→    filterEmployee !== 'all' ? filterEmployee : selectedEmployeeId;
+   475→
+   476→  return (
+   477→    <div className="flex flex-col gap-6 p-4 md:p-6">
+   478→      {/* ========== HEADER ========== */}
+   479→      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   480→        <div>
+   481→          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+   482→            Leave Management
+   483→          </h1>
+   484→          <p className="text-sm text-muted-foreground">
+   485→            Manage leave applications and balances for {currentYear}
+   486→          </p>
+   487→        </div>
+   488→        <Button
+   489→          onClick={() => {
+   490→            resetForm();
+   491→            if (filterEmployee && filterEmployee !== 'all') {
+   492→              setFormEmployee(filterEmployee);
+   493→            }
+   494→            setApplyOpen(true);
+   495→          }}
+   496→          className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+   497→        >
+   498→          <Plus className="mr-2 size-4" />
+   499→          Apply for Leave
+   500→        </Button>
+   501→      </div>
+   502→
+   503→      {/* ========== FILTERS ========== */}
+   504→      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+   505→        <div className="flex flex-col gap-1.5 min-w-[200px] flex-1">
+   506→          <Label className="text-xs font-medium text-muted-foreground">
+   507→            Employee
+   508→          </Label>
+   509→          <Select value={filterEmployee} onValueChange={setFilterEmployee}>
+   510→            <SelectTrigger className="w-full">
+   511→              <FilterIcon className="mr-2 size-4 text-muted-foreground" />
+   512→              <SelectValue placeholder="All Employees" />
+   513→            </SelectTrigger>
+   514→            <SelectContent>
+   515→              <SelectItem value="all">All Employees</SelectItem>
+   516→              {employees.map((emp) => (
+   517→                <SelectItem key={emp.id} value={emp.id}>
+   518→                  {emp.firstName} {emp.lastName} ({emp.employeeCode})
+   519→                </SelectItem>
+   520→              ))}
+   521→            </SelectContent>
+   522→          </Select>
+   523→        </div>
+   524→        <div className="flex flex-col gap-1.5 min-w-[160px]">
+   525→          <Label className="text-xs font-medium text-muted-foreground">
+   526→            Status
+   527→          </Label>
+   528→          <Select value={filterStatus} onValueChange={setFilterStatus}>
+   529→            <SelectTrigger className="w-full">
+   530→              <SelectValue placeholder="All Statuses" />
+   531→            </SelectTrigger>
+   532→            <SelectContent>
+   533→              <SelectItem value="all">All Statuses</SelectItem>
+   534→              <SelectItem value="pending">Pending</SelectItem>
+   535→              <SelectItem value="approved">Approved</SelectItem>
+   536→              <SelectItem value="rejected">Rejected</SelectItem>
+   537→            </SelectContent>
+   538→          </Select>
+   539→        </div>
+   540→      </div>
+   541→
+   542→      {/* ========== LEAVE BALANCE CARDS ========== */}
+   543→      {balanceEmployeeId && (
+   544→        <div>
+   545→          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+   546→            Leave Balance — {getEmployeeName(balanceEmployeeId)}
+   547→          </h2>
+   548→          {loadingBalances ? (
+   549→            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+   550→              {Array.from({ length: 4 }).map((_, i) => (
+   551→                <Skeleton key={i} className="h-36 rounded-xl" />
+   552→              ))}
+   553→            </div>
+   554→          ) : balances.length > 0 ? (
+   555→            <div className="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:overflow-x-visible">
+   556→              {balances.map((b) => {
+   557→                const pct =
+   558→                  b.allocated > 0
+   559→                    ? Math.round((b.available / b.allocated) * 100)
+   560→                    : 0;
+   561→                return (
+   562→                  <Card
+   563→                    key={b.id}
+   564→                    className={`min-w-[200px] flex-shrink-0 border-l-4 ${getBalanceBorderColor(b.available, b.allocated)}`}
+   565→                  >
+   566→                    <CardHeader className="pb-0 pt-4 px-4">
+   567→                      <div className="flex items-center justify-between">
+   568→                        <CardTitle className="text-sm font-semibold">
+   569→                          {b.leaveType.name}
+   570→                        </CardTitle>
+   571→                        <Badge variant="outline" className="text-[10px] font-mono">
+   572→                          {b.leaveType.code}
+   573→                        </Badge>
+   574→                      </div>
+   575→                    </CardHeader>
+   576→                    <CardContent className="px-4 pb-4 pt-2">
+   577→                      <div className="mb-2 flex items-baseline justify-between">
+   578→                        <span className={`text-2xl font-bold ${getBalanceColor(b.available, b.allocated)}`}>
+   579→                          {b.available}
+   580→                        </span>
+   581→                        <span className="text-xs text-muted-foreground">
+   582→                          of {b.allocated} days
+   583→                        </span>
+   584→                      </div>
+   585→                      <Progress
+   586→                        value={pct}
+   587→                        className={`h-2 mb-2 ${getProgressColor(b.available, b.allocated)}`}
+   588→                      />
+   589→                      <div className="flex justify-between text-xs text-muted-foreground">
+   590→                        <span>Used: {b.used}</span>
+   591→                        {b.carryForward > 0 && (
+   592→                          <span>Carry Fwd: {b.carryForward}</span>
+   593→                        )}
+   594→                      </div>
+   595→                    </CardContent>
+   596→                  </Card>
+   597→                );
+   598→              })}
+   599→            </div>
+   600→          ) : (
+   601→            <Card className="py-8">
+   602→              <CardContent className="text-center text-muted-foreground">
+   603→                <Leaf className="mx-auto mb-2 size-8 opacity-50" />
+   604→                <p className="text-sm">No leave balance data found for this employee.</p>
+   605→              </CardContent>
+   606→            </Card>
+   607→          )}
+   608→        </div>
+   609→      )}
+   610→
+   611→      {/* ========== TABS: Applications & Balances ========== */}
+   612→      <Tabs defaultValue="applications" className="w-full">
+   613→        <TabsList>
+   614→          <TabsTrigger value="applications">
+   615→            <CalendarDays className="mr-1.5 size-4" />
+   616→            Leave Applications
+   617→          </TabsTrigger>
+   618→          <TabsTrigger value="balances">
+   619→            <Search className="mr-1.5 size-4" />
+   620→            Employee Balances
+   621→          </TabsTrigger>
+   622→        </TabsList>
+   623→
+   624→        {/* ---- Applications Tab ---- */}
+   625→        <TabsContent value="applications">
+   626→          <Card>
+   627→            <CardHeader>
+   628→              <CardTitle className="text-base">Leave Applications</CardTitle>
+   629→              <CardDescription>
+   630→                {applications.length} application{applications.length !== 1 ? 's' : ''} found
+   631→              </CardDescription>
+   632→            </CardHeader>
+   633→            <CardContent>
+   634→              {loadingApplications ? (
+   635→                <div className="space-y-3">
+   636→                  {Array.from({ length: 5 }).map((_, i) => (
+   637→                    <Skeleton key={i} className="h-12 w-full" />
+   638→                  ))}
+   639→                </div>
+   640→              ) : applications.length === 0 ? (
+   641→                <div className="py-12 text-center text-muted-foreground">
+   642→                  <CalendarDays className="mx-auto mb-2 size-10 opacity-40" />
+   643→                  <p className="text-sm">No leave applications found.</p>
+   644→                  <p className="text-xs mt-1">
+   645→                    Try adjusting filters or apply for a new leave.
+   646→                  </p>
+   647→                </div>
+   648→              ) : (
+   649→                <div className="overflow-x-auto rounded-md border">
+   650→                  <Table>
+   651→                    <TableHeader>
+   652→                      <TableRow className="bg-muted/50">
+   653→                        <TableHead className="font-semibold">Employee</TableHead>
+   654→                        <TableHead className="font-semibold">Leave Type</TableHead>
+   655→                        <TableHead className="font-semibold">From</TableHead>
+   656→                        <TableHead className="font-semibold">To</TableHead>
+   657→                        <TableHead className="font-semibold text-center">Days</TableHead>
+   658→                        <TableHead className="font-semibold">Status</TableHead>
+   659→                        <TableHead className="font-semibold">Reason</TableHead>
+   660→                        <TableHead className="font-semibold text-right">Actions</TableHead>
+   661→                      </TableRow>
+   662→                    </TableHeader>
+   663→                    <TableBody>
+   664→                      {applications.map((app) => {
+   665→                        const st = statusConfig[app.status] ?? statusConfig.pending;
+   666→                        return (
+   667→                          <TableRow key={app.id}>
+   668→                            <TableCell className="font-medium whitespace-nowrap">
+   669→                              <div>
+   670→                                <div className="text-sm">
+   671→                                  {app.employee.firstName} {app.employee.lastName}
+   672→                                </div>
+   673→                                <div className="text-xs text-muted-foreground">
+   674→                                  {app.employee.employeeCode}
+   675→                                </div>
+   676→                              </div>
+   677→                            </TableCell>
+   678→                            <TableCell>
+   679→                              <Badge
+   680→                                variant="outline"
+   681→                                className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800"
+   682→                              >
+   683→                                {app.leaveType.code}
+   684→                              </Badge>
+   685→                            </TableCell>
+   686→                            <TableCell className="whitespace-nowrap text-sm">
+   687→                              {formatDate(app.startDate)}
+   688→                            </TableCell>
+   689→                            <TableCell className="whitespace-nowrap text-sm">
+   690→                              {formatDate(app.endDate)}
+   691→                            </TableCell>
+   692→                            <TableCell className="text-center font-medium">
+   693→                              {app.totalDays}
+   694→                            </TableCell>
+   695→                            <TableCell>
+   696→                              <Badge variant="outline" className={st.className}>
+   697→                                {st.label}
+   698→                              </Badge>
+   699→                            </TableCell>
+   700→                            <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
+   701→                              {app.reason || '—'}
+   702→                            </TableCell>
+   703→                            <TableCell className="text-right">
+   704→                              <div className="flex items-center justify-end gap-1">
+   705→                                {app.status === 'pending' && (
+   706→                                  <>
+   707→                                    <Button
+   708→                                      size="sm"
+   709→                                      variant="ghost"
+   710→                                      className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950"
+   711→                                      onClick={() => openConfirm('approve', app.id)}
+   712→                                    >
+   713→                                      <CheckCircle2 className="mr-1 size-4" />
+   714→                                      Approve
+   715→                                    </Button>
+   716→                                    <Button
+   717→                                      size="sm"
+   718→                                      variant="ghost"
+   719→                                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+   720→                                      onClick={() => openConfirm('reject', app.id)}
+   721→                                    >
+   722→                                      <XCircle className="mr-1 size-4" />
+   723→                                      Reject
+   724→                                    </Button>
+   725→                                  </>
+   726→                                )}
+   727→                                {(app.status === 'pending' || app.status === 'approved') && (
+   728→                                  <Button
+   729→                                    size="sm"
+   730→                                    variant="ghost"
+   731→                                    className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+   732→                                    onClick={() => openConfirm('cancel', app.id)}
+   733→                                  >
+   734→                                    <RotateCcw className="mr-1 size-4" />
+   735→                                    Cancel
+   736→                                  </Button>
+   737→                                )}
+   738→                              </div>
+   739→                            </TableCell>
+   740→                          </TableRow>
+   741→                        );
+   742→                      })}
+   743→                    </TableBody>
+   744→                  </Table>
+   745→                </div>
+   746→              )}
+   747→            </CardContent>
+   748→          </Card>
+   749→        </TabsContent>
+   750→
+   751→        {/* ---- Employee Balances Tab ---- */}
+   752→        <TabsContent value="balances">
+   753→          <Card>
+   754→            <CardHeader>
+   755→              <CardTitle className="text-base">
+   756→                Leave Balances — All Employees
+   757→              </CardTitle>
+   758→              <CardDescription>
+   759→                Year {currentYear} leave balance overview
+   760→              </CardDescription>
+   761→            </CardHeader>
+   762→            <CardContent>
+   763→              {loadingAllBalances ? (
+   764→                <div className="space-y-3">
+   765→                  {Array.from({ length: 6 }).map((_, i) => (
+   766→                    <Skeleton key={i} className="h-12 w-full" />
+   767→                  ))}
+   768→                </div>
+   769→              ) : allBalances.length === 0 ? (
+   770→                <div className="py-12 text-center text-muted-foreground">
+   771→                  <Leaf className="mx-auto mb-2 size-10 opacity-40" />
+   772→                  <p className="text-sm">No balance data available.</p>
+   773→                </div>
+   774→              ) : (
+   775→                <div className="overflow-x-auto rounded-md border">
+   776→                  <Table>
+   777→                    <TableHeader>
+   778→                      <TableRow className="bg-muted/50">
+   779→                        <TableHead className="font-semibold">Employee</TableHead>
+   780→                        <TableHead className="font-semibold">Leave Type</TableHead>
+   781→                        <TableHead className="font-semibold text-right">Allocated</TableHead>
+   782→                        <TableHead className="font-semibold text-right">Used</TableHead>
+   783→                        <TableHead className="font-semibold text-right">Available</TableHead>
+   784→                        <TableHead className="font-semibold text-right">Carry Forward</TableHead>
+   785→                      </TableRow>
+   786→                    </TableHeader>
+   787→                    <TableBody>
+   788→                      {allBalances.map((b) => (
+   789→                        <TableRow key={b.id}>
+   790→                          <TableCell className="font-medium whitespace-nowrap">
+   791→                            {getEmployeeName(b.employeeId)}
+   792→                          </TableCell>
+   793→                          <TableCell>
+   794→                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800">
+   795→                              {b.leaveType.code}
+   796→                            </Badge>
+   797→                          </TableCell>
+   798→                          <TableCell className="text-right tabular-nums">
+   799→                            {b.allocated}
+   800→                          </TableCell>
+   801→                          <TableCell className="text-right tabular-nums text-muted-foreground">
+   802→                            {b.used}
+   803→                          </TableCell>
+   804→                          <TableCell className="text-right tabular-nums font-medium">
+   805→                            <span className={getBalanceColor(b.available, b.allocated)}>
+   806→                              {b.available}
+   807→                            </span>
+   808→                          </TableCell>
+   809→                          <TableCell className="text-right tabular-nums">
+   810→                            {b.carryForward > 0 ? b.carryForward : '—'}
+   811→                          </TableCell>
+   812→                        </TableRow>
+   813→                      ))}
+   814→                    </TableBody>
+   815→                  </Table>
+   816→                </div>
+   817→              )}
+   818→            </CardContent>
+   819→          </Card>
+   820→        </TabsContent>
+   821→      </Tabs>
+   822→
+   823→      {/* ========== APPLY FOR LEAVE DIALOG ========== */}
+   824→      <Dialog open={applyOpen} onOpenChange={(open) => {
+   825→        if (!open) resetForm();
+   826→        setApplyOpen(open);
+   827→      }}>
+   828→        <DialogContent className="sm:max-w-lg">
+   829→          <DialogHeader>
+   830→            <DialogTitle className="flex items-center gap-2">
+   831→              <CalendarDays className="size-5 text-emerald-600" />
+   832→              Apply for Leave
+   833→            </DialogTitle>
+   834→            <DialogDescription>
+   835→              Submit a new leave application. All fields marked with * are required.
+   836→            </DialogDescription>
+   837→          </DialogHeader>
+   838→
+   839→          <div className="grid gap-4 py-2">
+   840→            {/* Employee */}
+   841→            <div className="grid gap-1.5">
+   842→              <Label htmlFor="form-employee">
+   843→                Employee <span className="text-red-500">*</span>
+   844→              </Label>
+   845→              <Select value={formEmployee} onValueChange={setFormEmployee}>
+   846→                <SelectTrigger id="form-employee" className="w-full">
+   847→                  <SelectValue placeholder="Select employee" />
+   848→                </SelectTrigger>
+   849→                <SelectContent>
+   850→                  {employees.map((emp) => (
+   851→                    <SelectItem key={emp.id} value={emp.id}>
+   852→                      {emp.firstName} {emp.lastName} ({emp.employeeCode})
+   853→                    </SelectItem>
+   854→                  ))}
+   855→                </SelectContent>
+   856→              </Select>
+   857→            </div>
+   858→
+   859→            {/* Leave Type */}
+   860→            <div className="grid gap-1.5">
+   861→              <Label htmlFor="form-type">
+   862→                Leave Type <span className="text-red-500">*</span>
+   863→              </Label>
+   864→              <Select value={formLeaveType} onValueChange={setFormLeaveType}>
+   865→                <SelectTrigger id="form-type" className="w-full">
+   866→                  <SelectValue placeholder="Select leave type" />
+   867→                </SelectTrigger>
+   868→                <SelectContent>
+   869→                  {leaveTypes.map((lt) => (
+   870→                    <SelectItem key={lt.id} value={lt.id}>
+   871→                      {lt.name} ({lt.code})
+   872→                    </SelectItem>
+   873→                  ))}
+   874→                </SelectContent>
+   875→              </Select>
+   876→            </div>
+   877→
+   878→            {/* Date row */}
+   879→            <div className="grid grid-cols-2 gap-3">
+   880→              <div className="grid gap-1.5">
+   881→                <Label htmlFor="form-start">
+   882→                  Start Date <span className="text-red-500">*</span>
+   883→                </Label>
+   884→                <Input
+   885→                  id="form-start"
+   886→                  type="date"
+   887→                  value={formStartDate}
+   888→                  onChange={(e) => {
+   889→                    setFormStartDate(e.target.value);
+   890→                    // Auto-set end date if not set
+   891→                    if (!formEndDate) setFormEndDate(e.target.value);
+   892→                  }}
+   893→                />
+   894→              </div>
+   895→              <div className="grid gap-1.5">
+   896→                <Label htmlFor="form-end">
+   897→                  End Date <span className="text-red-500">*</span>
+   898→                </Label>
+   899→                <Input
+   900→                  id="form-end"
+   901→                  type="date"
+   902→                  value={formEndDate}
+   903→                  min={formStartDate}
+   904→                  onChange={(e) => setFormEndDate(e.target.value)}
+   905→                />
+   906→              </div>
+   907→            </div>
+   908→
+   909→            {/* Total days display */}
+   910→            {totalDays > 0 && (
+   911→              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 dark:border-emerald-800 dark:bg-emerald-950/40">
+   912→                <div className="flex items-center justify-between">
+   913→                  <span className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
+   914→                    Total Days
+   915→                  </span>
+   916→                  <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
+   917→                    {totalDays}
+   918→                  </span>
+   919→                </div>
+   920→              </div>
+   921→            )}
+   922→
+   923→            {/* Reason */}
+   924→            <div className="grid gap-1.5">
+   925→              <Label htmlFor="form-reason">Reason</Label>
+   926→              <Textarea
+   927→                id="form-reason"
+   928→                placeholder="Enter reason for leave (optional)"
+   929→                value={formReason}
+   930→                onChange={(e) => setFormReason(e.target.value)}
+   931→                rows={3}
+   932→              />
+   933→            </div>
+   934→          </div>
+   935→
+   936→          <DialogFooter>
+   937→            <Button
+   938→              variant="outline"
+   939→              onClick={() => {
+   940→                resetForm();
+   941→                setApplyOpen(false);
+   942→              }}
+   943→            >
+   944→              Cancel
+   945→            </Button>
+   946→            <Button
+   947→              onClick={handleApply}
+   948→              disabled={submitting}
+   949→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   950→            >
+   951→              {submitting ? (
+   952→                <>
+   953→                  <RotateCcw className="mr-2 size-4 animate-spin" />
+   954→                  Submitting...
+   955→                </>
+   956→              ) : (
+   957→                <>
+   958→                  <CheckCircle2 className="mr-2 size-4" />
+   959→                  Submit Application
+   960→                </>
+   961→              )}
+   962→            </Button>
+   963→          </DialogFooter>
+   964→        </DialogContent>
+   965→      </Dialog>
+   966→
+   967→      {/* ========== CONFIRM ACTION DIALOG ========== */}
+   968→      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   969→        <AlertDialogContent>
+   970→          <AlertDialogHeader>
+   971→            <AlertDialogTitle>
+   972→              {confirmAction?.type === 'approve' && 'Approve Leave Application'}
+   973→              {confirmAction?.type === 'reject' && 'Reject Leave Application'}
+   974→              {confirmAction?.type === 'cancel' && 'Cancel Leave Application'}
+   975→            </AlertDialogTitle>
+   976→            <AlertDialogDescription>
+   977→              {confirmAction?.type === 'approve' &&
+   978→                'This will approve the leave application and update the employee\'s leave balance. This action cannot be undone.'}
+   979→              {confirmAction?.type === 'reject' &&
+   980→                'This will reject the leave application. The employee will be notified.'}
+   981→              {confirmAction?.type === 'cancel' &&
+   982→                'This will cancel the leave application. The leave balance will remain unchanged.'}
+   983→            </AlertDialogDescription>
+   984→          </AlertDialogHeader>
+   985→          <AlertDialogFooter>
+   986→            <AlertDialogCancel disabled={actioning}>Go Back</AlertDialogCancel>
+   987→            <AlertDialogAction
+   988→              onClick={(e) => {
+   989→                e.preventDefault();
+   990→                handleConfirmAction();
+   991→              }}
+   992→              disabled={actioning}
+   993→              className={
+   994→                confirmAction?.type === 'approve'
+   995→                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+   996→                  : confirmAction?.type === 'reject'
+   997→                    ? 'bg-red-600 hover:bg-red-700 text-white'
+   998→                    : 'bg-gray-600 hover:bg-gray-700 text-white'
+   999→              }
+  1000→            >
+  1001→              {actioning ? (
+  1002→                <>
+  1003→                  <RotateCcw className="mr-2 size-4 animate-spin" />
+  1004→                  Processing...
+  1005→                </>
+  1006→              ) : (
+  1007→                <>
+  1008→                  {confirmAction?.type === 'approve' && (
+  1009→                    <>
+  1010→                      <CheckCircle2 className="mr-2 size-4" />
+  1011→                      Approve
+  1012→                    </>
+  1013→                  )}
+  1014→                  {confirmAction?.type === 'reject' && (
+  1015→                    <>
+  1016→                      <XCircle className="mr-2 size-4" />
+  1017→                      Reject
+  1018→                    </>
+  1019→                  )}
+  1020→                  {confirmAction?.type === 'cancel' && (
+  1021→                    <>
+  1022→                      <Trash2 className="mr-2 size-4" />
+  1023→                      Cancel Leave
+  1024→                    </>
+  1025→                  )}
+  1026→                </>
+  1027→              )}
+  1028→            </AlertDialogAction>
+  1029→          </AlertDialogFooter>
+  1030→        </AlertDialogContent>
+  1031→      </AlertDialog>
+  1032→    </div>
+  1033→  );
+  1034→}
+  1035→
