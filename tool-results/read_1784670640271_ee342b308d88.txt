@@ -1,0 +1,847 @@
+     1→'use client';
+     2→
+     3→import { useState, useEffect, useCallback } from 'react';
+     4→import {
+     5→  Card,
+     6→  CardContent,
+     7→  CardDescription,
+     8→  CardFooter,
+     9→  CardHeader,
+    10→  CardTitle,
+    11→} from '@/components/ui/card';
+    12→import {
+    13→  Table,
+    14→  TableBody,
+    15→  TableCell,
+    16→  TableFooter,
+    17→  TableHead,
+    18→  TableHeader,
+    19→  TableRow,
+    20→} from '@/components/ui/table';
+    21→import { Button } from '@/components/ui/button';
+    22→import { Input } from '@/components/ui/input';
+    23→import { Label } from '@/components/ui/label';
+    24→import {
+    25→  Select,
+    26→  SelectContent,
+    27→  SelectItem,
+    28→  SelectTrigger,
+    29→  SelectValue,
+    30→} from '@/components/ui/select';
+    31→import { Badge } from '@/components/ui/badge';
+    32→import { Separator } from '@/components/ui/separator';
+    33→import {
+    34→  FileText,
+    35→  Users,
+    36→  TrendingUp,
+    37→  TrendingDown,
+    38→  Building2,
+    39→  Wallet,
+    40→  Shield,
+    41→  AlertCircle,
+    42→  CalendarClock,
+    43→  Download,
+    44→  Loader2,
+    45→  IndianRupee,
+    46→  Banknote,
+    47→  Receipt,
+    48→  Landmark,
+    49→  Info,
+    50→} from 'lucide-react';
+    51→import { toast } from 'sonner';
+    52→import { usePayrollStore } from '@/store/payroll-store';
+    53→
+    54→// ─── Helpers ───────────────────────────────────────────────────────────────────
+    55→
+    56→const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
+    57→
+    58→const MONTHS = [
+    59→  'January', 'February', 'March', 'April', 'May', 'June',
+    60→  'July', 'August', 'September', 'October', 'November', 'December',
+    61→] as const;
+    62→
+    63→type ReportType = 'summary' | 'pf' | 'esi' | 'tds' | 'pt' | 'lwf';
+    64→
+    65→// ─── Mock data types ───────────────────────────────────────────────────────────
+    66→
+    67→interface SummaryData {
+    68→  totalEmployees: number;
+    69→  totalEarnings: number;
+    70→  totalDeductions: number;
+    71→  employerContributions: number;
+    72→  netPayroll: number;
+    73→  pfEmployee: number;
+    74→  pfEmployer: number;
+    75→  esiEmployee: number;
+    76→  esiEmployer: number;
+    77→  tds: number;
+    78→  pt: number;
+    79→  lwf: number;
+    80→}
+    81→
+    82→interface PfRow {
+    83→  code: string;
+    84→  name: string;
+    85→  pfWages: number;
+    86→  employeePf: number;
+    87→  employerPf: number;
+    88→  eps: number;
+    89→  edli: number;
+    90→  total: number;
+    91→}
+    92→
+    93→interface PfData {
+    94→  rows: PfRow[];
+    95→  totalEmployeePf: number;
+    96→  totalEmployerContribution: number;
+    97→  challanMonth: string;
+    98→  dueDate: string;
+    99→}
+   100→
+   101→interface EsiRow {
+   102→  code: string;
+   103→  name: string;
+   104→  grossWages: number;
+   105→  employeeEsi: number;
+   106→  employerEsi: number;
+   107→  totalEsi: number;
+   108→}
+   109→
+   110→interface EsiData {
+   111→  rows: EsiRow[];
+   112→  totalEmployeeEsi: number;
+   113→  totalEmployerEsi: number;
+   114→  dueDate: string;
+   115→}
+   116→
+   117→interface TdsRow {
+   118→  code: string;
+   119→  name: string;
+   120→  pan: string;
+   121→  regime: 'New' | 'Old';
+   122→  annualGross: number;
+   123→  standardDeduction: number;
+   124→  taxableIncome: number;
+   125→  tax: number;
+   126→  cess: number;
+   127→  totalTax: number;
+   128→  monthlyTds: number;
+   129→}
+   130→
+   131→interface TdsData {
+   132→  rows: TdsRow[];
+   133→  totalTds: number;
+   134→  newRegimeCount: number;
+   135→  oldRegimeCount: number;
+   136→}
+   137→
+   138→interface PtStateGroup {
+   139→  state: string;
+   140→  rows: { name: string; monthlySalary: number; ptAmount: number }[];
+   141→  stateTotal: number;
+   142→}
+   143→
+   144→interface PtData {
+   145→  states: PtStateGroup[];
+   146→}
+   147→
+   148→interface LwfStateGroup {
+   149→  state: string;
+   150→  employeeContribution: number;
+   151→  employerContribution: number;
+   152→  totalContribution: number;
+   153→  dueDate: string;
+   154→  frequency: string;
+   155→  employeeCount: number;
+   156→}
+   157→
+   158→interface LwfData {
+   159→  states: LwfStateGroup[];
+   160→}
+   161→
+   162→// ─── Component ─────────────────────────────────────────────────────────────────
+   163→
+   164→export default function ReportsView() {
+   165→  const { refreshKey } = usePayrollStore();
+   166→
+   167→  const currentMonth = new Date().getMonth() + 1;
+   168→  const currentYear = new Date().getFullYear();
+   169→
+   170→  const [month, setMonth] = useState(String(currentMonth));
+   171→  const [year, setYear] = useState(String(currentYear));
+   172→  const [reportType, setReportType] = useState<ReportType>('summary');
+   173→  const [loading, setLoading] = useState(false);
+   174→  const [generated, setGenerated] = useState(false);
+   175→
+   176→  // Report data states
+   177→  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+   178→  const [pfData, setPfData] = useState<PfData | null>(null);
+   179→  const [esiData, setEsiData] = useState<EsiData | null>(null);
+   180→  const [tdsData, setTdsData] = useState<TdsData | null>(null);
+   181→  const [ptData, setPtData] = useState<PtData | null>(null);
+   182→  const [lwfData, setLwfData] = useState<LwfData | null>(null);
+   183→
+   184→  const fetchReport = useCallback(async () => {
+   185→    setLoading(true);
+   186→    setGenerated(true);
+   187→    try {
+   188→      const res = await fetch(
+   189→        `/api/reports?month=${month}&year=${year}&type=${reportType}`
+   190→      );
+   191→      if (!res.ok) throw new Error('Failed to fetch report');
+   192→      const data = await res.json();
+   193→
+   194→      switch (reportType) {
+   195→        case 'summary':
+   196→          setSummaryData(data as SummaryData);
+   197→          break;
+   198→        case 'pf':
+   199→          setPfData(data as PfData);
+   200→          break;
+   201→        case 'esi':
+   202→          setEsiData(data as EsiData);
+   203→          break;
+   204→        case 'tds':
+   205→          setTdsData(data as TdsData);
+   206→          break;
+   207→        case 'pt':
+   208→          setPtData(data as PtData);
+   209→          break;
+   210→        case 'lwf':
+   211→          setLwfData(data as LwfData);
+   212→          break;
+   213→      }
+   214→
+   215→      toast.success(`${MONTHS[Number(month) - 1]} ${year} ${reportLabel(reportType)} generated`);
+   216→    } catch {
+   217→      toast.error('Failed to generate report. Please try again.');
+   218→    } finally {
+   219→      setLoading(false);
+   220→    }
+   221→  }, [month, year, reportType]);
+   222→
+   223→  useEffect(() => {
+   224→    if (generated) fetchReport();
+   225→  }, [refreshKey, generated, fetchReport]);
+   226→
+   227→  const reportLabel = (type: ReportType) => {
+   228→    const labels: Record<ReportType, string> = {
+   229→      summary: 'Summary Report',
+   230→      pf: 'PF Report',
+   231→      esi: 'ESI Report',
+   232→      tds: 'TDS Report',
+   233→      pt: 'Professional Tax Report',
+   234→      lwf: 'LWF Report',
+   235→    };
+   236→    return labels[type];
+   237→  };
+   238→
+   239→  // ─── Summary Report ──────────────────────────────────────────────────────────
+   240→
+   241→  const renderSummary = () => {
+   242→    if (!summaryData) return null;
+   243→
+   244→    const kpiCards = [
+   245→      { label: 'Total Employees', value: String(summaryData.totalEmployees), icon: Users, color: 'text-emerald-600 bg-emerald-50' },
+   246→      { label: 'Total Earnings', value: fmt(summaryData.totalEarnings), icon: TrendingUp, color: 'text-emerald-600 bg-emerald-50' },
+   247→      { label: 'Total Deductions', value: fmt(summaryData.totalDeductions), icon: TrendingDown, color: 'text-amber-600 bg-amber-50' },
+   248→      { label: 'Employer Contributions', value: fmt(summaryData.employerContributions), icon: Building2, color: 'text-sky-600 bg-sky-50' },
+   249→      { label: 'Net Payroll', value: fmt(summaryData.netPayroll), icon: Wallet, color: 'text-emerald-700 bg-emerald-50' },
+   250→    ];
+   251→
+   252→    const statutoryCards = [
+   253→      { label: 'PF (Employee)', value: fmt(summaryData.pfEmployee), icon: Shield, color: 'text-emerald-600 bg-emerald-50' },
+   254→      { label: 'PF (Employer)', value: fmt(summaryData.pfEmployer), icon: Shield, color: 'text-emerald-700 bg-emerald-50' },
+   255→      { label: 'ESI (Employee)', value: fmt(summaryData.esiEmployee), icon: Shield, color: 'text-orange-600 bg-orange-50' },
+   256→      { label: 'ESI (Employer)', value: fmt(summaryData.esiEmployer), icon: Shield, color: 'text-orange-700 bg-orange-50' },
+   257→      { label: 'TDS', value: fmt(summaryData.tds), icon: Receipt, color: 'text-violet-600 bg-violet-50' },
+   258→      { label: 'Professional Tax', value: fmt(summaryData.pt), icon: Landmark, color: 'text-rose-600 bg-rose-50' },
+   259→      { label: 'LWF', value: fmt(summaryData.lwf), icon: Banknote, color: 'text-cyan-600 bg-cyan-50' },
+   260→    ];
+   261→
+   262→    return (
+   263→      <div className="space-y-6">
+   264→        <h3 className="text-lg font-semibold text-foreground">
+   265→          Payroll Summary — {MONTHS[Number(month) - 1]} {year}
+   266→        </h3>
+   267→
+   268→        {/* KPI Cards */}
+   269→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+   270→          {kpiCards.map((kpi) => (
+   271→            <Card key={kpi.label} className="gap-4">
+   272→              <CardContent className="flex items-center gap-4 pt-0">
+   273→                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${kpi.color}`}>
+   274→                  <kpi.icon className="h-5 w-5" />
+   275→                </div>
+   276→                <div className="min-w-0">
+   277→                  <p className="text-xs text-muted-foreground truncate">{kpi.label}</p>
+   278→                  <p className="text-lg font-bold leading-tight truncate">{kpi.value}</p>
+   279→                </div>
+   280→              </CardContent>
+   281→            </Card>
+   282→          ))}
+   283→        </div>
+   284→
+   285→        {/* Statutory Summary */}
+   286→        <div>
+   287→          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+   288→            Statutory Summary
+   289→          </h4>
+   290→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+   291→            {statutoryCards.map((s) => (
+   292→              <Card key={s.label} className="gap-3 py-4">
+   293→                <CardContent className="flex items-center gap-3 pt-0">
+   294→                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${s.color}`}>
+   295→                    <s.icon className="h-4 w-4" />
+   296→                  </div>
+   297→                  <div className="min-w-0">
+   298→                    <p className="text-[11px] text-muted-foreground truncate">{s.label}</p>
+   299→                    <p className="text-sm font-bold leading-tight truncate">{s.value}</p>
+   300→                  </div>
+   301→                </CardContent>
+   302→              </Card>
+   303→            ))}
+   304→          </div>
+   305→        </div>
+   306→      </div>
+   307→    );
+   308→  };
+   309→
+   310→  // ─── PF Report ───────────────────────────────────────────────────────────────
+   311→
+   312→  const renderPfReport = () => {
+   313→    if (!pfData) return null;
+   314→
+   315→    return (
+   316→      <div className="space-y-6">
+   317→        <div className="flex items-center justify-between">
+   318→          <h3 className="text-lg font-semibold text-foreground">
+   319→            PF Contribution Report — {MONTHS[Number(month) - 1]} {year}
+   320→          </h3>
+   321→          <Button
+   322→            variant="outline"
+   323→            size="sm"
+   324→            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+   325→          >
+   326→            <Download className="h-3.5 w-3.5" /> Export
+   327→          </Button>
+   328→        </div>
+   329→
+   330→        {/* Info Banner */}
+   331→        <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+   332→          <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+   333→          <div className="text-sm">
+   334→            <p className="font-medium text-emerald-800">Challan Month: {pfData.challanMonth}</p>
+   335→            <p className="text-emerald-700">
+   336→              Due date: <strong>{pfData.dueDate}</strong> — PF is due on the 15th of the following month.
+   337→            </p>
+   338→          </div>
+   339→        </div>
+   340→
+   341→        <Card>
+   342→          <CardContent className="p-0">
+   343→            <div className="overflow-x-auto">
+   344→              <Table>
+   345→                <TableHeader>
+   346→                  <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+   347→                    <TableHead className="w-[100px]">Emp Code</TableHead>
+   348→                    <TableHead>Name</TableHead>
+   349→                    <TableHead className="text-right">PF Wages<br /><span className="font-normal text-xs text-muted-foreground">(Basic+DA)</span></TableHead>
+   350→                    <TableHead className="text-right">Employee PF<br /><span className="font-normal text-xs text-muted-foreground">(12%)</span></TableHead>
+   351→                    <TableHead className="text-right">Employer PF<br /><span className="font-normal text-xs text-muted-foreground">(3.67%)</span></TableHead>
+   352→                    <TableHead className="text-right">EPS<br /><span className="font-normal text-xs text-muted-foreground">(8.33% cap)</span></TableHead>
+   353→                    <TableHead className="text-right">EDLI<br /><span className="font-normal text-xs text-muted-foreground">(0.5%)</span></TableHead>
+   354→                    <TableHead className="text-right font-semibold">Total</TableHead>
+   355→                  </TableRow>
+   356→                </TableHeader>
+   357→                <TableBody>
+   358→                  {pfData.rows.map((row, i) => (
+   359→                    <TableRow key={i}>
+   360→                      <TableCell className="font-mono text-xs">{row.code}</TableCell>
+   361→                      <TableCell className="font-medium">{row.name}</TableCell>
+   362→                      <TableCell className="text-right tabular-nums">{fmt(row.pfWages)}</TableCell>
+   363→                      <TableCell className="text-right tabular-nums">{fmt(row.employeePf)}</TableCell>
+   364→                      <TableCell className="text-right tabular-nums">{fmt(row.employerPf)}</TableCell>
+   365→                      <TableCell className="text-right tabular-nums">{fmt(row.eps)}</TableCell>
+   366→                      <TableCell className="text-right tabular-nums">{fmt(row.edli)}</TableCell>
+   367→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.total)}</TableCell>
+   368→                    </TableRow>
+   369→                  ))}
+   370→                  {pfData.rows.length === 0 && (
+   371→                    <TableRow>
+   372→                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+   373→                        No PF data available for this period.
+   374→                      </TableCell>
+   375→                    </TableRow>
+   376→                  )}
+   377→                </TableBody>
+   378→                {pfData.rows.length > 0 && (
+   379→                  <TableFooter>
+   380→                    <TableRow className="bg-emerald-50/40">
+   381→                      <TableCell colSpan={3} className="font-semibold">Total</TableCell>
+   382→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(pfData.totalEmployeePf)}</TableCell>
+   383→                      <TableCell colSpan={3} className="text-right font-semibold tabular-nums">{fmt(pfData.totalEmployerContribution)}</TableCell>
+   384→                    </TableRow>
+   385→                  </TableFooter>
+   386→                )}
+   387→              </Table>
+   388→            </div>
+   389→          </CardContent>
+   390→          <CardFooter className="flex items-center gap-2 border-t bg-muted/30 px-6 py-3 text-xs text-muted-foreground">
+   391→            <Info className="h-3.5 w-3.5" />
+   392→            PF is due on the 15th of the following month. Wage ceiling: ₹15,000.
+   393→          </CardFooter>
+   394→        </Card>
+   395→      </div>
+   396→    );
+   397→  };
+   398→
+   399→  // ─── ESI Report ──────────────────────────────────────────────────────────────
+   400→
+   401→  const renderEsiReport = () => {
+   402→    if (!esiData) return null;
+   403→
+   404→    return (
+   405→      <div className="space-y-6">
+   406→        <div className="flex items-center justify-between">
+   407→          <h3 className="text-lg font-semibold text-foreground">
+   408→            ESI Contribution Report — {MONTHS[Number(month) - 1]} {year}
+   409→          </h3>
+   410→          <Button
+   411→            variant="outline"
+   412→            size="sm"
+   413→            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+   414→          >
+   415→            <Download className="h-3.5 w-3.5" /> Export
+   416→          </Button>
+   417→        </div>
+   418→
+   419→        {/* Info Banner */}
+   420→        <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
+   421→          <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-orange-600" />
+   422→          <div className="text-sm">
+   423→            <p className="font-medium text-orange-800">ESI contribution is due by 15th of following month</p>
+   424→            <p className="text-orange-700">
+   425→              Only employees with gross wages ≤ ₹21,000 are covered under ESI.
+   426→            </p>
+   427→          </div>
+   428→        </div>
+   429→
+   430→        <Card>
+   431→          <CardContent className="p-0">
+   432→            <div className="overflow-x-auto">
+   433→              <Table>
+   434→                <TableHeader>
+   435→                  <TableRow className="bg-orange-50/60 hover:bg-orange-50/60">
+   436→                    <TableHead className="w-[100px]">Emp Code</TableHead>
+   437→                    <TableHead>Name</TableHead>
+   438→                    <TableHead className="text-right">Gross Wages</TableHead>
+   439→                    <TableHead className="text-right">Employee ESI<br /><span className="font-normal text-xs text-muted-foreground">(0.75%)</span></TableHead>
+   440→                    <TableHead className="text-right">Employer ESI<br /><span className="font-normal text-xs text-muted-foreground">(3.25%)</span></TableHead>
+   441→                    <TableHead className="text-right font-semibold">Total ESI</TableHead>
+   442→                  </TableRow>
+   443→                </TableHeader>
+   444→                <TableBody>
+   445→                  {esiData.rows.map((row, i) => (
+   446→                    <TableRow key={i}>
+   447→                      <TableCell className="font-mono text-xs">{row.code}</TableCell>
+   448→                      <TableCell className="font-medium">{row.name}</TableCell>
+   449→                      <TableCell className="text-right tabular-nums">{fmt(row.grossWages)}</TableCell>
+   450→                      <TableCell className="text-right tabular-nums">{fmt(row.employeeEsi)}</TableCell>
+   451→                      <TableCell className="text-right tabular-nums">{fmt(row.employerEsi)}</TableCell>
+   452→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.totalEsi)}</TableCell>
+   453→                    </TableRow>
+   454→                  ))}
+   455→                  {esiData.rows.length === 0 && (
+   456→                    <TableRow>
+   457→                      <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+   458→                        No ESI data available for this period.
+   459→                      </TableCell>
+   460→                    </TableRow>
+   461→                  )}
+   462→                </TableBody>
+   463→                {esiData.rows.length > 0 && (
+   464→                  <TableFooter>
+   465→                    <TableRow className="bg-orange-50/40">
+   466→                      <TableCell colSpan={3} className="font-semibold">Total</TableCell>
+   467→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(esiData.totalEmployeeEsi)}</TableCell>
+   468→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(esiData.totalEmployerEsi)}</TableCell>
+   469→                      <TableCell className="text-right font-semibold tabular-nums">
+   470→                        {fmt(esiData.totalEmployeeEsi + esiData.totalEmployerEsi)}
+   471→                      </TableCell>
+   472→                    </TableRow>
+   473→                  </TableFooter>
+   474→                )}
+   475→              </Table>
+   476→            </div>
+   477→          </CardContent>
+   478→        </Card>
+   479→      </div>
+   480→    );
+   481→  };
+   482→
+   483→  // ─── TDS Report ──────────────────────────────────────────────────────────────
+   484→
+   485→  const renderTdsReport = () => {
+   486→    if (!tdsData) return null;
+   487→
+   488→    return (
+   489→      <div className="space-y-6">
+   490→        <div className="flex items-center justify-between">
+   491→          <h3 className="text-lg font-semibold text-foreground">
+   492→            TDS Report — {MONTHS[Number(month) - 1]} {year}
+   493→          </h3>
+   494→          <Button
+   495→            variant="outline"
+   496→            size="sm"
+   497→            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+   498→          >
+   499→            <Download className="h-3.5 w-3.5" /> Export
+   500→          </Button>
+   501→        </div>
+   502→
+   503→        {/* Info Banner */}
+   504→        <div className="flex items-start gap-3 rounded-lg border border-violet-200 bg-violet-50 p-4">
+   505→          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
+   506→          <div className="text-sm">
+   507→            <p className="font-medium text-violet-800">TDS under Section 192</p>
+   508→            <p className="text-violet-700">
+   509→              Deduct monthly, deposit by 7th of next month.
+   510→            </p>
+   511→          </div>
+   512→        </div>
+   513→
+   514→        <Card>
+   515→          <CardContent className="p-0">
+   516→            <div className="overflow-x-auto">
+   517→              <Table>
+   518→                <TableHeader>
+   519→                  <TableRow className="bg-violet-50/60 hover:bg-violet-50/60">
+   520→                    <TableHead className="w-[90px]">Emp Code</TableHead>
+   521→                    <TableHead>Name</TableHead>
+   522→                    <TableHead className="w-[120px]">PAN</TableHead>
+   523→                    <TableHead className="w-[100px]">Regime</TableHead>
+   524→                    <TableHead className="text-right">Annual Gross</TableHead>
+   525→                    <TableHead className="text-right">Std Deduction</TableHead>
+   526→                    <TableHead className="text-right">Taxable Income</TableHead>
+   527→                    <TableHead className="text-right">Tax</TableHead>
+   528→                    <TableHead className="text-right">Cess (4%)</TableHead>
+   529→                    <TableHead className="text-right">Total Tax</TableHead>
+   530→                    <TableHead className="text-right font-semibold">Monthly TDS</TableHead>
+   531→                  </TableRow>
+   532→                </TableHeader>
+   533→                <TableBody>
+   534→                  {tdsData.rows.map((row, i) => (
+   535→                    <TableRow key={i}>
+   536→                      <TableCell className="font-mono text-xs">{row.code}</TableCell>
+   537→                      <TableCell className="font-medium">{row.name}</TableCell>
+   538→                      <TableCell className="font-mono text-xs uppercase">{row.pan}</TableCell>
+   539→                      <TableCell>
+   540→                        <Badge
+   541→                          variant={row.regime === 'New' ? 'default' : 'secondary'}
+   542→                          className={
+   543→                            row.regime === 'New'
+   544→                              ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+   545→                              : 'bg-slate-100 text-slate-800 border-slate-200'
+   546→                          }
+   547→                        >
+   548→                          {row.regime}
+   549→                        </Badge>
+   550→                      </TableCell>
+   551→                      <TableCell className="text-right tabular-nums">{fmt(row.annualGross)}</TableCell>
+   552→                      <TableCell className="text-right tabular-nums">{fmt(row.standardDeduction)}</TableCell>
+   553→                      <TableCell className="text-right tabular-nums">{fmt(row.taxableIncome)}</TableCell>
+   554→                      <TableCell className="text-right tabular-nums">{fmt(row.tax)}</TableCell>
+   555→                      <TableCell className="text-right tabular-nums">{fmt(row.cess)}</TableCell>
+   556→                      <TableCell className="text-right tabular-nums">{fmt(row.totalTax)}</TableCell>
+   557→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.monthlyTds)}</TableCell>
+   558→                    </TableRow>
+   559→                  ))}
+   560→                  {tdsData.rows.length === 0 && (
+   561→                    <TableRow>
+   562→                      <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
+   563→                        No TDS data available for this period.
+   564→                      </TableCell>
+   565→                    </TableRow>
+   566→                  )}
+   567→                </TableBody>
+   568→                {tdsData.rows.length > 0 && (
+   569→                  <TableFooter>
+   570→                    <TableRow className="bg-violet-50/40">
+   571→                      <TableCell colSpan={10} className="font-semibold">Total TDS</TableCell>
+   572→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(tdsData.totalTds)}</TableCell>
+   573→                    </TableRow>
+   574→                  </TableFooter>
+   575→                )}
+   576→              </Table>
+   577→            </div>
+   578→          </CardContent>
+   579→          <CardFooter className="flex items-center justify-between border-t bg-muted/30 px-6 py-3 text-xs text-muted-foreground">
+   580→            <div className="flex items-center gap-2">
+   581→              <Info className="h-3.5 w-3.5" />
+   582→              TDS under Section 192 — deduct monthly, deposit by 7th of next month.
+   583→            </div>
+   584→            <div className="flex items-center gap-3">
+   585→              <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+   586→                New Regime: {tdsData.newRegimeCount}
+   587→              </Badge>
+   588→              <Badge variant="outline" className="border-slate-400 text-slate-600">
+   589→                Old Regime: {tdsData.oldRegimeCount}
+   590→              </Badge>
+   591→            </div>
+   592→          </CardFooter>
+   593→        </Card>
+   594→      </div>
+   595→    );
+   596→  };
+   597→
+   598→  // ─── Professional Tax Report ─────────────────────────────────────────────────
+   599→
+   600→  const renderPtReport = () => {
+   601→    if (!ptData) return null;
+   602→
+   603→    return (
+   604→      <div className="space-y-6">
+   605→        <h3 className="text-lg font-semibold text-foreground">
+   606→          Professional Tax Report — {MONTHS[Number(month) - 1]} {year}
+   607→        </h3>
+   608→
+   609→        {ptData.states.length === 0 && (
+   610→          <Card>
+   611→            <CardContent className="flex items-center justify-center h-24 text-muted-foreground">
+   612→              No Professional Tax data available for this period.
+   613→            </CardContent>
+   614→          </Card>
+   615→        )}
+   616→
+   617→        {ptData.states.map((state) => (
+   618→          <Card key={state.state}>
+   619→            <CardHeader className="pb-3">
+   620→              <div className="flex items-center justify-between">
+   621→                <CardTitle className="text-base flex items-center gap-2">
+   622→                  <Landmark className="h-4 w-4 text-rose-500" />
+   623→                  {state.state}
+   624→                </CardTitle>
+   625→                <Badge variant="outline" className="border-emerald-300 text-emerald-700 font-semibold">
+   626→                  State Total: {fmt(state.stateTotal)}
+   627→                </Badge>
+   628→              </div>
+   629→            </CardHeader>
+   630→            <CardContent className="p-0">
+   631→              <div className="overflow-x-auto">
+   632→                <Table>
+   633→                  <TableHeader>
+   634→                    <TableRow className="bg-rose-50/60 hover:bg-rose-50/60">
+   635→                      <TableHead>Employee</TableHead>
+   636→                      <TableHead className="text-right">Monthly Salary</TableHead>
+   637→                      <TableHead className="text-right font-semibold">PT Amount</TableHead>
+   638→                    </TableRow>
+   639→                  </TableHeader>
+   640→                  <TableBody>
+   641→                    {state.rows.map((row, i) => (
+   642→                      <TableRow key={i}>
+   643→                        <TableCell className="font-medium">{row.name}</TableCell>
+   644→                        <TableCell className="text-right tabular-nums">{fmt(row.monthlySalary)}</TableCell>
+   645→                        <TableCell className="text-right font-semibold tabular-nums">{fmt(row.ptAmount)}</TableCell>
+   646→                      </TableRow>
+   647→                    ))}
+   648→                  </TableBody>
+   649→                  <TableFooter>
+   650→                    <TableRow className="bg-rose-50/40">
+   651→                      <TableCell colSpan={2} className="font-semibold">State Total</TableCell>
+   652→                      <TableCell className="text-right font-semibold tabular-nums">{fmt(state.stateTotal)}</TableCell>
+   653→                    </TableRow>
+   654→                  </TableFooter>
+   655→                </Table>
+   656→              </div>
+   657→            </CardContent>
+   658→          </Card>
+   659→        ))}
+   660→      </div>
+   661→    );
+   662→  };
+   663→
+   664→  // ─── LWF Report ──────────────────────────────────────────────────────────────
+   665→
+   666→  const renderLwfReport = () => {
+   667→    if (!lwfData) return null;
+   668→
+   669→    return (
+   670→      <div className="space-y-6">
+   671→        <h3 className="text-lg font-semibold text-foreground">
+   672→          Labour Welfare Fund Report — {MONTHS[Number(month) - 1]} {year}
+   673→        </h3>
+   674→
+   675→        {lwfData.states.length === 0 && (
+   676→          <Card>
+   677→            <CardContent className="flex items-center justify-center h-24 text-muted-foreground">
+   678→              No LWF data available for this period.
+   679→            </CardContent>
+   680→          </Card>
+   681→        )}
+   682→
+   683→        <div className="grid gap-4">
+   684→          {lwfData.states.map((state) => (
+   685→            <Card key={state.state}>
+   686→              <CardHeader className="pb-3">
+   687→                <div className="flex items-center justify-between">
+   688→                  <CardTitle className="text-base flex items-center gap-2">
+   689→                    <Banknote className="h-4 w-4 text-cyan-500" />
+   690→                    {state.state}
+   691→                  </CardTitle>
+   692→                  <Badge variant="outline" className="border-emerald-300 text-emerald-700">
+   693→                    {state.frequency}
+   694→                  </Badge>
+   695→                </div>
+   696→                <CardDescription className="text-xs">
+   697→                  Due: {state.dueDate} &middot; {state.employeeCount} employees
+   698→                </CardDescription>
+   699→              </CardHeader>
+   700→              <CardContent>
+   701→                <div className="grid grid-cols-3 gap-4">
+   702→                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+   703→                    <p className="text-xs text-muted-foreground">Employee Contribution</p>
+   704→                    <p className="text-lg font-bold text-foreground tabular-nums">{fmt(state.employeeContribution)}</p>
+   705→                  </div>
+   706→                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+   707→                    <p className="text-xs text-muted-foreground">Employer Contribution</p>
+   708→                    <p className="text-lg font-bold text-foreground tabular-nums">{fmt(state.employerContribution)}</p>
+   709→                  </div>
+   710→                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
+   711→                    <p className="text-xs text-emerald-700">Total Contribution</p>
+   712→                    <p className="text-lg font-bold text-emerald-800 tabular-nums">{fmt(state.totalContribution)}</p>
+   713→                  </div>
+   714→                </div>
+   715→              </CardContent>
+   716→            </Card>
+   717→          ))}
+   718→        </div>
+   719→      </div>
+   720→    );
+   721→  };
+   722→
+   723→  // ─── Render ──────────────────────────────────────────────────────────────────
+   724→
+   725→  return (
+   726→    <div className="space-y-6">
+   727→      {/* Page Header */}
+   728→      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   729→        <div className="flex items-center gap-3">
+   730→          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+   731→            <FileText className="h-5 w-5" />
+   732→          </div>
+   733→          <div>
+   734→            <h1 className="text-2xl font-bold tracking-tight text-foreground">Compliance Reports</h1>
+   735→            <p className="text-sm text-muted-foreground">
+   736→              Generate and view statutory compliance reports
+   737→            </p>
+   738→          </div>
+   739→        </div>
+   740→      </div>
+   741→
+   742→      {/* Filters */}
+   743→      <Card>
+   744→        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-end">
+   745→          <div className="space-y-1.5">
+   746→            <Label htmlFor="report-month" className="text-xs font-medium">Month</Label>
+   747→            <Select value={month} onValueChange={setMonth}>
+   748→              <SelectTrigger id="report-month" className="w-[160px]">
+   749→                <SelectValue />
+   750→              </SelectTrigger>
+   751→              <SelectContent>
+   752→                {MONTHS.map((m, i) => (
+   753→                  <SelectItem key={i} value={String(i + 1)}>
+   754→                    {m}
+   755→                  </SelectItem>
+   756→                ))}
+   757→              </SelectContent>
+   758→            </Select>
+   759→          </div>
+   760→
+   761→          <div className="space-y-1.5">
+   762→            <Label htmlFor="report-year" className="text-xs font-medium">Year</Label>
+   763→            <Input
+   764→              id="report-year"
+   765→              type="number"
+   766→              min={2020}
+   767→              max={2035}
+   768→              value={year}
+   769→              onChange={(e) => setYear(e.target.value)}
+   770→              className="w-[100px]"
+   771→            />
+   772→          </div>
+   773→
+   774→          <div className="space-y-1.5">
+   775→            <Label htmlFor="report-type" className="text-xs font-medium">Report Type</Label>
+   776→            <Select
+   777→              value={reportType}
+   778→              onValueChange={(v) => setReportType(v as ReportType)}
+   779→            >
+   780→              <SelectTrigger id="report-type" className="w-[200px]">
+   781→                <SelectValue />
+   782→              </SelectTrigger>
+   783→              <SelectContent>
+   784→                <SelectItem value="summary">Summary</SelectItem>
+   785→                <SelectItem value="pf">PF</SelectItem>
+   786→                <SelectItem value="esi">ESI</SelectItem>
+   787→                <SelectItem value="tds">TDS</SelectItem>
+   788→                <SelectItem value="pt">Professional Tax</SelectItem>
+   789→                <SelectItem value="lwf">LWF</SelectItem>
+   790→              </SelectContent>
+   791→            </Select>
+   792→          </div>
+   793→
+   794→          <Button
+   795→            onClick={fetchReport}
+   796→            disabled={loading}
+   797→            className="bg-emerald-600 text-white hover:bg-emerald-700 gap-2"
+   798→          >
+   799→            {loading ? (
+   800→              <Loader2 className="h-4 w-4 animate-spin" />
+   801→            ) : (
+   802→              <FileText className="h-4 w-4" />
+   803→            )}
+   804→            Generate Report
+   805→          </Button>
+   806→        </CardContent>
+   807→      </Card>
+   808→
+   809→      {/* Report Content */}
+   810→      {!generated && (
+   811→        <Card className="py-16">
+   812→          <CardContent className="flex flex-col items-center justify-center gap-3 text-center">
+   813→            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-400">
+   814→              <IndianRupee className="h-8 w-8" />
+   815→            </div>
+   816→            <div>
+   817→              <p className="font-medium text-foreground">No report generated</p>
+   818→              <p className="text-sm text-muted-foreground">
+   819→                Select the period and report type, then click &quot;Generate Report&quot;
+   820→              </p>
+   821→            </div>
+   822→          </CardContent>
+   823→        </Card>
+   824→      )}
+   825→
+   826→      {generated && loading && (
+   827→        <Card className="py-16">
+   828→          <CardContent className="flex flex-col items-center justify-center gap-3">
+   829→            <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+   830→            <p className="text-sm text-muted-foreground">Generating report...</p>
+   831→          </CardContent>
+   832→        </Card>
+   833→      )}
+   834→
+   835→      {generated && !loading && (
+   836→        <>
+   837→          {reportType === 'summary' && renderSummary()}
+   838→          {reportType === 'pf' && renderPfReport()}
+   839→          {reportType === 'esi' && renderEsiReport()}
+   840→          {reportType === 'tds' && renderTdsReport()}
+   841→          {reportType === 'pt' && renderPtReport()}
+   842→          {reportType === 'lwf' && renderLwfReport()}
+   843→        </>
+   844→      )}
+   845→    </div>
+   846→  );
+   847→}

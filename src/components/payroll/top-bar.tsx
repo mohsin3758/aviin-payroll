@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePayrollStore } from '@/store/payroll-store';
 import { Menu, Database, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,13 +22,18 @@ const viewTitles: Record<string, string> = {
 export function TopBar() {
   const { activeView, setSidebarOpen, triggerRefresh } = usePayrollStore();
   const [seeding, setSeeding] = useState(false);
+  const [today, setToday] = useState('');
+  const [mounted, setMounted] = useState(false);
 
-  const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  useEffect(() => {
+    setToday(new Date().toLocaleDateString('en-IN', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }));
+    setMounted(true);
+  }, []);
 
   const handleSeed = async () => {
     setSeeding(true);
@@ -61,7 +66,9 @@ export function TopBar() {
         </Button>
         <div>
           <h2 className="text-lg font-semibold text-slate-900">{viewTitles[activeView] || 'Dashboard'}</h2>
-          <p className="hidden text-xs text-slate-500 sm:block">{today}</p>
+          {mounted && (
+            <p className="hidden text-xs text-slate-500 sm:block">{today}</p>
+          )}
         </div>
       </div>
 

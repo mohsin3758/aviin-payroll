@@ -1,0 +1,658 @@
+     1→'use client';
+     2→
+     3→import { useState, useEffect, useCallback } from 'react';
+     4→import {
+     5→  Calculator,
+     6→  Eye,
+     7→  Loader2,
+     8→  RefreshCw,
+     9→  ArrowRight,
+    10→  CheckCircle2,
+    11→  AlertCircle,
+    12→  ChevronLeft,
+    13→} from 'lucide-react';
+    14→import { toast } from 'sonner';
+    15→
+    16→import { Button } from '@/components/ui/button';
+    17→import { Input } from '@/components/ui/input';
+    18→import { Label } from '@/components/ui/label';
+    19→import { Badge } from '@/components/ui/badge';
+    20→import { Skeleton } from '@/components/ui/skeleton';
+    21→import { Separator } from '@/components/ui/separator';
+    22→import {
+    23→  Card,
+    24→  CardContent,
+    25→  CardHeader,
+    26→  CardTitle,
+    27→  CardDescription,
+    28→} from '@/components/ui/card';
+    29→import {
+    30→  Table,
+    31→  TableBody,
+    32→  TableCell,
+    33→  TableFooter,
+    34→  TableHead,
+    35→  TableHeader,
+    36→  TableRow,
+    37→} from '@/components/ui/table';
+    38→import {
+    39→  Dialog,
+    40→  DialogContent,
+    41→  DialogDescription,
+    42→  DialogHeader,
+    43→  DialogTitle,
+    44→  DialogFooter,
+    45→} from '@/components/ui/dialog';
+    46→import {
+    47→  AlertDialog,
+    48→  AlertDialogAction,
+    49→  AlertDialogCancel,
+    50→  AlertDialogContent,
+    51→  AlertDialogDescription,
+    52→  AlertDialogFooter,
+    53→  AlertDialogHeader,
+    54→  AlertDialogTitle,
+    55→  AlertDialogTrigger,
+    56→} from '@/components/ui/alert-dialog';
+    57→import {
+    58→  Select,
+    59→  SelectContent,
+    60→  SelectItem,
+    61→  SelectTrigger,
+    62→  SelectValue,
+    63→} from '@/components/ui/select';
+    64→import { usePayrollStore } from '@/store/payroll-store';
+    65→
+    66→/* ------------------------------------------------------------------ */
+    67→/*  Types                                                              */
+    68→/* ------------------------------------------------------------------ */
+    69→
+    70→interface PayrollRunSummary {
+    71→  id: string;
+    72→  month: number;
+    73→  year: number;
+    74→  status: string;
+    75→  totalEmployees: number;
+    76→  totalGrossSalary: number;
+    77→  totalDeductions: number;
+    78→  totalNetSalary: number;
+    79→  totalEmployerPF: number;
+    80→  totalEmployerESI: number;
+    81→  totalEmployeePF: number;
+    82→  totalEmployeeESI: number;
+    83→  totalTDS: number;
+    84→  totalPT: number;
+    85→  totalLWF: number;
+    86→  processedAt: string | null;
+    87→  _count?: { details: number };
+    88→}
+    89→
+    90→interface EmployeeInDetail {
+    91→  id: string;
+    92→  employeeCode: string;
+    93→  firstName: string;
+    94→  lastName: string | null;
+    95→  designation: string | null;
+    96→  department: string | null;
+    97→}
+    98→
+    99→interface PayrollDetailRow {
+   100→  id: string;
+   101→  employeeId: string;
+   102→  daysInMonth: number;
+   103→  presentDays: number;
+   104→  paidDays: number;
+   105→  basic: number;
+   106→  dearnessAllowance: number;
+   107→  houseRentAllowance: number;
+   108→  conveyanceAllowance: number;
+   109→  medicalAllowance: number;
+   110→  specialAllowance: number;
+   111→  overtimeAllowance: number;
+   112→  bonus: number;
+   113→  otherEarnings: number;
+   114→  totalEarnings: number;
+   115→  employeePF: number;
+   116→  employerPF: number;
+   117→  employeeESI: number;
+   118→  employerESI: number;
+   119→  tds: number;
+   120→  professionalTax: number;
+   121→  lwf: number;
+   122→  totalDeductions: number;
+   123→  netSalary: number;
+   124→  grossSalary: number;
+   125→  ctc: number;
+   126→  employee?: EmployeeInDetail;
+   127→}
+   128→
+   129→interface PayrollRunDetail extends Omit<PayrollRunSummary, '_count'> {
+   130→  details: PayrollDetailRow[];
+   131→}
+   132→
+   133→/* ------------------------------------------------------------------ */
+   134→/*  Helpers                                                            */
+   135→/* ------------------------------------------------------------------ */
+   136→
+   137→const MONTHS = [
+   138→  'January', 'February', 'March', 'April', 'May', 'June',
+   139→  'July', 'August', 'September', 'October', 'November', 'December',
+   140→] as const;
+   141→
+   142→const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
+   143→
+   144→const statusColor: Record<string, string> = {
+   145→  draft: 'bg-amber-100 text-amber-800 border-amber-200',
+   146→  processed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+   147→  paid: 'bg-slate-100 text-slate-800 border-slate-200',
+   148→};
+   149→
+   150→const nextStatus: Record<string, string> = {
+   151→  draft: 'processed',
+   152→  processed: 'paid',
+   153→};
+   154→
+   155→const nextStatusLabel: Record<string, string> = {
+   156→  draft: 'Mark Processed',
+   157→  processed: 'Mark Paid',
+   158→};
+   159→
+   160→/* ------------------------------------------------------------------ */
+   161→/*  Component                                                          */
+   162→/* ------------------------------------------------------------------ */
+   163→
+   164→export default function PayrollView() {
+   165→  const { refreshKey } = usePayrollStore();
+   166→
+   167→  // Header state
+   168→  const now = new Date();
+   169→  const [month, setMonth] = useState(String(now.getMonth() + 1));
+   170→  const [year, setYear] = useState(String(now.getFullYear()));
+   171→
+   172→  // Processing dialog state
+   173→  const [confirmOpen, setConfirmOpen] = useState(false);
+   174→  const [processing, setProcessing] = useState(false);
+   175→
+   176→  // Table state
+   177→  const [runs, setRuns] = useState<PayrollRunSummary[]>([]);
+   178→  const [loadingRuns, setLoadingRuns] = useState(true);
+   179→
+   180→  // Detail dialog state
+   181→  const [detailOpen, setDetailOpen] = useState(false);
+   182→  const [selectedRun, setSelectedRun] = useState<PayrollRunDetail | null>(null);
+   183→  const [loadingDetail, setLoadingDetail] = useState(false);
+   184→  const [statusUpdating, setStatusUpdating] = useState(false);
+   185→
+   186→  /* --- Fetch payroll runs --- */
+   187→  const fetchRuns = useCallback(async () => {
+   188→    setLoadingRuns(true);
+   189→    try {
+   190→      const res = await fetch('/api/payroll');
+   191→      if (!res.ok) throw new Error('Failed to fetch payroll runs');
+   192→      const data: PayrollRunSummary[] = await res.json();
+   193→      setRuns(data);
+   194→    } catch {
+   195→      toast.error('Failed to load payroll runs');
+   196→    } finally {
+   197→      setLoadingRuns(false);
+   198→    }
+   199→  }, []);
+   200→
+   201→  useEffect(() => {
+   202→    fetchRuns();
+   203→  }, [fetchRuns, refreshKey]);
+   204→
+   205→  /* --- Process payroll --- */
+   206→  const handleProcess = async () => {
+   207→    setProcessing(true);
+   208→    try {
+   209→      const res = await fetch('/api/payroll', {
+   210→        method: 'POST',
+   211→        headers: { 'Content-Type': 'application/json' },
+   212→        body: JSON.stringify({ month: Number(month), year: Number(year) }),
+   213→      });
+   214→      const data = await res.json();
+   215→      if (!res.ok) throw new Error(data.error || 'Processing failed');
+   216→
+   217→      toast.success(
+   218→        `Payroll processed for ${MONTHS[Number(month) - 1]} ${year} — ${data.totalEmployees} employees`
+   219→      );
+   220→      setConfirmOpen(false);
+   221→      fetchRuns();
+   222→    } catch (err) {
+   223→      toast.error(err instanceof Error ? err.message : 'Processing failed');
+   224→    } finally {
+   225→      setProcessing(false);
+   226→    }
+   227→  };
+   228→
+   229→  /* --- View detail --- */
+   230→  const openDetail = async (runId: string) => {
+   231→    setDetailOpen(true);
+   232→    setLoadingDetail(true);
+   233→    setSelectedRun(null);
+   234→    try {
+   235→      const res = await fetch(`/api/payroll/${runId}`);
+   236→      if (!res.ok) throw new Error('Failed to fetch details');
+   237→      const data: PayrollRunDetail = await res.json();
+   238→      setSelectedRun(data);
+   239→    } catch {
+   240→      toast.error('Failed to load payroll details');
+   241→      setDetailOpen(false);
+   242→    } finally {
+   243→      setLoadingDetail(false);
+   244→    }
+   245→  };
+   246→
+   247→  /* --- Status transition --- */
+   248→  const handleStatusChange = async (runId: string, newStatus: string) => {
+   249→    setStatusUpdating(true);
+   250→    try {
+   251→      const res = await fetch(`/api/payroll/${runId}`, {
+   252→        method: 'PUT',
+   253→        headers: { 'Content-Type': 'application/json' },
+   254→        body: JSON.stringify({ status: newStatus }),
+   255→      });
+   256→      const data = await res.json();
+   257→      if (!res.ok) throw new Error(data.error || 'Status update failed');
+   258→
+   259→      toast.success(`Payroll marked as "${newStatus}"`);
+   260→      // Refresh detail view
+   261→      setSelectedRun(data);
+   262→      fetchRuns();
+   263→    } catch (err) {
+   264→      toast.error(err instanceof Error ? err.message : 'Status update failed');
+   265→    } finally {
+   266→      setStatusUpdating(false);
+   267→    }
+   268→  };
+   269→
+   270→  /* --- Detail totals --- */
+   271→  const detailTotals = (detail: PayrollRunDetail) => {
+   272→    const t = {
+   273→      paidDays: 0, basic: 0, dearnessAllowance: 0, houseRentAllowance: 0,
+   274→      specialAllowance: 0, totalEarnings: 0,
+   275→      employeePF: 0, employeeESI: 0, tds: 0, professionalTax: 0, lwf: 0,
+   276→      totalDeductions: 0, netSalary: 0, employerPF: 0, employerESI: 0,
+   277→    };
+   278→    for (const d of detail.details) {
+   279→      t.paidDays += d.paidDays;
+   280→      t.basic += d.basic;
+   281→      t.dearnessAllowance += d.dearnessAllowance;
+   282→      t.houseRentAllowance += d.houseRentAllowance;
+   283→      t.specialAllowance += d.specialAllowance;
+   284→      t.totalEarnings += d.totalEarnings;
+   285→      t.employeePF += d.employeePF;
+   286→      t.employeeESI += d.employeeESI;
+   287→      t.tds += d.tds;
+   288→      t.professionalTax += d.professionalTax;
+   289→      t.lwf += d.lwf;
+   290→      t.totalDeductions += d.totalDeductions;
+   291→      t.netSalary += d.netSalary;
+   292→      t.employerPF += d.employerPF;
+   293→      t.employerESI += d.employerESI;
+   294→    }
+   295→    return t;
+   296→  };
+   297→
+   298→  return (
+   299→    <div className="space-y-6">
+   300→      {/* ── Header ─────────────────────────────────────────────────── */}
+   301→      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+   302→        <div>
+   303→          <h1 className="text-2xl font-bold tracking-tight">Payroll Processing</h1>
+   304→          <p className="text-muted-foreground text-sm mt-1">
+   305→            Process monthly payroll and manage run statuses
+   306→          </p>
+   307→        </div>
+   308→
+   309→        <div className="flex flex-wrap items-end gap-3">
+   310→          <div className="space-y-1.5">
+   311→            <Label htmlFor="payroll-month">Month</Label>
+   312→            <Select value={month} onValueChange={setMonth}>
+   313→              <SelectTrigger id="payroll-month" className="w-[160px]">
+   314→                <SelectValue />
+   315→              </SelectTrigger>
+   316→              <SelectContent>
+   317→                {MONTHS.map((m, i) => (
+   318→                  <SelectItem key={i} value={String(i + 1)}>
+   319→                    {m}
+   320→                  </SelectItem>
+   321→                ))}
+   322→              </SelectContent>
+   323→            </Select>
+   324→          </div>
+   325→
+   326→          <div className="space-y-1.5">
+   327→            <Label htmlFor="payroll-year">Year</Label>
+   328→            <Input
+   329→              id="payroll-year"
+   330→              type="number"
+   331→              min={2000}
+   332→              max={2100}
+   333→              value={year}
+   334→              onChange={(e) => setYear(e.target.value)}
+   335→              className="w-[100px]"
+   336→            />
+   337→          </div>
+   338→
+   339→          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   340→            <AlertDialogTrigger asChild>
+   341→              <Button className="bg-emerald-600 hover:bg-emerald-700 text-white">
+   342→                <Calculator className="size-4" />
+   343→                Process Payroll
+   344→              </Button>
+   345→            </AlertDialogTrigger>
+   346→            <AlertDialogContent>
+   347→              <AlertDialogHeader>
+   348→                <AlertDialogTitle>Process Payroll</AlertDialogTitle>
+   349→                <AlertDialogDescription>
+   350→                  Process payroll for <span className="font-semibold">{MONTHS[Number(month) - 1]} {year}</span>?
+   351→                  This will calculate salary for all active employees based on their attendance.
+   352→                </AlertDialogDescription>
+   353→              </AlertDialogHeader>
+   354→              <AlertDialogFooter>
+   355→                <AlertDialogCancel disabled={processing}>Cancel</AlertDialogCancel>
+   356→                <AlertDialogAction
+   357→                  onClick={handleProcess}
+   358→                  disabled={processing}
+   359→                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   360→                >
+   361→                  {processing ? (
+   362→                    <>
+   363→                      <Loader2 className="size-4 animate-spin" />
+   364→                      Processing…
+   365→                    </>
+   366→                  ) : (
+   367→                    'Confirm'
+   368→                  )}
+   369→                </AlertDialogAction>
+   370→              </AlertDialogFooter>
+   371→            </AlertDialogContent>
+   372→          </AlertDialog>
+   373→        </div>
+   374→      </div>
+   375→
+   376→      {/* ── Runs Table ─────────────────────────────────────────────── */}
+   377→      <Card>
+   378→        <CardHeader>
+   379→          <div className="flex items-center justify-between">
+   380→            <div>
+   381→              <CardTitle>Payroll Runs</CardTitle>
+   382→              <CardDescription>All processed payroll periods</CardDescription>
+   383→            </div>
+   384→            <Button variant="outline" size="sm" onClick={fetchRuns} disabled={loadingRuns}>
+   385→              <RefreshCw className={`size-4 ${loadingRuns ? 'animate-spin' : ''}`} />
+   386→              Refresh
+   387→            </Button>
+   388→          </div>
+   389→        </CardHeader>
+   390→        <CardContent>
+   391→          {loadingRuns ? (
+   392→            <div className="space-y-3">
+   393→              {Array.from({ length: 3 }).map((_, i) => (
+   394→                <Skeleton key={i} className="h-12 w-full" />
+   395→              ))}
+   396→            </div>
+   397→          ) : runs.length === 0 ? (
+   398→            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+   399→              <AlertCircle className="size-10 mb-3 opacity-40" />
+   400→              <p className="text-sm">No payroll runs found. Process your first payroll above.</p>
+   401→            </div>
+   402→          ) : (
+   403→            <div className="overflow-x-auto">
+   404→              <Table>
+   405→                <TableHeader>
+   406→                  <TableRow>
+   407→                    <TableHead>Month</TableHead>
+   408→                    <TableHead>Year</TableHead>
+   409→                    <TableHead className="text-right">Employees</TableHead>
+   410→                    <TableHead className="text-right">Total Gross</TableHead>
+   411→                    <TableHead className="text-right">Total Deductions</TableHead>
+   412→                    <TableHead className="text-right">Total Net</TableHead>
+   413→                    <TableHead className="text-right">Total PF</TableHead>
+   414→                    <TableHead className="text-right">Total ESI</TableHead>
+   415→                    <TableHead className="text-right">Total TDS</TableHead>
+   416→                    <TableHead>Status</TableHead>
+   417→                    <TableHead className="text-right">Actions</TableHead>
+   418→                  </TableRow>
+   419→                </TableHeader>
+   420→                <TableBody>
+   421→                  {runs.map((run) => (
+   422→                    <TableRow key={run.id}>
+   423→                      <TableCell className="font-medium">{MONTHS[run.month - 1]}</TableCell>
+   424→                      <TableCell>{run.year}</TableCell>
+   425→                      <TableCell className="text-right">{run.totalEmployees}</TableCell>
+   426→                      <TableCell className="text-right">{fmt(run.totalGrossSalary)}</TableCell>
+   427→                      <TableCell className="text-right">{fmt(run.totalDeductions)}</TableCell>
+   428→                      <TableCell className="text-right font-semibold">{fmt(run.totalNetSalary)}</TableCell>
+   429→                      <TableCell className="text-right">{fmt(run.totalEmployeePF)}</TableCell>
+   430→                      <TableCell className="text-right">{fmt(run.totalEmployeeESI)}</TableCell>
+   431→                      <TableCell className="text-right">{fmt(run.totalTDS)}</TableCell>
+   432→                      <TableCell>
+   433→                        <Badge
+   434→                          variant="outline"
+   435→                          className={statusColor[run.status] || ''}
+   436→                        >
+   437→                          {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
+   438→                        </Badge>
+   439→                      </TableCell>
+   440→                      <TableCell className="text-right">
+   441→                        <Button
+   442→                          variant="ghost"
+   443→                          size="sm"
+   444→                          onClick={() => openDetail(run.id)}
+   445→                        >
+   446→                          <Eye className="size-4 mr-1" />
+   447→                          View
+   448→                        </Button>
+   449→                      </TableCell>
+   450→                    </TableRow>
+   451→                  ))}
+   452→                </TableBody>
+   453→              </Table>
+   454→            </div>
+   455→          )}
+   456→        </CardContent>
+   457→      </Card>
+   458→
+   459→      {/* ── Detail Dialog ──────────────────────────────────────────── */}
+   460→      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+   461→        <DialogContent className="max-w-[95vw] lg:max-w-[90vw] xl:max-w-[1200px] max-h-[90vh] overflow-y-auto">
+   462→          <DialogHeader>
+   463→            <DialogTitle className="flex items-center gap-2">
+   464→              {selectedRun && (
+   465→                <>
+   466→                  Payroll Detail — {MONTHS[selectedRun.month - 1]} {selectedRun.year}
+   467→                  <Badge
+   468→                    variant="outline"
+   469→                    className={statusColor[selectedRun.status] || ''}
+   470→                  >
+   471→                    {selectedRun.status.charAt(0).toUpperCase() + selectedRun.status.slice(1)}
+   472→                  </Badge>
+   473→                </>
+   474→              )}
+   475→            </DialogTitle>
+   476→            <DialogDescription>
+   477→              Employee-wise salary breakdown
+   478→            </DialogDescription>
+   479→          </DialogHeader>
+   480→
+   481→          {loadingDetail ? (
+   482→            <div className="space-y-3 py-4">
+   483→              {Array.from({ length: 5 }).map((_, i) => (
+   484→                <Skeleton key={i} className="h-10 w-full" />
+   485→              ))}
+   486→            </div>
+   487→          ) : selectedRun ? (
+   488→            <div className="space-y-4">
+   489→              {/* Status action bar */}
+   490→              {nextStatus[selectedRun.status] && (
+   491→                <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+   492→                  <ChevronLeft className="size-4 text-amber-600 shrink-0" />
+   493→                  <span className="text-sm text-amber-800 flex-1">
+   494→                    Current status: <strong>{selectedRun.status}</strong>. You can transition to{' '}
+   495→                    <strong>{nextStatus[selectedRun.status]}</strong>.
+   496→                  </span>
+   497→                  <Button
+   498→                    size="sm"
+   499→                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   500→                    disabled={statusUpdating}
+   501→                    onClick={() =>
+   502→                      handleStatusChange(selectedRun.id, nextStatus[selectedRun.status]!)
+   503→                    }
+   504→                  >
+   505→                    {statusUpdating ? (
+   506→                      <Loader2 className="size-4 animate-spin" />
+   507→                    ) : (
+   508→                      <ArrowRight className="size-4" />
+   509→                    )}
+   510→                    {nextStatusLabel[selectedRun.status]}
+   511→                  </Button>
+   512→                </div>
+   513→              )}
+   514→
+   515→              {/* Summary cards */}
+   516→              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+   517→                <div className="rounded-lg border bg-emerald-50 p-3">
+   518→                  <p className="text-xs text-emerald-600 font-medium">Total Gross</p>
+   519→                  <p className="text-lg font-bold text-emerald-800">{fmt(selectedRun.totalGrossSalary)}</p>
+   520→                </div>
+   521→                <div className="rounded-lg border bg-red-50 p-3">
+   522→                  <p className="text-xs text-red-600 font-medium">Total Deductions</p>
+   523→                  <p className="text-lg font-bold text-red-800">{fmt(selectedRun.totalDeductions)}</p>
+   524→                </div>
+   525→                <div className="rounded-lg border bg-slate-50 p-3">
+   526→                  <p className="text-xs text-slate-600 font-medium">Total Net</p>
+   527→                  <p className="text-lg font-bold text-slate-800">{fmt(selectedRun.totalNetSalary)}</p>
+   528→                </div>
+   529→                <div className="rounded-lg border bg-amber-50 p-3">
+   530→                  <p className="text-xs text-amber-600 font-medium">Employees</p>
+   531→                  <p className="text-lg font-bold text-amber-800">{selectedRun.totalEmployees}</p>
+   532→                </div>
+   533→              </div>
+   534→
+   535→              <Separator />
+   536→
+   537→              {/* Employee detail table */}
+   538→              <div className="overflow-x-auto text-sm">
+   539→                <Table>
+   540→                  <TableHeader>
+   541→                    <TableRow>
+   542→                      <TableHead>Emp Code</TableHead>
+   543→                      <TableHead>Name</TableHead>
+   544→                      <TableHead className="text-right">Paid Days</TableHead>
+   545→                      <TableHead className="text-right">Basic</TableHead>
+   546→                      <TableHead className="text-right">HRA</TableHead>
+   547→                      <TableHead className="text-right">DA</TableHead>
+   548→                      <TableHead className="text-right">Special Allow</TableHead>
+   549→                      <TableHead className="text-right">Total Earnings</TableHead>
+   550→                      <TableHead className="text-right">Emp PF</TableHead>
+   551→                      <TableHead className="text-right">Emp ESI</TableHead>
+   552→                      <TableHead className="text-right">TDS</TableHead>
+   553→                      <TableHead className="text-right">PT</TableHead>
+   554→                      <TableHead className="text-right">LWF</TableHead>
+   555→                      <TableHead className="text-right">Total Deductions</TableHead>
+   556→                      <TableHead className="text-right">Net Salary</TableHead>
+   557→                      <TableHead className="text-right">Er. PF</TableHead>
+   558→                      <TableHead className="text-right">Er. ESI</TableHead>
+   559→                    </TableRow>
+   560→                  </TableHeader>
+   561→                  <TableBody>
+   562→                    {selectedRun.details.map((d) => (
+   563→                      <TableRow key={d.id}>
+   564→                        <TableCell className="font-mono text-xs">
+   565→                          {d.employee?.employeeCode ?? '—'}
+   566→                        </TableCell>
+   567→                        <TableCell className="font-medium min-w-[160px]">
+   568→                          {d.employee
+   569→                            ? `${d.employee.firstName} ${d.employee.lastName ?? ''}`.trim()
+   570→                            : '—'}
+   571→                        </TableCell>
+   572→                        <TableCell className="text-right">{d.paidDays}</TableCell>
+   573→                        <TableCell className="text-right">{fmt(d.basic)}</TableCell>
+   574→                        <TableCell className="text-right">{fmt(d.houseRentAllowance)}</TableCell>
+   575→                        <TableCell className="text-right">{fmt(d.dearnessAllowance)}</TableCell>
+   576→                        <TableCell className="text-right">{fmt(d.specialAllowance)}</TableCell>
+   577→                        <TableCell className="text-right font-medium">{fmt(d.totalEarnings)}</TableCell>
+   578→                        <TableCell className="text-right">{fmt(d.employeePF)}</TableCell>
+   579→                        <TableCell className="text-right">{fmt(d.employeeESI)}</TableCell>
+   580→                        <TableCell className="text-right">{fmt(d.tds)}</TableCell>
+   581→                        <TableCell className="text-right">{fmt(d.professionalTax)}</TableCell>
+   582→                        <TableCell className="text-right">{fmt(d.lwf)}</TableCell>
+   583→                        <TableCell className="text-right font-medium">{fmt(d.totalDeductions)}</TableCell>
+   584→                        <TableCell className="text-right font-bold text-emerald-700">
+   585→                          {fmt(d.netSalary)}
+   586→                        </TableCell>
+   587→                        <TableCell className="text-right">{fmt(d.employerPF)}</TableCell>
+   588→                        <TableCell className="text-right">{fmt(d.employerESI)}</TableCell>
+   589→                      </TableRow>
+   590→                    ))}
+   591→                  </TableBody>
+   592→                  {selectedRun.details.length > 0 && (
+   593→                    <TableFooter>
+   594→                      <TableRow className="font-semibold">
+   595→                        <TableCell colSpan={2}>Totals</TableCell>
+   596→                        <TableCell className="text-right">
+   597→                          {detailTotals(selectedRun).paidDays}
+   598→                        </TableCell>
+   599→                        <TableCell className="text-right">
+   600→                          {fmt(detailTotals(selectedRun).basic)}
+   601→                        </TableCell>
+   602→                        <TableCell className="text-right">
+   603→                          {fmt(detailTotals(selectedRun).houseRentAllowance)}
+   604→                        </TableCell>
+   605→                        <TableCell className="text-right">
+   606→                          {fmt(detailTotals(selectedRun).dearnessAllowance)}
+   607→                        </TableCell>
+   608→                        <TableCell className="text-right">
+   609→                          {fmt(detailTotals(selectedRun).specialAllowance)}
+   610→                        </TableCell>
+   611→                        <TableCell className="text-right">
+   612→                          {fmt(detailTotals(selectedRun).totalEarnings)}
+   613→                        </TableCell>
+   614→                        <TableCell className="text-right">
+   615→                          {fmt(detailTotals(selectedRun).employeePF)}
+   616→                        </TableCell>
+   617→                        <TableCell className="text-right">
+   618→                          {fmt(detailTotals(selectedRun).employeeESI)}
+   619→                        </TableCell>
+   620→                        <TableCell className="text-right">
+   621→                          {fmt(detailTotals(selectedRun).tds)}
+   622→                        </TableCell>
+   623→                        <TableCell className="text-right">
+   624→                          {fmt(detailTotals(selectedRun).professionalTax)}
+   625→                        </TableCell>
+   626→                        <TableCell className="text-right">
+   627→                          {fmt(detailTotals(selectedRun).lwf)}
+   628→                        </TableCell>
+   629→                        <TableCell className="text-right">
+   630→                          {fmt(detailTotals(selectedRun).totalDeductions)}
+   631→                        </TableCell>
+   632→                        <TableCell className="text-right text-emerald-700">
+   633→                          {fmt(detailTotals(selectedRun).netSalary)}
+   634→                        </TableCell>
+   635→                        <TableCell className="text-right">
+   636→                          {fmt(detailTotals(selectedRun).employerPF)}
+   637→                        </TableCell>
+   638→                        <TableCell className="text-right">
+   639→                          {fmt(detailTotals(selectedRun).employerESI)}
+   640→                        </TableCell>
+   641→                      </TableRow>
+   642→                    </TableFooter>
+   643→                  )}
+   644→                </Table>
+   645→              </div>
+   646→            </div>
+   647→          ) : null}
+   648→
+   649→          <DialogFooter>
+   650→            <Button variant="outline" onClick={() => setDetailOpen(false)}>
+   651→              Close
+   652→            </Button>
+   653→          </DialogFooter>
+   654→        </DialogContent>
+   655→      </Dialog>
+   656→    </div>
+   657→  );
+   658→}
