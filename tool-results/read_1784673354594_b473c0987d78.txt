@@ -1,0 +1,1425 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback } from 'react'
+     4→     4→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     5→     5→import {
+     6→     6→  Table,
+     7→     7→  TableBody,
+     8→     8→  TableCell,
+     9→     9→  TableHead,
+    10→    10→  TableHeader,
+    11→    11→  TableRow,
+    12→    12→} from '@/components/ui/table'
+    13→    13→import { Button } from '@/components/ui/button'
+    14→    14→import {
+    15→    15→  Dialog,
+    16→    16→  DialogContent,
+    17→    17→  DialogDescription,
+    18→    18→  DialogFooter,
+    19→    19→  DialogHeader,
+    20→    20→  DialogTitle,
+    21→    21→} from '@/components/ui/dialog'
+    22→    22→import { Input } from '@/components/ui/input'
+    23→    23→import { Label } from '@/components/ui/label'
+    24→    24→import {
+    25→    25→  Select,
+    26→    26→  SelectContent,
+    27→    27→  SelectItem,
+    28→    28→  SelectTrigger,
+    29→    29→  SelectValue,
+    30→    30→} from '@/components/ui/select'
+    31→    31→import { Switch } from '@/components/ui/switch'
+    32→    32→import { Badge } from '@/components/ui/badge'
+    33→    33→import {
+    34→    34→  AlertDialog,
+    35→    35→  AlertDialogAction,
+    36→    36→  AlertDialogCancel,
+    37→    37→  AlertDialogContent,
+    38→    38→  AlertDialogDescription,
+    39→    39→  AlertDialogFooter,
+    40→    40→  AlertDialogHeader,
+    41→    41→  AlertDialogTitle,
+    42→    42→} from '@/components/ui/alert-dialog'
+    43→    43→import { Skeleton } from '@/components/ui/skeleton'
+    44→    44→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    45→    45→import { Separator } from '@/components/ui/separator'
+    46→    46→import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+    47→    47→import { Textarea } from '@/components/ui/textarea'
+    48→    48→import {
+    49→    49→  Collapsible,
+    50→    50→  CollapsibleContent,
+    51→    51→  CollapsibleTrigger,
+    52→    52→} from '@/components/ui/collapsible'
+    53→    53→import {
+    54→    54→  Plus,
+    55→    55→  Search,
+    56→    56→  Eye,
+    57→    57→  Pencil,
+    58→    58→  Trash2,
+    59→    59→  Check,
+    60→    60→  X,
+    61→    61→  ChevronDown,
+    62→    62→  ChevronUp,
+    63→    63→  UserPlus,
+    64→    64→  Building2,
+    65→    65→  CreditCard,
+    66→    66→  Landmark,
+    67→    67→  Briefcase,
+    68→    68→  Phone,
+    69→    69→  Mail,
+    70→    70→  CalendarDays,
+    71→    71→  Droplets,
+    72→    72→  Heart,
+    73→    73→  MapPin,
+    74→    74→  Shield,
+    75→    75→  Banknote,
+    76→    76→  FileText,
+    77→    77→} from 'lucide-react'
+    78→    78→import { toast } from 'sonner'
+    79→    79→import { usePayrollStore } from '@/store/payroll-store'
+    80→    80→
+    81→    81→// ─── Constants ────────────────────────────────────────────────────────────────
+    82→    82→
+    83→    83→const fmt = (n: number) => '₹' + n.toLocaleString('en-IN')
+    84→    84→
+    85→    85→const DEPARTMENTS = ['Engineering', 'HR', 'Finance', 'Marketing', 'Operations']
+    86→    86→
+    87→    87→const INDIAN_STATES = [
+    88→    88→  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+    89→    89→  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand',
+    90→    90→  'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
+    91→    91→  'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
+    92→    92→  'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+    93→    93→  'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+    94→    94→  'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu',
+    95→    95→  'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+    96→    96→]
+    97→    97→
+    98→    98→const GENDERS = ['Male', 'Female', 'Other']
+    99→    99→const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+   100→   100→
+   101→   101→const DEPT_COLORS: Record<string, string> = {
+   102→   102→  Engineering: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
+   103→   103→  HR: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400',
+   104→   104→  Finance: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+   105→   105→  Marketing: 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400',
+   106→   106→  Operations: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',
+   107→   107→}
+   108→   108→
+   109→   109→// ─── Types ────────────────────────────────────────────────────────────────────
+   110→   110→
+   111→   111→interface SalaryStructure {
+   112→   112→  id?: string
+   113→   113→  basic: number
+   114→   114→  dearnessAllowance: number
+   115→   115→  houseRentAllowance: number
+   116→   116→  conveyanceAllowance: number
+   117→   117→  medicalAllowance: number
+   118→   118→  specialAllowance: number
+   119→   119→  overtimeAllowance: number
+   120→   120→  bonus: number
+   121→   121→  otherEarnings: number
+   122→   122→  employerPF: number
+   123→   123→  employerESI: number
+   124→   124→  gratuity: number
+   125→   125→}
+   126→   126→
+   127→   127→interface Employee {
+   128→   128→  id: string
+   129→   129→  employeeCode: string
+   130→   130→  firstName: string
+   131→   131→  lastName: string | null
+   132→   132→  email: string
+   133→   133→  phone: string | null
+   134→   134→  dateOfJoining: string
+   135→   135→  dateOfExit: string | null
+   136→   136→  designation: string
+   137→   137→  department: string
+   138→   138→  state: string
+   139→   139→  panNumber: string | null
+   140→   140→  aadhaarNumber: string | null
+   141→   141→  bankName: string | null
+   142→   142→  bankAccountNumber: string | null
+   143→   143→  bankIfsc: string | null
+   144→   144→  uanNumber: string | null
+   145→   145→  esiNumber: string | null
+   146→   146→  pfApplicable: boolean
+   147→   147→  esiApplicable: boolean
+   148→   148→  ptApplicable: boolean
+   149→   149→  lwfApplicable: boolean
+   150→   150→  taxRegime: string
+   151→   151→  gender: string
+   152→   152→  dateOfBirth: string | null
+   153→   153→  bloodGroup: string | null
+   154→   154→  emergencyContact: string | null
+   155→   155→  currentAddress: string | null
+   156→   156→  permanentAddress: string | null
+   157→   157→  salaryStructure: SalaryStructure | null
+   158→   158→  createdAt: string
+   159→   159→  updatedAt: string
+   160→   160→}
+   161→   161→
+   162→   162→interface FormData {
+   163→   163→  employeeCode: string
+   164→   164→  firstName: string
+   165→   165→  lastName: string
+   166→   166→  email: string
+   167→   167→  phone: string
+   168→   168→  dateOfJoining: string
+   169→   169→  designation: string
+   170→   170→  department: string
+   171→   171→  state: string
+   172→   172→  panNumber: string
+   173→   173→  aadhaarNumber: string
+   174→   174→  bankName: string
+   175→   175→  bankAccountNumber: string
+   176→   176→  bankIfsc: string
+   177→   177→  uanNumber: string
+   178→   178→  esiNumber: string
+   179→   179→  pfApplicable: boolean
+   180→   180→  esiApplicable: boolean
+   181→   181→  ptApplicable: boolean
+   182→   182→  lwfApplicable: boolean
+   183→   183→  taxRegime: string
+   184→   184→  gender: string
+   185→   185→  dateOfBirth: string
+   186→   186→  bloodGroup: string
+   187→   187→  emergencyContact: string
+   188→   188→  currentAddress: string
+   189→   189→  permanentAddress: string
+   190→   190→  // Salary structure
+   191→   191→  basic: string
+   192→   192→  dearnessAllowance: string
+   193→   193→  houseRentAllowance: string
+   194→   194→  conveyanceAllowance: string
+   195→   195→  medicalAllowance: string
+   196→   196→  specialAllowance: string
+   197→   197→}
+   198→   198→
+   199→   199→const emptyForm: FormData = {
+   200→   200→  employeeCode: '',
+   201→   201→  firstName: '',
+   202→   202→  lastName: '',
+   203→   203→  email: '',
+   204→   204→  phone: '',
+   205→   205→  dateOfJoining: '',
+   206→   206→  designation: '',
+   207→   207→  department: '',
+   208→   208→  state: 'Maharashtra',
+   209→   209→  panNumber: '',
+   210→   210→  aadhaarNumber: '',
+   211→   211→  bankName: '',
+   212→   212→  bankAccountNumber: '',
+   213→   213→  bankIfsc: '',
+   214→   214→  uanNumber: '',
+   215→   215→  esiNumber: '',
+   216→   216→  pfApplicable: true,
+   217→   217→  esiApplicable: true,
+   218→   218→  ptApplicable: true,
+   219→   219→  lwfApplicable: true,
+   220→   220→  taxRegime: 'new',
+   221→   221→  gender: 'Male',
+   222→   222→  dateOfBirth: '',
+   223→   223→  bloodGroup: '',
+   224→   224→  emergencyContact: '',
+   225→   225→  currentAddress: '',
+   226→   226→  permanentAddress: '',
+   227→   227→  basic: '',
+   228→   228→  dearnessAllowance: '0',
+   229→   229→  houseRentAllowance: '',
+   230→   230→  conveyanceAllowance: '1600',
+   231→   231→  medicalAllowance: '1250',
+   232→   232→  specialAllowance: '',
+   233→   233→}
+   234→   234→
+   235→   235→// ─── Helpers ──────────────────────────────────────────────────────────────────
+   236→   236→
+   237→   237→function getInitials(firstName: string, lastName: string | null) {
+   238→   238→  const f = firstName?.charAt(0)?.toUpperCase() || ''
+   239→   239→  const l = lastName?.charAt(0)?.toUpperCase() || ''
+   240→   240→  return (f + l) || '?'
+   241→   241→}
+   242→   242→
+   243→   243→function getFullName(emp: Employee) {
+   244→   244→  return `${emp.firstName}${emp.lastName ? ' ' + emp.lastName : ''}`
+   245→   245→}
+   246→   246→
+   247→   247→function computeSalary(form: FormData) {
+   248→   248→  const basic = parseFloat(form.basic) || 0
+   249→   249→  const da = parseFloat(form.dearnessAllowance) || 0
+   250→   250→  const hra = parseFloat(form.houseRentAllowance) || 0
+   251→   251→  const conv = parseFloat(form.conveyanceAllowance) || 0
+   252→   252→  const med = parseFloat(form.medicalAllowance) || 0
+   253→   253→  const special = parseFloat(form.specialAllowance) || 0
+   254→   254→  const gross = basic + da + hra + conv + med + special
+   255→   255→  const employerPF = form.pfApplicable ? Math.round(basic * 0.12) : 0
+   256→   256→  const employerESI = form.esiApplicable && gross <= 21000 ? Math.round(gross * 0.0325) : 0
+   257→   257→  const monthlyCTC = gross + employerPF + employerESI
+   258→   258→  return { gross, employerPF, employerESI, monthlyCTC }
+   259→   259→}
+   260→   260→
+   261→   261→// ─── Component ────────────────────────────────────────────────────────────────
+   262→   262→
+   263→   263→export default function EmployeesView() {
+   264→   264→  const { refreshKey } = usePayrollStore()
+   265→   265→
+   266→   266→  // Table state
+   267→   267→  const [employees, setEmployees] = useState<Employee[]>([])
+   268→   268→  const [loading, setLoading] = useState(true)
+   269→   269→  const [search, setSearch] = useState('')
+   270→   270→  const [deptFilter, setDeptFilter] = useState('all')
+   271→   271→  const [stateFilter, setStateFilter] = useState('all')
+   272→   272→
+   273→   273→  // Dialogs
+   274→   274→  const [formOpen, setFormOpen] = useState(false)
+   275→   275→  const [viewOpen, setViewOpen] = useState(false)
+   276→   276→  const [deleteOpen, setDeleteOpen] = useState(false)
+   277→   277→
+   278→   278→  // Form
+   279→   279→  const [editingId, setEditingId] = useState<string | null>(null)
+   280→   280→  const [form, setForm] = useState<FormData>({ ...emptyForm })
+   281→   281→  const [submitting, setSubmitting] = useState(false)
+   282→   282→  const [salaryOpen, setSalaryOpen] = useState(false)
+   283→   283→
+   284→   284→  // View
+   285→   285→  const [viewEmployee, setViewEmployee] = useState<Employee | null>(null)
+   286→   286→
+   287→   287→  // Delete
+   288→   288→  const [deletingId, setDeletingId] = useState<string | null>(null)
+   289→   289→
+   290→   290→  // ─── Fetch Employees ──────────────────────────────────────────────────────
+   291→   291→
+   292→   292→  const fetchEmployees = useCallback(async () => {
+   293→   293→    setLoading(true)
+   294→   294→    try {
+   295→   295→      const params = new URLSearchParams()
+   296→   296→      if (search) params.set('search', search)
+   297→   297→      if (deptFilter && deptFilter !== 'all') params.set('department', deptFilter)
+   298→   298→      if (stateFilter && stateFilter !== 'all') params.set('state', stateFilter)
+   299→   299→
+   300→   300→      const res = await fetch(`/api/employees?${params.toString()}`)
+   301→   301→      if (!res.ok) throw new Error('Failed to fetch employees')
+   302→   302→      const data = await res.json()
+   303→   303→      setEmployees(data)
+   304→   304→    } catch {
+   305→   305→      toast.error('Failed to load employees')
+   306→   306→    } finally {
+   307→   307→      setLoading(false)
+   308→   308→    }
+   309→   309→  }, [search, deptFilter, stateFilter])
+   310→   310→
+   311→   311→  useEffect(() => {
+   312→   312→    fetchEmployees()
+   313→   313→  }, [fetchEmployees, refreshKey])
+   314→   314→
+   315→   315→  // ─── Form helpers ─────────────────────────────────────────────────────────
+   316→   316→
+   317→   317→  const updateField = (field: keyof FormData, value: string | boolean) => {
+   318→   318→    setForm((prev) => ({ ...prev, [field]: value }))
+   319→   319→  }
+   320→   320→
+   321→   321→  const openAddDialog = () => {
+   322→   322→    setEditingId(null)
+   323→   323→    setForm({ ...emptyForm })
+   324→   324→    setSalaryOpen(false)
+   325→   325→    setFormOpen(true)
+   326→   326→  }
+   327→   327→
+   328→   328→  const openEditDialog = (emp: Employee) => {
+   329→   329→    setEditingId(emp.id)
+   330→   330→    setForm({
+   331→   331→      employeeCode: emp.employeeCode,
+   332→   332→      firstName: emp.firstName,
+   333→   333→      lastName: emp.lastName || '',
+   334→   334→      email: emp.email,
+   335→   335→      phone: emp.phone || '',
+   336→   336→      dateOfJoining: emp.dateOfJoining?.split('T')[0] || '',
+   337→   337→      designation: emp.designation,
+   338→   338→      department: emp.department,
+   339→   339→      state: emp.state,
+   340→   340→      panNumber: emp.panNumber || '',
+   341→   341→      aadhaarNumber: emp.aadhaarNumber || '',
+   342→   342→      bankName: emp.bankName || '',
+   343→   343→      bankAccountNumber: emp.bankAccountNumber || '',
+   344→   344→      bankIfsc: emp.bankIfsc || '',
+   345→   345→      uanNumber: emp.uanNumber || '',
+   346→   346→      esiNumber: emp.esiNumber || '',
+   347→   347→      pfApplicable: emp.pfApplicable,
+   348→   348→      esiApplicable: emp.esiApplicable,
+   349→   349→      ptApplicable: emp.ptApplicable,
+   350→   350→      lwfApplicable: emp.lwfApplicable,
+   351→   351→      taxRegime: emp.taxRegime,
+   352→   352→      gender: emp.gender,
+   353→   353→      dateOfBirth: emp.dateOfBirth?.split('T')[0] || '',
+   354→   354→      bloodGroup: emp.bloodGroup || '',
+   355→   355→      emergencyContact: emp.emergencyContact || '',
+   356→   356→      currentAddress: emp.currentAddress || '',
+   357→   357→      permanentAddress: emp.permanentAddress || '',
+   358→   358→      basic: emp.salaryStructure?.basic?.toString() || '',
+   359→   359→      dearnessAllowance: emp.salaryStructure?.dearnessAllowance?.toString() || '0',
+   360→   360→      houseRentAllowance: emp.salaryStructure?.houseRentAllowance?.toString() || '',
+   361→   361→      conveyanceAllowance: emp.salaryStructure?.conveyanceAllowance?.toString() || '1600',
+   362→   362→      medicalAllowance: emp.salaryStructure?.medicalAllowance?.toString() || '1250',
+   363→   363→      specialAllowance: emp.salaryStructure?.specialAllowance?.toString() || '',
+   364→   364→    })
+   365→   365→    setSalaryOpen(false)
+   366→   366→    setFormOpen(true)
+   367→   367→  }
+   368→   368→
+   369→   369→  const openViewDialog = (emp: Employee) => {
+   370→   370→    setViewEmployee(emp)
+   371→   371→    setViewOpen(true)
+   372→   372→  }
+   373→   373→
+   374→   374→  const openDeleteDialog = (id: string) => {
+   375→   375→    setDeletingId(id)
+   376→   376→    setDeleteOpen(true)
+   377→   377→  }
+   378→   378→
+   379→   379→  // ─── Submit ───────────────────────────────────────────────────────────────
+   380→   380→
+   381→   381→  const handleSubmit = async () => {
+   382→   382→    if (!form.firstName.trim()) {
+   383→   383→      toast.error('First name is required')
+   384→   384→      return
+   385→   385→    }
+   386→   386→    if (!form.email.trim()) {
+   387→   387→      toast.error('Email is required')
+   388→   388→      return
+   389→   389→    }
+   390→   390→    if (!form.designation.trim()) {
+   391→   391→      toast.error('Designation is required')
+   392→   392→      return
+   393→   393→    }
+   394→   394→    if (!form.department) {
+   395→   395→      toast.error('Department is required')
+   396→   396→      return
+   397→   397→    }
+   398→   398→    if (!form.dateOfJoining) {
+   399→   399→      toast.error('Date of joining is required')
+   400→   400→      return
+   401→   401→    }
+   402→   402→
+   403→   403→    setSubmitting(true)
+   404→   404→    try {
+   405→   405→      const salary = computeSalary(form)
+   406→   406→      const payload = {
+   407→   407→        ...(editingId ? {} : { employeeCode: form.employeeCode || undefined }),
+   408→   408→        firstName: form.firstName.trim(),
+   409→   409→        lastName: form.lastName.trim() || null,
+   410→   410→        email: form.email.trim(),
+   411→   411→        phone: form.phone.trim() || null,
+   412→   412→        dateOfJoining: form.dateOfJoining,
+   413→   413→        designation: form.designation.trim(),
+   414→   414→        department: form.department,
+   415→   415→        state: form.state,
+   416→   416→        panNumber: form.panNumber.trim() || null,
+   417→   417→        aadhaarNumber: form.aadhaarNumber.trim() || null,
+   418→   418→        bankName: form.bankName.trim() || null,
+   419→   419→        bankAccountNumber: form.bankAccountNumber.trim() || null,
+   420→   420→        bankIfsc: form.bankIfsc.trim() || null,
+   421→   421→        uanNumber: form.uanNumber.trim() || null,
+   422→   422→        esiNumber: form.esiNumber.trim() || null,
+   423→   423→        pfApplicable: form.pfApplicable,
+   424→   424→        esiApplicable: form.esiApplicable,
+   425→   425→        ptApplicable: form.ptApplicable,
+   426→   426→        lwfApplicable: form.lwfApplicable,
+   427→   427→        taxRegime: form.taxRegime,
+   428→   428→        gender: form.gender.toLowerCase(),
+   429→   429→        dateOfBirth: form.dateOfBirth || null,
+   430→   430→        bloodGroup: form.bloodGroup || null,
+   431→   431→        emergencyContact: form.emergencyContact.trim() || null,
+   432→   432→        currentAddress: form.currentAddress.trim() || null,
+   433→   433→        permanentAddress: form.permanentAddress.trim() || null,
+   434→   434→        salaryStructure: {
+   435→   435→          basic: parseFloat(form.basic) || 0,
+   436→   436→          dearnessAllowance: parseFloat(form.dearnessAllowance) || 0,
+   437→   437→          houseRentAllowance: parseFloat(form.houseRentAllowance) || 0,
+   438→   438→          conveyanceAllowance: parseFloat(form.conveyanceAllowance) || 0,
+   439→   439→          medicalAllowance: parseFloat(form.medicalAllowance) || 0,
+   440→   440→          specialAllowance: parseFloat(form.specialAllowance) || 0,
+   441→   441→          employerPF: salary.employerPF,
+   442→   442→          employerESI: salary.employerESI,
+   443→   443→        },
+   444→   444→      }
+   445→   445→
+   446→   446→      const url = editingId ? `/api/employees/${editingId}` : '/api/employees'
+   447→   447→      const method = editingId ? 'PUT' : 'POST'
+   448→   448→
+   449→   449→      const res = await fetch(url, {
+   450→   450→        method,
+   451→   451→        headers: { 'Content-Type': 'application/json' },
+   452→   452→        body: JSON.stringify(payload),
+   453→   453→      })
+   454→   454→
+   455→   455→      if (!res.ok) {
+   456→   456→        const err = await res.json().catch(() => ({ error: 'Request failed' }))
+   457→   457→        throw new Error(err.error || 'Request failed')
+   458→   458→      }
+   459→   459→
+   460→   460→      toast.success(editingId ? 'Employee updated successfully' : 'Employee added successfully')
+   461→   461→      setFormOpen(false)
+   462→   462→      fetchEmployees()
+   463→   463→    } catch (err) {
+   464→   464→      toast.error(err instanceof Error ? err.message : 'Something went wrong')
+   465→   465→    } finally {
+   466→   466→      setSubmitting(false)
+   467→   467→    }
+   468→   468→  }
+   469→   469→
+   470→   470→  // ─── Delete ───────────────────────────────────────────────────────────────
+   471→   471→
+   472→   472→  const handleDelete = async () => {
+   473→   473→    if (!deletingId) return
+   474→   474→    try {
+   475→   475→      const res = await fetch(`/api/employees/${deletingId}`, { method: 'DELETE' })
+   476→   476→      if (!res.ok) throw new Error('Failed to delete employee')
+   477→   477→      toast.success('Employee marked as exited')
+   478→   478→      setDeleteOpen(false)
+   479→   479→      setDeletingId(null)
+   480→   480→      fetchEmployees()
+   481→   481→    } catch {
+   482→   482→      toast.error('Failed to delete employee')
+   483→   483→    }
+   484→   484→  }
+   485→   485→
+   486→   486→  // ─── Salary computed values ───────────────────────────────────────────────
+   487→   487→
+   488→   488→  const salaryComputed = computeSalary(form)
+   489→   489→
+   490→   490→  // ─── Loading Skeletons ────────────────────────────────────────────────────
+   491→   491→
+   492→   492→  if (loading) {
+   493→   493→    return (
+   494→   494→      <div className="space-y-6">
+   495→   495→        <div className="flex items-center justify-between">
+   496→   496→          <Skeleton className="h-8 w-52" />
+   497→   497→          <Skeleton className="h-9 w-36" />
+   498→   498→        </div>
+   499→   499→        <div className="flex gap-3">
+   500→   500→          <Skeleton className="h-9 w-64" />
+   501→   501→          <Skeleton className="h-9 w-40" />
+   502→   502→          <Skeleton className="h-9 w-40" />
+   503→   503→        </div>
+   504→   504→        <Card>
+   505→   505→          <CardContent className="p-0">
+   506→   506→            <div className="space-y-3 p-4">
+   507→   507→              {Array.from({ length: 6 }).map((_, i) => (
+   508→   508→                <div key={i} className="flex items-center gap-4">
+   509→   509→                  <Skeleton className="h-4 w-20" />
+   510→   510→                  <Skeleton className="h-8 w-8 rounded-full" />
+   511→   511→                  <Skeleton className="h-4 w-32" />
+   512→   512→                  <Skeleton className="h-5 w-24 rounded-full" />
+   513→   513→                  <Skeleton className="h-4 w-28" />
+   514→   514→                  <Skeleton className="h-4 w-20" />
+   515→   515→                  <Skeleton className="h-4 w-24" />
+   516→   516→                  <Skeleton className="h-5 w-16 rounded-full" />
+   517→   517→                  <div className="flex gap-2">
+   518→   518→                    <Skeleton className="h-8 w-8" />
+   519→   519→                    <Skeleton className="h-8 w-8" />
+   520→   520→                    <Skeleton className="h-8 w-8" />
+   521→   521→                  </div>
+   522→   522→                </div>
+   523→   523→              ))}
+   524→   524→            </div>
+   525→   525→          </CardContent>
+   526→   526→        </Card>
+   527→   527→      </div>
+   528→   528→    )
+   529→   529→  }
+   530→   530→
+   531→   531→  // ─── Render ───────────────────────────────────────────────────────────────
+   532→   532→
+   533→   533→  return (
+   534→   534→    <div className="space-y-6">
+   535→   535→      {/* Header */}
+   536→   536→      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+   537→   537→        <div>
+   538→   538→          <h1 className="text-2xl font-bold tracking-tight">Employee Management</h1>
+   539→   539→          <p className="text-muted-foreground text-sm mt-1">
+   540→   540→            {employees.length} active {employees.length === 1 ? 'employee' : 'employees'}
+   541→   541→          </p>
+   542→   542→        </div>
+   543→   543→        <Button onClick={openAddDialog} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+   544→   544→          <UserPlus className="size-4" />
+   545→   545→          Add Employee
+   546→   546→        </Button>
+   547→   547→      </div>
+   548→   548→
+   549→   549→      {/* Filters */}
+   550→   550→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+   551→   551→        <div className="relative flex-1 max-w-sm">
+   552→   552→          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   553→   553→          <Input
+   554→   554→            placeholder="Search by name or code..."
+   555→   555→            value={search}
+   556→   556→            onChange={(e) => setSearch(e.target.value)}
+   557→   557→            className="pl-9"
+   558→   558→          />
+   559→   559→        </div>
+   560→   560→        <Select value={deptFilter} onValueChange={setDeptFilter}>
+   561→   561→          <SelectTrigger className="w-[180px]">
+   562→   562→            <SelectValue placeholder="All Departments" />
+   563→   563→          </SelectTrigger>
+   564→   564→          <SelectContent>
+   565→   565→            <SelectItem value="all">All Departments</SelectItem>
+   566→   566→            {DEPARTMENTS.map((d) => (
+   567→   567→              <SelectItem key={d} value={d}>{d}</SelectItem>
+   568→   568→            ))}
+   569→   569→          </SelectContent>
+   570→   570→        </Select>
+   571→   571→        <Select value={stateFilter} onValueChange={setStateFilter}>
+   572→   572→          <SelectTrigger className="w-[180px]">
+   573→   573→            <SelectValue placeholder="All States" />
+   574→   574→          </SelectTrigger>
+   575→   575→          <SelectContent>
+   576→   576→            <SelectItem value="all">All States</SelectItem>
+   577→   577→            {INDIAN_STATES.map((s) => (
+   578→   578→              <SelectItem key={s} value={s}>{s}</SelectItem>
+   579→   579→            ))}
+   580→   580→          </SelectContent>
+   581→   581→        </Select>
+   582→   582→      </div>
+   583→   583→
+   584→   584→      {/* Table */}
+   585→   585→      <Card>
+   586→   586→        <CardContent className="p-0">
+   587→   587→          <Table>
+   588→   588→            <TableHeader>
+   589→   589→              <TableRow className="bg-muted/50">
+   590→   590→                <TableHead className="w-[100px]">Code</TableHead>
+   591→   591→                <TableHead>Name</TableHead>
+   592→   592→                <TableHead>Department</TableHead>
+   593→   593→                <TableHead>Designation</TableHead>
+   594→   594→                <TableHead>State</TableHead>
+   595→   595→                <TableHead>PAN</TableHead>
+   596→   596→                <TableHead>Tax Regime</TableHead>
+   597→   597→                <TableHead className="text-center">PF/ESI</TableHead>
+   598→   598→                <TableHead className="text-right">Actions</TableHead>
+   599→   599→              </TableRow>
+   600→   600→            </TableHeader>
+   601→   601→            <TableBody>
+   602→   602→              {employees.length === 0 ? (
+   603→   603→                <TableRow>
+   604→   604→                  <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+   605→   605→                    No employees found
+   606→   606→                  </TableCell>
+   607→   607→                </TableRow>
+   608→   608→              ) : (
+   609→   609→                employees.map((emp) => (
+   610→   610→                  <TableRow key={emp.id}>
+   611→   611→                    <TableCell className="font-mono text-xs">
+   612→   612→                      {emp.employeeCode}
+   613→   613→                    </TableCell>
+   614→   614→                    <TableCell>
+   615→   615→                      <div className="flex items-center gap-2.5">
+   616→   616→                        <Avatar className="size-8">
+   617→   617→                          <AvatarFallback className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-xs font-semibold">
+   618→   618→                            {getInitials(emp.firstName, emp.lastName)}
+   619→   619→                          </AvatarFallback>
+   620→   620→                        </Avatar>
+   621→   621→                        <div>
+   622→   622→                          <div className="font-medium">{getFullName(emp)}</div>
+   623→   623→                          <div className="text-muted-foreground text-xs">{emp.email}</div>
+   624→   624→                        </div>
+   625→   625→                      </div>
+   626→   626→                    </TableCell>
+   627→   627→                    <TableCell>
+   628→   628→                      <Badge
+   629→   629→                        variant="secondary"
+   630→   630→                        className={DEPT_COLORS[emp.department] || ''}
+   631→   631→                      >
+   632→   632→                        {emp.department}
+   633→   633→                      </Badge>
+   634→   634→                    </TableCell>
+   635→   635→                    <TableCell className="text-muted-foreground">{emp.designation}</TableCell>
+   636→   636→                    <TableCell className="text-muted-foreground">{emp.state}</TableCell>
+   637→   637→                    <TableCell className="font-mono text-xs">{emp.panNumber || '—'}</TableCell>
+   638→   638→                    <TableCell>
+   639→   639→                      <Badge
+   640→   640→                        className={
+   641→   641→                          emp.taxRegime === 'new'
+   642→   642→                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-transparent'
+   643→   643→                            : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-transparent'
+   644→   644→                        }
+   645→   645→                      >
+   646→   646→                        {emp.taxRegime === 'new' ? 'New' : 'Old'}
+   647→   647→                      </Badge>
+   648→   648→                    </TableCell>
+   649→   649→                    <TableCell>
+   650→   650→                      <div className="flex items-center justify-center gap-1.5">
+   651→   651→                        {emp.pfApplicable ? (
+   652→   652→                          <Check className="size-4 text-emerald-600" />
+   653→   653→                        ) : (
+   654→   654→                          <X className="size-4 text-muted-foreground/40" />
+   655→   655→                        )}
+   656→   656→                        <span className="text-muted-foreground text-xs">/</span>
+   657→   657→                        {emp.esiApplicable ? (
+   658→   658→                          <Check className="size-4 text-emerald-600" />
+   659→   659→                        ) : (
+   660→   660→                          <X className="size-4 text-muted-foreground/40" />
+   661→   661→                        )}
+   662→   662→                      </div>
+   663→   663→                    </TableCell>
+   664→   664→                    <TableCell>
+   665→   665→                      <div className="flex items-center justify-end gap-1">
+   666→   666→                        <Button
+   667→   667→                          variant="ghost"
+   668→   668→                          size="icon"
+   669→   669→                          className="size-8"
+   670→   670→                          onClick={() => openViewDialog(emp)}
+   671→   671→                          title="View"
+   672→   672→                        >
+   673→   673→                          <Eye className="size-4" />
+   674→   674→                        </Button>
+   675→   675→                        <Button
+   676→   676→                          variant="ghost"
+   677→   677→                          size="icon"
+   678→   678→                          className="size-8"
+   679→   679→                          onClick={() => openEditDialog(emp)}
+   680→   680→                          title="Edit"
+   681→   681→                        >
+   682→   682→                          <Pencil className="size-4" />
+   683→   683→                        </Button>
+   684→   684→                        <Button
+   685→   685→                          variant="ghost"
+   686→   686→                          size="icon"
+   687→   687→                          className="size-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+   688→   688→                          onClick={() => openDeleteDialog(emp.id)}
+   689→   689→                          title="Delete"
+   690→   690→                        >
+   691→   691→                          <Trash2 className="size-4" />
+   692→   692→                        </Button>
+   693→   693→                      </div>
+   694→   694→                    </TableCell>
+   695→   695→                  </TableRow>
+   696→   696→                ))
+   697→   697→              )}
+   698→   698→            </TableBody>
+   699→   699→          </Table>
+   700→   700→        </CardContent>
+   701→   701→      </Card>
+   702→   702→
+   703→   703→      {/* ─── Add / Edit Dialog ─────────────────────────────────────────────── */}
+   704→   704→      <Dialog open={formOpen} onOpenChange={(open) => { if (!open && !submitting) setFormOpen(false) }}>
+   705→   705→        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+   706→   706→          <DialogHeader>
+   707→   707→            <DialogTitle>{editingId ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
+   708→   708→            <DialogDescription>
+   709→   709→              {editingId
+   710→   710→                ? 'Update employee details below.'
+   711→   711→                : 'Fill in the details to add a new employee.'}
+   712→   712→            </DialogDescription>
+   713→   713→          </DialogHeader>
+   714→   714→
+   715→   715→          <div className="space-y-6 py-2">
+   716→   716→            {/* Personal Info */}
+   717→   717→            <div>
+   718→   718→              <div className="flex items-center gap-2 mb-3">
+   719→   719→                <UserPlus className="size-4 text-emerald-600" />
+   720→   720→                <h3 className="font-semibold text-sm">Personal Information</h3>
+   721→   721→              </div>
+   722→   722→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   723→   723→                <div className="space-y-1.5">
+   724→   724→                  <Label htmlFor="firstName">First Name *</Label>
+   725→   725→                  <Input
+   726→   726→                    id="firstName"
+   727→   727→                    value={form.firstName}
+   728→   728→                    onChange={(e) => updateField('firstName', e.target.value)}
+   729→   729→                    placeholder="John"
+   730→   730→                  />
+   731→   731→                </div>
+   732→   732→                <div className="space-y-1.5">
+   733→   733→                  <Label htmlFor="lastName">Last Name</Label>
+   734→   734→                  <Input
+   735→   735→                    id="lastName"
+   736→   736→                    value={form.lastName}
+   737→   737→                    onChange={(e) => updateField('lastName', e.target.value)}
+   738→   738→                    placeholder="Doe"
+   739→   739→                  />
+   740→   740→                </div>
+   741→   741→                <div className="space-y-1.5">
+   742→   742→                  <Label htmlFor="email">Email *</Label>
+   743→   743→                  <Input
+   744→   744→                    id="email"
+   745→   745→                    type="email"
+   746→   746→                    value={form.email}
+   747→   747→                    onChange={(e) => updateField('email', e.target.value)}
+   748→   748→                    placeholder="john@company.com"
+   749→   749→                  />
+   750→   750→                </div>
+   751→   751→                <div className="space-y-1.5">
+   752→   752→                  <Label htmlFor="phone">Phone</Label>
+   753→   753→                  <Input
+   754→   754→                    id="phone"
+   755→   755→                    value={form.phone}
+   756→   756→                    onChange={(e) => updateField('phone', e.target.value)}
+   757→   757→                    placeholder="+91 98765 43210"
+   758→   758→                  />
+   759→   759→                </div>
+   760→   760→                <div className="space-y-1.5">
+   761→   761→                  <Label>Gender</Label>
+   762→   762→                  <Select value={form.gender} onValueChange={(v) => updateField('gender', v)}>
+   763→   763→                    <SelectTrigger className="w-full">
+   764→   764→                      <SelectValue />
+   765→   765→                    </SelectTrigger>
+   766→   766→                    <SelectContent>
+   767→   767→                      {GENDERS.map((g) => (
+   768→   768→                        <SelectItem key={g} value={g}>{g}</SelectItem>
+   769→   769→                      ))}
+   770→   770→                    </SelectContent>
+   771→   771→                  </Select>
+   772→   772→                </div>
+   773→   773→                <div className="space-y-1.5">
+   774→   774→                  <Label htmlFor="dob">Date of Birth</Label>
+   775→   775→                  <Input
+   776→   776→                    id="dob"
+   777→   777→                    type="date"
+   778→   778→                    value={form.dateOfBirth}
+   779→   779→                    onChange={(e) => updateField('dateOfBirth', e.target.value)}
+   780→   780→                  />
+   781→   781→                </div>
+   782→   782→                <div className="space-y-1.5">
+   783→   783→                  <Label>Blood Group</Label>
+   784→   784→                  <Select value={form.bloodGroup} onValueChange={(v) => updateField('bloodGroup', v)}>
+   785→   785→                    <SelectTrigger className="w-full">
+   786→   786→                      <SelectValue placeholder="Select" />
+   787→   787→                    </SelectTrigger>
+   788→   788→                    <SelectContent>
+   789→   789→                      {BLOOD_GROUPS.map((bg) => (
+   790→   790→                        <SelectItem key={bg} value={bg}>{bg}</SelectItem>
+   791→   791→                      ))}
+   792→   792→                    </SelectContent>
+   793→   793→                  </Select>
+   794→   794→                </div>
+   795→   795→                <div className="space-y-1.5">
+   796→   796→                  <Label htmlFor="emergencyContact">Emergency Contact</Label>
+   797→   797→                  <Input
+   798→   798→                    id="emergencyContact"
+   799→   799→                    value={form.emergencyContact}
+   800→   800→                    onChange={(e) => updateField('emergencyContact', e.target.value)}
+   801→   801→                    placeholder="+91 98765 00000"
+   802→   802→                  />
+   803→   803→                </div>
+   804→   804→              </div>
+   805→   805→            </div>
+   806→   806→
+   807→   807→            <Separator />
+   808→   808→
+   809→   809→            {/* Employment Info */}
+   810→   810→            <div>
+   811→   811→              <div className="flex items-center gap-2 mb-3">
+   812→   812→                <Briefcase className="size-4 text-emerald-600" />
+   813→   813→                <h3 className="font-semibold text-sm">Employment Information</h3>
+   814→   814→              </div>
+   815→   815→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   816→   816→                <div className="space-y-1.5">
+   817→   817→                  <Label htmlFor="employeeCode">Employee Code</Label>
+   818→   818→                  <Input
+   819→   819→                    id="employeeCode"
+   820→   820→                    value={form.employeeCode}
+   821→   821→                    onChange={(e) => updateField('employeeCode', e.target.value)}
+   822→   822→                    placeholder="Auto-generated"
+   823→   823→                    disabled={!!editingId}
+   824→   824→                  />
+   825→   825→                  {!editingId && (
+   826→   826→                    <p className="text-muted-foreground text-xs">Leave empty to auto-generate</p>
+   827→   827→                  )}
+   828→   828→                </div>
+   829→   829→                <div className="space-y-1.5">
+   830→   830→                  <Label htmlFor="designation">Designation *</Label>
+   831→   831→                  <Input
+   832→   832→                    id="designation"
+   833→   833→                    value={form.designation}
+   834→   834→                    onChange={(e) => updateField('designation', e.target.value)}
+   835→   835→                    placeholder="Software Engineer"
+   836→   836→                  />
+   837→   837→                </div>
+   838→   838→                <div className="space-y-1.5">
+   839→   839→                  <Label>Department *</Label>
+   840→   840→                  <Select value={form.department} onValueChange={(v) => updateField('department', v)}>
+   841→   841→                    <SelectTrigger className="w-full">
+   842→   842→                      <SelectValue placeholder="Select department" />
+   843→   843→                    </SelectTrigger>
+   844→   844→                    <SelectContent>
+   845→   845→                      {DEPARTMENTS.map((d) => (
+   846→   846→                        <SelectItem key={d} value={d}>{d}</SelectItem>
+   847→   847→                      ))}
+   848→   848→                    </SelectContent>
+   849→   849→                  </Select>
+   850→   850→                </div>
+   851→   851→                <div className="space-y-1.5">
+   852→   852→                  <Label htmlFor="doj">Date of Joining *</Label>
+   853→   853→                  <Input
+   854→   854→                    id="doj"
+   855→   855→                    type="date"
+   856→   856→                    value={form.dateOfJoining}
+   857→   857→                    onChange={(e) => updateField('dateOfJoining', e.target.value)}
+   858→   858→                  />
+   859→   859→                </div>
+   860→   860→                <div className="space-y-1.5">
+   861→   861→                  <Label>State</Label>
+   862→   862→                  <Select value={form.state} onValueChange={(v) => updateField('state', v)}>
+   863→   863→                    <SelectTrigger className="w-full">
+   864→   864→                      <SelectValue />
+   865→   865→                    </SelectTrigger>
+   866→   866→                    <SelectContent>
+   867→   867→                      {INDIAN_STATES.map((s) => (
+   868→   868→                        <SelectItem key={s} value={s}>{s}</SelectItem>
+   869→   869→                      ))}
+   870→   870→                    </SelectContent>
+   871→   871→                  </Select>
+   872→   872→                </div>
+   873→   873→              </div>
+   874→   874→            </div>
+   875→   875→
+   876→   876→            <Separator />
+   877→   877→
+   878→   878→            {/* Statutory */}
+   879→   879→            <div>
+   880→   880→              <div className="flex items-center gap-2 mb-3">
+   881→   881→                <Shield className="size-4 text-emerald-600" />
+   882→   882→                <h3 className="font-semibold text-sm">Statutory Details</h3>
+   883→   883→              </div>
+   884→   884→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   885→   885→                <div className="space-y-1.5">
+   886→   886→                  <Label htmlFor="panNumber">PAN Number</Label>
+   887→   887→                  <Input
+   888→   888→                    id="panNumber"
+   889→   889→                    value={form.panNumber}
+   890→   890→                    onChange={(e) => updateField('panNumber', e.target.value.toUpperCase())}
+   891→   891→                    placeholder="ABCDE1234F"
+   892→   892→                    className="uppercase"
+   893→   893→                    maxLength={10}
+   894→   894→                  />
+   895→   895→                </div>
+   896→   896→                <div className="space-y-1.5">
+   897→   897→                  <Label htmlFor="aadhaarNumber">Aadhaar Number</Label>
+   898→   898→                  <Input
+   899→   899→                    id="aadhaarNumber"
+   900→   900→                    value={form.aadhaarNumber}
+   901→   901→                    onChange={(e) => updateField('aadhaarNumber', e.target.value.replace(/\D/g, '').slice(0, 12))}
+   902→   902→                    placeholder="1234 5678 9012"
+   903→   903→                    maxLength={12}
+   904→   904→                  />
+   905→   905→                </div>
+   906→   906→                <div className="space-y-1.5">
+   907→   907→                  <Label htmlFor="uanNumber">UAN Number</Label>
+   908→   908→                  <Input
+   909→   909→                    id="uanNumber"
+   910→   910→                    value={form.uanNumber}
+   911→   911→                    onChange={(e) => updateField('uanNumber', e.target.value)}
+   912→   912→                    placeholder="100000000000"
+   913→   913→                  />
+   914→   914→                </div>
+   915→   915→                <div className="space-y-1.5">
+   916→   916→                  <Label htmlFor="esiNumber">ESI Number</Label>
+   917→   917→                  <Input
+   918→   918→                    id="esiNumber"
+   919→   919→                    value={form.esiNumber}
+   920→   920→                    onChange={(e) => updateField('esiNumber', e.target.value)}
+   921→   921→                    placeholder="310000000000000"
+   922→   922→                  />
+   923→   923→                </div>
+   924→   924→              </div>
+   925→   925→            </div>
+   926→   926→
+   927→   927→            <Separator />
+   928→   928→
+   929→   929→            {/* Compliances */}
+   930→   930→            <div>
+   931→   931→              <div className="flex items-center gap-2 mb-3">
+   932→   932→                <FileText className="size-4 text-emerald-600" />
+   933→   933→                <h3 className="font-semibold text-sm">Compliances</h3>
+   934→   934→              </div>
+   935→   935→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   936→   936→                <div className="flex items-center justify-between rounded-lg border p-3">
+   937→   937→                  <Label htmlFor="pfSwitch" className="cursor-pointer">PF Applicable</Label>
+   938→   938→                  <Switch
+   939→   939→                    id="pfSwitch"
+   940→   940→                    checked={form.pfApplicable}
+   941→   941→                    onCheckedChange={(v) => updateField('pfApplicable', v)}
+   942→   942→                  />
+   943→   943→                </div>
+   944→   944→                <div className="flex items-center justify-between rounded-lg border p-3">
+   945→   945→                  <Label htmlFor="esiSwitch" className="cursor-pointer">ESI Applicable</Label>
+   946→   946→                  <Switch
+   947→   947→                    id="esiSwitch"
+   948→   948→                    checked={form.esiApplicable}
+   949→   949→                    onCheckedChange={(v) => updateField('esiApplicable', v)}
+   950→   950→                  />
+   951→   951→                </div>
+   952→   952→                <div className="flex items-center justify-between rounded-lg border p-3">
+   953→   953→                  <Label htmlFor="ptSwitch" className="cursor-pointer">PT Applicable</Label>
+   954→   954→                  <Switch
+   955→   955→                    id="ptSwitch"
+   956→   956→                    checked={form.ptApplicable}
+   957→   957→                    onCheckedChange={(v) => updateField('ptApplicable', v)}
+   958→   958→                  />
+   959→   959→                </div>
+   960→   960→                <div className="flex items-center justify-between rounded-lg border p-3">
+   961→   961→                  <Label htmlFor="lwfSwitch" className="cursor-pointer">LWF Applicable</Label>
+   962→   962→                  <Switch
+   963→   963→                    id="lwfSwitch"
+   964→   964→                    checked={form.lwfApplicable}
+   965→   965→                    onCheckedChange={(v) => updateField('lwfApplicable', v)}
+   966→   966→                  />
+   967→   967→                </div>
+   968→   968→                <div className="space-y-1.5 sm:col-span-2">
+   969→   969→                  <Label>Tax Regime</Label>
+   970→   970→                  <Select value={form.taxRegime} onValueChange={(v) => updateField('taxRegime', v)}>
+   971→   971→                    <SelectTrigger className="w-full max-w-xs">
+   972→   972→                      <SelectValue />
+   973→   973→                    </SelectTrigger>
+   974→   974→                    <SelectContent>
+   975→   975→                      <SelectItem value="new">New Tax Regime</SelectItem>
+   976→   976→                      <SelectItem value="old">Old Tax Regime</SelectItem>
+   977→   977→                    </SelectContent>
+   978→   978→                  </Select>
+   979→   979→                </div>
+   980→   980→              </div>
+   981→   981→            </div>
+   982→   982→
+   983→   983→            <Separator />
+   984→   984→
+   985→   985→            {/* Bank Details */}
+   986→   986→            <div>
+   987→   987→              <div className="flex items-center gap-2 mb-3">
+   988→   988→                <Landmark className="size-4 text-emerald-600" />
+   989→   989→                <h3 className="font-semibold text-sm">Bank Details</h3>
+   990→   990→              </div>
+   991→   991→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   992→   992→                <div className="space-y-1.5 sm:col-span-2">
+   993→   993→                  <Label htmlFor="bankName">Bank Name</Label>
+   994→   994→                  <Input
+   995→   995→                    id="bankName"
+   996→   996→                    value={form.bankName}
+   997→   997→                    onChange={(e) => updateField('bankName', e.target.value)}
+   998→   998→                    placeholder="State Bank of India"
+   999→   999→                  />
+  1000→  1000→                </div>
+  1001→  1001→                <div className="space-y-1.5">
+  1002→  1002→                  <Label htmlFor="bankAccountNumber">Account Number</Label>
+  1003→  1003→                  <Input
+  1004→  1004→                    id="bankAccountNumber"
+  1005→  1005→                    value={form.bankAccountNumber}
+  1006→  1006→                    onChange={(e) => updateField('bankAccountNumber', e.target.value.replace(/\D/g, ''))}
+  1007→  1007→                    placeholder="1234567890"
+  1008→  1008→                  />
+  1009→  1009→                </div>
+  1010→  1010→                <div className="space-y-1.5">
+  1011→  1011→                  <Label htmlFor="bankIfsc">IFSC Code</Label>
+  1012→  1012→                  <Input
+  1013→  1013→                    id="bankIfsc"
+  1014→  1014→                    value={form.bankIfsc}
+  1015→  1015→                    onChange={(e) => updateField('bankIfsc', e.target.value.toUpperCase())}
+  1016→  1016→                    placeholder="SBIN0001234"
+  1017→  1017→                    className="uppercase"
+  1018→  1018→                    maxLength={11}
+  1019→  1019→                  />
+  1020→  1020→                </div>
+  1021→  1021→              </div>
+  1022→  1022→            </div>
+  1023→  1023→
+  1024→  1024→            <Separator />
+  1025→  1025→
+  1026→  1026→            {/* Address */}
+  1027→  1027→            <div>
+  1028→  1028→              <div className="flex items-center gap-2 mb-3">
+  1029→  1029→                <MapPin className="size-4 text-emerald-600" />
+  1030→  1030→                <h3 className="font-semibold text-sm">Address</h3>
+  1031→  1031→              </div>
+  1032→  1032→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1033→  1033→                <div className="space-y-1.5 sm:col-span-2">
+  1034→  1034→                  <Label htmlFor="currentAddress">Current Address</Label>
+  1035→  1035→                  <Textarea
+  1036→  1036→                    id="currentAddress"
+  1037→  1037→                    value={form.currentAddress}
+  1038→  1038→                    onChange={(e) => updateField('currentAddress', e.target.value)}
+  1039→  1039→                    placeholder="Enter current address"
+  1040→  1040→                    rows={2}
+  1041→  1041→                  />
+  1042→  1042→                </div>
+  1043→  1043→                <div className="space-y-1.5 sm:col-span-2">
+  1044→  1044→                  <Label htmlFor="permanentAddress">Permanent Address</Label>
+  1045→  1045→                  <Textarea
+  1046→  1046→                    id="permanentAddress"
+  1047→  1047→                    value={form.permanentAddress}
+  1048→  1048→                    onChange={(e) => updateField('permanentAddress', e.target.value)}
+  1049→  1049→                    placeholder="Enter permanent address"
+  1050→  1050→                    rows={2}
+  1051→  1051→                  />
+  1052→  1052→                </div>
+  1053→  1053→              </div>
+  1054→  1054→            </div>
+  1055→  1055→
+  1056→  1056→            <Separator />
+  1057→  1057→
+  1058→  1058→            {/* Salary Structure (Collapsible) */}
+  1059→  1059→            <Collapsible open={salaryOpen} onOpenChange={setSalaryOpen}>
+  1060→  1060→              <CollapsibleTrigger className="flex items-center gap-2 w-full">
+  1061→  1061→                <Banknote className="size-4 text-emerald-600" />
+  1062→  1062→                <h3 className="font-semibold text-sm">Salary Structure</h3>
+  1063→  1063→                {salaryOpen ? (
+  1064→  1064→                  <ChevronUp className="size-4 ml-auto text-muted-foreground" />
+  1065→  1065→                ) : (
+  1066→  1066→                  <ChevronDown className="size-4 ml-auto text-muted-foreground" />
+  1067→  1067→                )}
+  1068→  1068→              </CollapsibleTrigger>
+  1069→  1069→              <CollapsibleContent className="mt-4">
+  1070→  1070→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1071→  1071→                  <div className="space-y-1.5">
+  1072→  1072→                    <Label htmlFor="basic">Basic Salary</Label>
+  1073→  1073→                    <Input
+  1074→  1074→                      id="basic"
+  1075→  1075→                      type="number"
+  1076→  1076→                      value={form.basic}
+  1077→  1077→                      onChange={(e) => updateField('basic', e.target.value)}
+  1078→  1078→                      placeholder="25000"
+  1079→  1079→                    />
+  1080→  1080→                  </div>
+  1081→  1081→                  <div className="space-y-1.5">
+  1082→  1082→                    <Label htmlFor="da">Dearness Allowance</Label>
+  1083→  1083→                    <Input
+  1084→  1084→                      id="da"
+  1085→  1085→                      type="number"
+  1086→  1086→                      value={form.dearnessAllowance}
+  1087→  1087→                      onChange={(e) => updateField('dearnessAllowance', e.target.value)}
+  1088→  1088→                      placeholder="0"
+  1089→  1089→                    />
+  1090→  1090→                  </div>
+  1091→  1091→                  <div className="space-y-1.5">
+  1092→  1092→                    <Label htmlFor="hra">HRA</Label>
+  1093→  1093→                    <Input
+  1094→  1094→                      id="hra"
+  1095→  1095→                      type="number"
+  1096→  1096→                      value={form.houseRentAllowance}
+  1097→  1097→                      onChange={(e) => updateField('houseRentAllowance', e.target.value)}
+  1098→  1098→                      placeholder="10000"
+  1099→  1099→                    />
+  1100→  1100→                  </div>
+  1101→  1101→                  <div className="space-y-1.5">
+  1102→  1102→                    <Label htmlFor="conveyance">Conveyance Allowance</Label>
+  1103→  1103→                    <Input
+  1104→  1104→                      id="conveyance"
+  1105→  1105→                      type="number"
+  1106→  1106→                      value={form.conveyanceAllowance}
+  1107→  1107→                      onChange={(e) => updateField('conveyanceAllowance', e.target.value)}
+  1108→  1108→                      placeholder="1600"
+  1109→  1109→                    />
+  1110→  1110→                  </div>
+  1111→  1111→                  <div className="space-y-1.5">
+  1112→  1112→                    <Label htmlFor="medical">Medical Allowance</Label>
+  1113→  1113→                    <Input
+  1114→  1114→                      id="medical"
+  1115→  1115→                      type="number"
+  1116→  1116→                      value={form.medicalAllowance}
+  1117→  1117→                      onChange={(e) => updateField('medicalAllowance', e.target.value)}
+  1118→  1118→                      placeholder="1250"
+  1119→  1119→                    />
+  1120→  1120→                  </div>
+  1121→  1121→                  <div className="space-y-1.5">
+  1122→  1122→                    <Label htmlFor="special">Special Allowance</Label>
+  1123→  1123→                    <Input
+  1124→  1124→                      id="special"
+  1125→  1125→                      type="number"
+  1126→  1126→                      value={form.specialAllowance}
+  1127→  1127→                      onChange={(e) => updateField('specialAllowance', e.target.value)}
+  1128→  1128→                      placeholder="5000"
+  1129→  1129→                    />
+  1130→  1130→                  </div>
+  1131→  1131→                </div>
+  1132→  1132→
+  1133→  1133→                {/* Computed values */}
+  1134→  1134→                <div className="mt-4 rounded-lg border bg-muted/50 p-4 space-y-2">
+  1135→  1135→                  <h4 className="text-sm font-semibold text-muted-foreground">Computed Values</h4>
+  1136→  1136→                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  1137→  1137→                    <div className="flex justify-between sm:flex-col sm:gap-0.5">
+  1138→  1138→                      <span className="text-xs text-muted-foreground">Gross Salary</span>
+  1139→  1139→                      <span className="text-sm font-semibold">{fmt(salaryComputed.gross)}</span>
+  1140→  1140→                    </div>
+  1141→  1141→                    <div className="flex justify-between sm:flex-col sm:gap-0.5">
+  1142→  1142→                      <span className="text-xs text-muted-foreground">Employer PF (12% of Basic)</span>
+  1143→  1143→                      <span className="text-sm font-semibold">{fmt(salaryComputed.employerPF)}</span>
+  1144→  1144→                    </div>
+  1145→  1145→                    <div className="flex justify-between sm:flex-col sm:gap-0.5">
+  1146→  1146→                      <span className="text-xs text-muted-foreground">
+  1147→  1147→                        Employer ESI (3.25%{form.esiApplicable && salaryComputed.gross <= 21000 ? '' : ' — N/A'})
+  1148→  1148→                      </span>
+  1149→  1149→                      <span className="text-sm font-semibold">{fmt(salaryComputed.employerESI)}</span>
+  1150→  1150→                    </div>
+  1151→  1151→                  </div>
+  1152→  1152→                  <Separator />
+  1153→  1153→                  <div className="flex justify-between">
+  1154→  1154→                    <span className="text-sm font-semibold">Monthly CTC</span>
+  1155→  1155→                    <span className="text-sm font-bold text-emerald-600">{fmt(salaryComputed.monthlyCTC)}</span>
+  1156→  1156→                  </div>
+  1157→  1157→                </div>
+  1158→  1158→              </CollapsibleContent>
+  1159→  1159→            </Collapsible>
+  1160→  1160→          </div>
+  1161→  1161→
+  1162→  1162→          <DialogFooter>
+  1163→  1163→            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={submitting}>
+  1164→  1164→              Cancel
+  1165→  1165→            </Button>
+  1166→  1166→            <Button
+  1167→  1167→              onClick={handleSubmit}
+  1168→  1168→              disabled={submitting}
+  1169→  1169→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1170→  1170→            >
+  1171→  1171→              {submitting ? 'Saving...' : editingId ? 'Update Employee' : 'Add Employee'}
+  1172→  1172→            </Button>
+  1173→  1173→          </DialogFooter>
+  1174→  1174→        </DialogContent>
+  1175→  1175→      </Dialog>
+  1176→  1176→
+  1177→  1177→      {/* ─── View Employee Dialog ──────────────────────────────────────────── */}
+  1178→  1178→      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+  1179→  1179→        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+  1180→  1180→          {viewEmployee && (
+  1181→  1181→            <>
+  1182→  1182→              <DialogHeader>
+  1183→  1183→                <div className="flex items-center gap-3">
+  1184→  1184→                  <Avatar className="size-10">
+  1185→  1185→                    <AvatarFallback className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-sm font-bold">
+  1186→  1186→                      {getInitials(viewEmployee.firstName, viewEmployee.lastName)}
+  1187→  1187→                    </AvatarFallback>
+  1188→  1188→                  </Avatar>
+  1189→  1189→                  <div>
+  1190→  1190→                    <DialogTitle>{getFullName(viewEmployee)}</DialogTitle>
+  1191→  1191→                    <DialogDescription>{viewEmployee.employeeCode} · {viewEmployee.designation}</DialogDescription>
+  1192→  1192→                  </div>
+  1193→  1193→                </div>
+  1194→  1194→              </DialogHeader>
+  1195→  1195→
+  1196→  1196→              <Tabs defaultValue="personal" className="mt-2">
+  1197→  1197→                <TabsList>
+  1198→  1198→                  <TabsTrigger value="personal">
+  1199→  1199→                    <UserPlus className="size-3.5 mr-1" /> Personal
+  1200→  1200→                  </TabsTrigger>
+  1201→  1201→                  <TabsTrigger value="employment">
+  1202→  1202→                    <Briefcase className="size-3.5 mr-1" /> Employment
+  1203→  1203→                  </TabsTrigger>
+  1204→  1204→                  <TabsTrigger value="salary">
+  1205→  1205→                    <Banknote className="size-3.5 mr-1" /> Salary
+  1206→  1206→                  </TabsTrigger>
+  1207→  1207→                  <TabsTrigger value="bank">
+  1208→  1208→                    <Landmark className="size-3.5 mr-1" /> Bank
+  1209→  1209→                  </TabsTrigger>
+  1210→  1210→                </TabsList>
+  1211→  1211→
+  1212→  1212→                {/* Personal Tab */}
+  1213→  1213→                <TabsContent value="personal" className="mt-4 space-y-4">
+  1214→  1214→                  <div className="grid grid-cols-2 gap-4">
+  1215→  1215→                    <InfoItem icon={<UserPlus className="size-4 text-muted-foreground" />} label="Full Name" value={getFullName(viewEmployee)} />
+  1216→  1216→                    <InfoItem icon={<Mail className="size-4 text-muted-foreground" />} label="Email" value={viewEmployee.email} />
+  1217→  1217→                    <InfoItem icon={<Phone className="size-4 text-muted-foreground" />} label="Phone" value={viewEmployee.phone || '—'} />
+  1218→  1218→                    <InfoItem icon={<UserPlus className="size-4 text-muted-foreground" />} label="Gender" value={viewEmployee.gender} />
+  1219→  1219→                    <InfoItem icon={<CalendarDays className="size-4 text-muted-foreground" />} label="Date of Birth" value={viewEmployee.dateOfBirth ? new Date(viewEmployee.dateOfBirth).toLocaleDateString('en-IN') : '—'} />
+  1220→  1220→                    <InfoItem icon={<Droplets className="size-4 text-muted-foreground" />} label="Blood Group" value={viewEmployee.bloodGroup || '—'} />
+  1221→  1221→                    <InfoItem icon={<Heart className="size-4 text-muted-foreground" />} label="Emergency Contact" value={viewEmployee.emergencyContact || '—'} />
+  1222→  1222→                  </div>
+  1223→  1223→                  <Separator />
+  1224→  1224→                  <div className="space-y-2">
+  1225→  1225→                    <div className="flex items-center gap-2">
+  1226→  1226→                      <MapPin className="size-4 text-muted-foreground" />
+  1227→  1227→                      <span className="text-xs text-muted-foreground font-medium">Current Address</span>
+  1228→  1228→                    </div>
+  1229→  1229→                    <p className="text-sm pl-6">{viewEmployee.currentAddress || '—'}</p>
+  1230→  1230→                  </div>
+  1231→  1231→                  <div className="space-y-2">
+  1232→  1232→                    <div className="flex items-center gap-2">
+  1233→  1233→                      <MapPin className="size-4 text-muted-foreground" />
+  1234→  1234→                      <span className="text-xs text-muted-foreground font-medium">Permanent Address</span>
+  1235→  1235→                    </div>
+  1236→  1236→                    <p className="text-sm pl-6">{viewEmployee.permanentAddress || '—'}</p>
+  1237→  1237→                  </div>
+  1238→  1238→                </TabsContent>
+  1239→  1239→
+  1240→  1240→                {/* Employment Tab */}
+  1241→  1241→                <TabsContent value="employment" className="mt-4 space-y-4">
+  1242→  1242→                  <div className="grid grid-cols-2 gap-4">
+  1243→  1243→                    <InfoItem icon={<FileText className="size-4 text-muted-foreground" />} label="Employee Code" value={viewEmployee.employeeCode} mono />
+  1244→  1244→                    <InfoItem icon={<Briefcase className="size-4 text-muted-foreground" />} label="Designation" value={viewEmployee.designation} />
+  1245→  1245→                    <InfoItem icon={<Building2 className="size-4 text-muted-foreground" />} label="Department" value={viewEmployee.department}>
+  1246→  1246→                      <Badge
+  1247→  1247→                        variant="secondary"
+  1248→  1248→                        className={DEPT_COLORS[viewEmployee.department] || ''}
+  1249→  1249→                      >
+  1250→  1250→                        {viewEmployee.department}
+  1251→  1251→                      </Badge>
+  1252→  1252→                    </InfoItem>
+  1253→  1253→                    <InfoItem icon={<CalendarDays className="size-4 text-muted-foreground" />} label="Date of Joining" value={new Date(viewEmployee.dateOfJoining).toLocaleDateString('en-IN')} />
+  1254→  1254→                    <InfoItem icon={<MapPin className="size-4 text-muted-foreground" />} label="State" value={viewEmployee.state} />
+  1255→  1255→                    <InfoItem icon={<Shield className="size-4 text-muted-foreground" />} label="Tax Regime" value={viewEmployee.taxRegime === 'new' ? 'New' : 'Old'}>
+  1256→  1256→                      <Badge
+  1257→  1257→                        className={
+  1258→  1258→                          viewEmployee.taxRegime === 'new'
+  1259→  1259→                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-transparent'
+  1260→  1260→                            : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-transparent'
+  1261→  1261→                        }
+  1262→  1262→                      >
+  1263→  1263→                        {viewEmployee.taxRegime === 'new' ? 'New' : 'Old'}
+  1264→  1264→                      </Badge>
+  1265→  1265→                    </InfoItem>
+  1266→  1266→                  </div>
+  1267→  1267→                  <Separator />
+  1268→  1268→                  <div>
+  1269→  1269→                    <h4 className="text-xs text-muted-foreground font-medium mb-3">Statutory & Compliances</h4>
+  1270→  1270→                    <div className="grid grid-cols-2 gap-3">
+  1271→  1271→                      <InfoItem icon={<CreditCard className="size-4 text-muted-foreground" />} label="PAN" value={viewEmployee.panNumber || '—'} mono />
+  1272→  1272→                      <InfoItem icon={<CreditCard className="size-4 text-muted-foreground" />} label="Aadhaar" value={viewEmployee.aadhaarNumber || '—'} mono />
+  1273→  1273→                      <InfoItem icon={<Shield className="size-4 text-muted-foreground" />} label="UAN" value={viewEmployee.uanNumber || '—'} mono />
+  1274→  1274→                      <InfoItem icon={<Shield className="size-4 text-muted-foreground" />} label="ESI No." value={viewEmployee.esiNumber || '—'} mono />
+  1275→  1275→                      <ComplianceBadge label="PF" active={viewEmployee.pfApplicable} />
+  1276→  1276→                      <ComplianceBadge label="ESI" active={viewEmployee.esiApplicable} />
+  1277→  1277→                      <ComplianceBadge label="PT" active={viewEmployee.ptApplicable} />
+  1278→  1278→                      <ComplianceBadge label="LWF" active={viewEmployee.lwfApplicable} />
+  1279→  1279→                    </div>
+  1280→  1280→                  </div>
+  1281→  1281→                </TabsContent>
+  1282→  1282→
+  1283→  1283→                {/* Salary Tab */}
+  1284→  1284→                <TabsContent value="salary" className="mt-4 space-y-4">
+  1285→  1285→                  {viewEmployee.salaryStructure ? (
+  1286→  1286→                    <>
+  1287→  1287→                      <div className="grid grid-cols-2 gap-4">
+  1288→  1288→                        <InfoItem icon={null} label="Basic Salary" value={fmt(viewEmployee.salaryStructure.basic)} />
+  1289→  1289→                        <InfoItem icon={null} label="Dearness Allowance" value={fmt(viewEmployee.salaryStructure.dearnessAllowance)} />
+  1290→  1290→                        <InfoItem icon={null} label="HRA" value={fmt(viewEmployee.salaryStructure.houseRentAllowance)} />
+  1291→  1291→                        <InfoItem icon={null} label="Conveyance" value={fmt(viewEmployee.salaryStructure.conveyanceAllowance)} />
+  1292→  1292→                        <InfoItem icon={null} label="Medical" value={fmt(viewEmployee.salaryStructure.medicalAllowance)} />
+  1293→  1293→                        <InfoItem icon={null} label="Special Allowance" value={fmt(viewEmployee.salaryStructure.specialAllowance)} />
+  1294→  1294→                        <InfoItem icon={null} label="Overtime" value={fmt(viewEmployee.salaryStructure.overtimeAllowance)} />
+  1295→  1295→                        <InfoItem icon={null} label="Bonus" value={fmt(viewEmployee.salaryStructure.bonus)} />
+  1296→  1296→                      </div>
+  1297→  1297→                      <Separator />
+  1298→  1298→                      <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
+  1299→  1299→                        <h4 className="text-xs text-muted-foreground font-medium">Summary</h4>
+  1300→  1300→                        <div className="grid grid-cols-2 gap-3">
+  1301→  1301→                          <InfoItem icon={null} label="Employer PF" value={fmt(viewEmployee.salaryStructure.employerPF)} />
+  1302→  1302→                          <InfoItem icon={null} label="Employer ESI" value={fmt(viewEmployee.salaryStructure.employerESI)} />
+  1303→  1303→                          <InfoItem icon={null} label="Gratuity" value={fmt(viewEmployee.salaryStructure.gratuity)} />
+  1304→  1304→                        </div>
+  1305→  1305→                        <Separator />
+  1306→  1306→                        <div className="flex justify-between">
+  1307→  1307→                          <span className="text-sm font-semibold">Monthly CTC</span>
+  1308→  1308→                          {(() => {
+  1309→  1309→                            const gross =
+  1310→  1310→                              viewEmployee.salaryStructure.basic +
+  1311→  1311→                              viewEmployee.salaryStructure.dearnessAllowance +
+  1312→  1312→                              viewEmployee.salaryStructure.houseRentAllowance +
+  1313→  1313→                              viewEmployee.salaryStructure.conveyanceAllowance +
+  1314→  1314→                              viewEmployee.salaryStructure.medicalAllowance +
+  1315→  1315→                              viewEmployee.salaryStructure.specialAllowance +
+  1316→  1316→                              viewEmployee.salaryStructure.overtimeAllowance +
+  1317→  1317→                              viewEmployee.salaryStructure.bonus +
+  1318→  1318→                              viewEmployee.salaryStructure.otherEarnings
+  1319→  1319→                            const ctc = gross + (viewEmployee.salaryStructure.employerPF || 0) + (viewEmployee.salaryStructure.employerESI || 0) + (viewEmployee.salaryStructure.gratuity || 0)
+  1320→  1320→                            return <span className="text-base font-bold text-emerald-600">{fmt(ctc)}</span>
+  1321→  1321→                          })()}
+  1322→  1322→                        </div>
+  1323→  1323→                      </div>
+  1324→  1324→                    </>
+  1325→  1325→                  ) : (
+  1326→  1326→                    <div className="text-center py-8 text-muted-foreground">
+  1327→  1327→                      <Banknote className="size-8 mx-auto mb-2 opacity-40" />
+  1328→  1328→                      <p className="text-sm">No salary structure defined</p>
+  1329→  1329→                    </div>
+  1330→  1330→                  )}
+  1331→  1331→                </TabsContent>
+  1332→  1332→
+  1333→  1333→                {/* Bank Tab */}
+  1334→  1334→                <TabsContent value="bank" className="mt-4 space-y-4">
+  1335→  1335→                  <div className="grid grid-cols-1 gap-4">
+  1336→  1336→                    <InfoItem icon={<Landmark className="size-4 text-muted-foreground" />} label="Bank Name" value={viewEmployee.bankName || '—'} />
+  1337→  1337→                    <InfoItem icon={<CreditCard className="size-4 text-muted-foreground" />} label="Account Number" value={viewEmployee.bankAccountNumber || '—'} mono />
+  1338→  1338→                    <InfoItem icon={<FileText className="size-4 text-muted-foreground" />} label="IFSC Code" value={viewEmployee.bankIfsc || '—'} mono />
+  1339→  1339→                  </div>
+  1340→  1340→                </TabsContent>
+  1341→  1341→              </Tabs>
+  1342→  1342→
+  1343→  1343→              <DialogFooter>
+  1344→  1344→                <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
+  1345→  1345→                <Button
+  1346→  1346→                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1347→  1347→                  onClick={() => {
+  1348→  1348→                    setViewOpen(false)
+  1349→  1349→                    openEditDialog(viewEmployee)
+  1350→  1350→                  }}
+  1351→  1351→                >
+  1352→  1352→                  <Pencil className="size-4" />
+  1353→  1353→                  Edit
+  1354→  1354→                </Button>
+  1355→  1355→              </DialogFooter>
+  1356→  1356→            </>
+  1357→  1357→          )}
+  1358→  1358→        </DialogContent>
+  1359→  1359→      </Dialog>
+  1360→  1360→
+  1361→  1361→      {/* ─── Delete Confirmation ───────────────────────────────────────────── */}
+  1362→  1362→      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+  1363→  1363→        <AlertDialogContent>
+  1364→  1364→          <AlertDialogHeader>
+  1365→  1365→            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+  1366→  1366→            <AlertDialogDescription>
+  1367→  1367→              This will mark the employee as exited. They will no longer appear in the active
+  1368→  1368→              employees list. This action can be reversed by updating their exit date.
+  1369→  1369→            </AlertDialogDescription>
+  1370→  1370→          </AlertDialogHeader>
+  1371→  1371→          <AlertDialogFooter>
+  1372→  1372→            <AlertDialogCancel disabled={false}>Cancel</AlertDialogCancel>
+  1373→  1373→            <AlertDialogAction
+  1374→  1374→              onClick={handleDelete}
+  1375→  1375→              className="bg-red-600 hover:bg-red-700 text-white"
+  1376→  1376→            >
+  1377→  1377→              Delete
+  1378→  1378→            </AlertDialogAction>
+  1379→  1379→          </AlertDialogFooter>
+  1380→  1380→        </AlertDialogContent>
+  1381→  1381→      </AlertDialog>
+  1382→  1382→    </div>
+  1383→  1383→  )
+  1384→  1384→}
+  1385→  1385→
+  1386→  1386→// ─── Sub-Components ────────────────────────────────────────────────────────────
+  1387→  1387→
+  1388→  1388→function InfoItem({
+  1389→  1389→  icon,
+  1390→  1390→  label,
+  1391→  1391→  value,
+  1392→  1392→  mono,
+  1393→  1393→  children,
+  1394→  1394→}: {
+  1395→  1395→  icon?: React.ReactNode
+  1396→  1396→  label: string
+  1397→  1397→  value?: string
+  1398→  1398→  mono?: boolean
+  1399→  1399→  children?: React.ReactNode
+  1400→  1400→}) {
+  1401→  1401→  return (
+  1402→  1402→    <div className="space-y-1">
+  1403→  1403→      <div className="flex items-center gap-1.5">
+  1404→  1404→        {icon}
+  1405→  1405→        <span className="text-xs text-muted-foreground font-medium">{label}</span>
+  1406→  1406→      </div>
+  1407→  1407→      {children || (
+  1408→  1408→        <p className={`text-sm pl-6 ${mono ? 'font-mono' : ''}`}>{value || '—'}</p>
+  1409→  1409→      )}
+  1410→  1410→    </div>
+  1411→  1411→  )
+  1412→  1412→}
+  1413→  1413→
+  1414→  1414→function ComplianceBadge({ label, active }: { label: string; active: boolean }) {
+  1415→  1415→  return (
+  1416→  1416→    <div className="flex items-center gap-2 rounded-lg border p-2">
+  1417→  1417→      {active ? (
+  1418→  1418→        <Check className="size-4 text-emerald-600" />
+  1419→  1419→      ) : (
+  1420→  1420→        <X className="size-4 text-muted-foreground/40" />
+  1421→  1421→      )}
+  1422→  1422→      <span className="text-sm">{label} {active ? 'Applicable' : 'Not Applicable'}</span>
+  1423→  1423→    </div>
+  1424→  1424→  )
+  1425→  1425→}
