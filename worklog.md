@@ -128,3 +128,25 @@ Stage Summary:
 - Database seeded with demo data
 - All 8 views verified working through browser testing
 - Application fully functional: PayrollPro - Indian Payroll Management System
+
+---
+Task ID: 6
+Agent: Main
+Task: Fix deployment error - add standalone output and fix build script
+
+Work Log:
+- Analyzed deployment error screenshot: "Sorry, there was a problem deploying the code"
+- Found build script was failing: `cp: cannot create directory '.next/standalone/.next/': No such file or directory`
+- Root cause: Missing `output: "standalone"` in next.config.ts
+- Added `output: "standalone"` to next.config.ts
+- Updated build script to also copy `db/` folder to standalone output
+- Updated build script to fix DATABASE_URL in standalone .env to use relative path
+- Verified clean production build succeeds (15 routes, 0 errors)
+- Tested production server: HTTP 200, dashboard API returns 6 employees
+- Verified dev server and preview panel working through Caddy proxy
+
+Stage Summary:
+- Deployment fix: Added `output: "standalone"` to next.config.ts
+- Build script updated to bundle database and fix DB path
+- Production server tested and working
+- Dev server verified working through preview panel
