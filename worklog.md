@@ -208,3 +208,24 @@ Stage Summary:
 - Generated ERRORS.md (71 issues cataloged with fix instructions)
 - Production Readiness Score: 37/100 (D+ / Prototype Stage)
 - Key findings: No auth (CRITICAL), 4 TS errors (HIGH), 3 routes missing error handling (HIGH), 0% test coverage
+---
+Task ID: 3
+Agent: Main Agent
+Task: Generate ARCHITECTURE.md with 6 architecture diagram sections
+
+Work Log:
+- Launched Explore sub-agent to thoroughly analyze project structure, schema, API routes, components, dependencies, and payroll engine
+- Sub-agent returned comprehensive architecture data: 8 DB models, 14 API endpoints, 9 view components, 47 shadcn/ui components, full dependency tree
+- Generated ARCHITECTURE.md (1,227 lines) with all 6 requested sections:
+  1. System Architecture Diagram - High-level ASCII + Mermaid diagrams showing Client/Server/Data layers, SPA architecture
+  2. Database ER Diagram - Full Mermaid ER diagram with all 8 models, relationships, cardinality, constraints
+  3. API Flow Diagram - Complete API routing map, endpoint reference table (23 endpoints), payroll processing data flow
+  4. Authentication Flow - Current state (no auth, red), proposed next-auth v4 flow with middleware chain, RBAC matrix
+  5. Module Dependencies - File dependency graph, import heat map, client vs server module split, dependency matrix
+  6. Sequence Diagrams - 7 Mermaid sequence diagrams: Employee Lifecycle, Payroll Processing, Leave Application, Attendance Punch, Salary Slip Generation, Dashboard Aggregation, Seed Data Initialization
+- Copied ARCHITECTURE.md to public/ directory for download
+
+Stage Summary:
+- ARCHITECTURE.md (1,227 lines) generated with 6 comprehensive diagram sections
+- All diagrams use Mermaid syntax for rendering compatibility + ASCII art for immediate readability
+- File available at /public/ARCHITECTURE.md for download
