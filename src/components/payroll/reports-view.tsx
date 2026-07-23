@@ -189,26 +189,106 @@ export default function ReportsView() {
         `/api/reports?month=${month}&year=${year}&type=${reportType}`
       );
       if (!res.ok) throw new Error('Failed to fetch report');
-      const data = await res.json();
+      const json = await res.json();
+      const d = json.data;
 
+      // The API returns a normalized shape (employees[]/totals/states[]) — mapped here into
+      // the view-friendly row shapes the render functions below expect.
       switch (reportType) {
         case 'summary':
-          setSummaryData(data as SummaryData);
+          setSummaryData({
+            totalEmployees: d.totalEmployees,
+            totalEarnings: d.earnings.totalEarnings,
+            totalDeductions: d.deductions.totalDeductions,
+            employerContributions: d.employerContributions.totalEmployerPF + d.employerContributions.totalEmployerESI,
+            netPayroll: d.netPay.totalNetSalary,
+            pfEmployee: d.statutoryTotals.pf.employeeShare,
+            pfEmployer: d.statutoryTotals.pf.employerShare,
+            esiEmployee: d.statutoryTotals.esi.employeeShare,
+            esiEmployer: d.statutoryTotals.esi.employerShare,
+            tds: d.statutoryTotals.tds,
+            pt: d.statutoryTotals.professionalTax,
+            lwf: d.statutoryTotals.lwf,
+          });
           break;
         case 'pf':
-          setPfData(data as PfData);
+          setPfData({
+            rows: d.employees.map((e: Record<string, number | string>) => ({
+              code: e.employeeCode,
+              name: e.employeeName,
+              pfWages: e.pfWages,
+              employeePf: e.employeePF,
+              employerPf: e.employerPF,
+              eps: e.employerEPS,
+              edli: e.employerEDLI,
+              total: e.totalPF,
+            })),
+            totalEmployeePf: d.totals.totalEmployeePF,
+            totalEmployerContribution: d.totals.totalEmployerPF + d.totals.totalEmployerEPS + d.totals.totalEmployerEDLI,
+            challanMonth: `${MONTHS[Number(month) - 1]} ${year}`,
+            dueDate: `15th ${MONTHS[Number(month) % 12]} ${Number(month) === 12 ? Number(year) + 1 : year}`,
+          });
           break;
         case 'esi':
-          setEsiData(data as EsiData);
+          setEsiData({
+            rows: d.employees.map((e: Record<string, number | string>) => ({
+              code: e.employeeCode,
+              name: e.employeeName,
+              grossWages: e.esiWages,
+              employeeEsi: e.employeeESI,
+              employerEsi: e.employerESI,
+              totalEsi: e.totalESI,
+            })),
+            totalEmployeeEsi: d.totals.totalEmployeeESI,
+            totalEmployerEsi: d.totals.totalEmployerESI,
+            dueDate: `15th ${MONTHS[Number(month) % 12]} ${Number(month) === 12 ? Number(year) + 1 : year}`,
+          });
           break;
         case 'tds':
-          setTdsData(data as TdsData);
+          setTdsData({
+            rows: d.employees.map((e: Record<string, number | string>) => ({
+              code: e.employeeCode,
+              name: e.employeeName,
+              pan: e.panNumber || '—',
+              regime: e.taxRegime === 'old' ? 'Old' : 'New',
+              annualGross: Number(e.grossSalary) * 12,
+              standardDeduction: e.taxRegime === 'old' ? 50000 : 75000,
+              taxableIncome: Math.max(0, Number(e.grossSalary) * 12 - (e.taxRegime === 'old' ? 50000 : 75000)),
+              tax: e.tdsAnnual,
+              cess: 0, // Cess/tax split isn't persisted per-run; tdsAnnual is the authoritative total.
+              totalTax: e.tdsAnnual,
+              monthlyTds: e.tdsMonthly,
+            })),
+            totalTds: d.totals.totalTDS,
+            newRegimeCount: d.totals.newRegimeCount,
+            oldRegimeCount: d.totals.oldRegimeCount,
+          });
           break;
         case 'pt':
-          setPtData(data as PtData);
+          setPtData({
+            states: d.states.map((s: { state: string; totalPT: number; employees: { employeeName: string; grossSalary: number; professionalTax: number }[] }) => ({
+              state: s.state,
+              stateTotal: s.totalPT,
+              rows: s.employees.map((e) => ({
+                name: e.employeeName,
+                monthlySalary: e.grossSalary,
+                ptAmount: e.professionalTax,
+              })),
+            })),
+          });
           break;
         case 'lwf':
-          setLwfData(data as LwfData);
+          setLwfData({
+            states: d.states.map((s: { state: string; totalLWF: number; employeeCount: number }) => ({
+              state: s.state,
+              employeeContribution: s.totalLWF,
+              employerContribution: 0,
+              totalContribution: s.totalLWF,
+              dueDate: 'Per state LWF schedule',
+              frequency: 'As applicable',
+              employeeCount: s.employeeCount,
+            })),
+          });
           break;
       }
 
@@ -219,6 +299,25 @@ export default function ReportsView() {
       setLoading(false);
     }
   }, [month, year, reportType]);
+
+  const handleExport = useCallback(async (type: ReportType) => {
+    try {
+      const res = await fetch(`/api/reports?month=${month}&year=${year}&type=${type}&format=csv`);
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${type}-report-${month}-${year}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Export downloaded');
+    } catch {
+      toast.error('Failed to export report');
+    }
+  }, [month, year]);
 
   useEffect(() => {
     if (generated) fetchReport();
@@ -261,9 +360,19 @@ export default function ReportsView() {
 
     return (
       <div className="space-y-6">
-        <h3 className="text-lg font-semibold text-foreground">
-          Payroll Summary — {MONTHS[Number(month) - 1]} {year}
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">
+            Payroll Summary — {MONTHS[Number(month) - 1]} {year}
+          </h3>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => handleExport('summary')}
+          >
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+        </div>
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -322,6 +431,7 @@ export default function ReportsView() {
             variant="outline"
             size="sm"
             className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => handleExport('pf')}
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
@@ -411,6 +521,7 @@ export default function ReportsView() {
             variant="outline"
             size="sm"
             className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => handleExport('esi')}
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
@@ -495,6 +606,7 @@ export default function ReportsView() {
             variant="outline"
             size="sm"
             className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => handleExport('tds')}
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>

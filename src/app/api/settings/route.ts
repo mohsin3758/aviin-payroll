@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { updateSettingsSchema } from "@/lib/validations/settings";
+import { handleApiError } from "@/lib/api-utils";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 
 const DEFAULT_COMPANY = {
   name: "My Company",
@@ -13,31 +17,41 @@ const DEFAULT_COMPANY = {
   financialYearStart: "2025-04-01",
   payrollMonth: 4,
   payrollYear: 2025,
+  weeklyOffDays: [0],
 };
 
+function parseWeeklyOffDays(value: string): number[] {
+  return value
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n) && n >= 0 && n <= 6);
+}
+
 // GET /api/settings — return company settings (first record) or defaults
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    await requireAuth(request);
     const company = await db.company.findFirst();
 
     if (!company) {
       return NextResponse.json({ data: DEFAULT_COMPANY });
     }
 
-    return NextResponse.json({ data: company });
+    return NextResponse.json({
+      data: { ...company, weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays) },
+    });
   } catch (error) {
-    console.error("[SETTINGS_GET]", error);
-    return NextResponse.json(
-      { error: "Failed to fetch company settings" },
-      { status: 500 }
-    );
+    return handleApiError(error, "fetch company settings");
   }
 }
 
 // PUT /api/settings — update (or create) company settings
 export async function PUT(request: NextRequest) {
   try {
-    const body = await request.json();
+    const session = await requireRole(request, ["admin"]);
+    const raw = await request.json();
+    const body = updateSettingsSchema.parse(raw);
+    const weeklyOffDaysStr = body.weeklyOffDays ? [...new Set(body.weeklyOffDays)].sort().join(",") : undefined;
 
     const existing = await db.company.findFirst();
 
@@ -60,6 +74,7 @@ export async function PUT(request: NextRequest) {
           }),
           ...(body.payrollMonth !== undefined && { payrollMonth: body.payrollMonth }),
           ...(body.payrollYear !== undefined && { payrollYear: body.payrollYear }),
+          ...(weeklyOffDaysStr !== undefined && { weeklyOffDays: weeklyOffDaysStr }),
         },
       });
     } else {
@@ -77,16 +92,17 @@ export async function PUT(request: NextRequest) {
             body.financialYearStart ?? DEFAULT_COMPANY.financialYearStart,
           payrollMonth: body.payrollMonth ?? DEFAULT_COMPANY.payrollMonth,
           payrollYear: body.payrollYear ?? DEFAULT_COMPANY.payrollYear,
+          weeklyOffDays: weeklyOffDaysStr ?? DEFAULT_COMPANY.weeklyOffDays.join(","),
         },
       });
     }
 
-    return NextResponse.json({ data: company });
+    await logAudit({ session, action: "update", entity: "Company", entityId: company.id });
+
+    return NextResponse.json({
+      data: { ...company, weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays) },
+    });
   } catch (error) {
-    console.error("[SETTINGS_PUT]", error);
-    return NextResponse.json(
-      { error: "Failed to update company settings" },
-      { status: 500 }
-    );
+    return handleApiError(error, "update company settings");
   }
 }

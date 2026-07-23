@@ -25,6 +25,7 @@ import {
   TrendingUp,
   Building2,
   DollarSign,
+  CalendarDays,
 } from 'lucide-react';
 import {
   PieChart,
@@ -136,6 +137,34 @@ export default function DashboardView() {
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  const [upcomingHolidays, setUpcomingHolidays] = useState<{ id: string; name: string; date: string }[]>([]);
+  const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const [weeklyOffLabel, setWeeklyOffLabel] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [holidaysRes, settingsRes] = await Promise.all([
+          fetch(`/api/holidays?year=${new Date().getFullYear()}`),
+          fetch('/api/settings'),
+        ]);
+        const holidaysJson = await holidaysRes.json();
+        const today = new Date();
+        const upcoming = (holidaysJson.data ?? [])
+          .filter((h: { date: string }) => new Date(h.date) >= new Date(today.toDateString()))
+          .slice(0, 5);
+        setUpcomingHolidays(upcoming);
+
+        const settingsJson = await settingsRes.json();
+        const days: number[] = settingsJson.data?.weeklyOffDays ?? [];
+        setWeeklyOffLabel(days.map((d) => WEEKDAY_NAMES[d]).join(', '));
+      } catch {
+        /* non-critical widget, fail silently */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ---- Derived ---- */
@@ -293,6 +322,39 @@ export default function DashboardView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ============================================================ */}
+      {/*  1b. Company Calendar — visible to every role                */}
+      {/* ============================================================ */}
+      {(upcomingHolidays.length > 0 || weeklyOffLabel) && (
+        <Card className="bg-white rounded-xl border shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="size-4 text-emerald-600" />
+              Company Calendar
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-6">
+            {weeklyOffLabel && (
+              <p className="mb-3 text-sm text-muted-foreground">
+                Weekly off: <span className="font-medium text-foreground">{weeklyOffLabel}</span>
+              </p>
+            )}
+            {upcomingHolidays.length > 0 && (
+              <div className="flex flex-wrap gap-3">
+                {upcomingHolidays.map((h) => (
+                  <div key={h.id} className="rounded-lg border bg-emerald-50/50 px-3 py-2 text-sm">
+                    <span className="font-medium">{h.name}</span>{' '}
+                    <span className="text-muted-foreground">
+                      — {new Date(h.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ============================================================ */}
       {/*  2. Charts Row                                               */}

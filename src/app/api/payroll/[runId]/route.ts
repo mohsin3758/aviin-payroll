@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { apiError, handleApiError } from "@/lib/api-utils";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 
 type Params = {
   params: Promise<{ runId: string }>;
@@ -12,8 +15,9 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 // GET /api/payroll/[runId] - Get a payroll run with all details
-export async function GET(_request: NextRequest, { params }: Params) {
+export async function GET(request: NextRequest, { params }: Params) {
   try {
+    await requireAuth(request);
     const { runId } = await params;
 
     const payrollRun = await db.payrollRun.findUnique({
@@ -33,34 +37,25 @@ export async function GET(_request: NextRequest, { params }: Params) {
     });
 
     if (!payrollRun) {
-      return NextResponse.json(
-        { error: "Payroll run not found" },
-        { status: 404 }
-      );
+      return apiError("Payroll run not found", 404);
     }
 
     return NextResponse.json(payrollRun);
   } catch (error) {
-    console.error("Error fetching payroll run:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch payroll run" },
-      { status: 500 }
-    );
+    return handleApiError(error, "fetch payroll run");
   }
 }
 
 // PUT /api/payroll/[runId] - Update payroll run status
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
+    const session = await requireRole(request, ["admin", "hr"]);
     const { runId } = await params;
     const body = await request.json();
     const { status } = body;
 
     if (!status || !["draft", "processed", "paid"].includes(status)) {
-      return NextResponse.json(
-        { error: "Invalid status. Must be one of: draft, processed, paid" },
-        { status: 400 }
-      );
+      return apiError("Invalid status. Must be one of: draft, processed, paid", 400);
     }
 
     const existing = await db.payrollRun.findUnique({
@@ -68,20 +63,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     });
 
     if (!existing) {
-      return NextResponse.json(
-        { error: "Payroll run not found" },
-        { status: 404 }
-      );
+      return apiError("Payroll run not found", 404);
     }
 
     // Validate status transition
     const allowedTransitions = VALID_TRANSITIONS[existing.status] || [];
     if (!allowedTransitions.includes(status)) {
-      return NextResponse.json(
-        {
-          error: `Cannot transition from "${existing.status}" to "${status}". Allowed: ${allowedTransitions.join(", ") || "none"}`,
-        },
-        { status: 400 }
+      return apiError(
+        `Cannot transition from "${existing.status}" to "${status}". Allowed: ${allowedTransitions.join(", ") || "none"}`,
+        400
       );
     }
 
@@ -97,12 +87,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
       },
     });
 
+    await logAudit({
+      session,
+      action: "update",
+      entity: "PayrollRun",
+      entityId: runId,
+      details: { fromStatus: existing.status, toStatus: status },
+    });
+
     return NextResponse.json(updated);
   } catch (error) {
-    console.error("Error updating payroll run:", error);
-    return NextResponse.json(
-      { error: "Failed to update payroll run" },
-      { status: 500 }
-    );
+    return handleApiError(error, "update payroll run");
   }
 }

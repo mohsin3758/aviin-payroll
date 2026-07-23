@@ -269,6 +269,10 @@ export default function EmployeesView() {
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('all')
   const [stateFilter, setStateFilter] = useState('all')
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const pageSize = 20
 
   // Dialogs
   const [formOpen, setFormOpen] = useState(false)
@@ -284,6 +288,53 @@ export default function EmployeesView() {
   // View
   const [viewEmployee, setViewEmployee] = useState<Employee | null>(null)
 
+  // Tax declaration (80C/80D) — only meaningful for old-regime employees
+  const currentFinancialYear = new Date().getFullYear()
+  const [declaration80C, setDeclaration80C] = useState('')
+  const [declaration80D, setDeclaration80D] = useState('')
+  const [declarationLoading, setDeclarationLoading] = useState(false)
+  const [declarationSaving, setDeclarationSaving] = useState(false)
+
+  const fetchDeclaration = useCallback(async (employeeId: string) => {
+    setDeclarationLoading(true)
+    try {
+      const res = await fetch(`/api/investment-declarations?employeeId=${employeeId}&year=${currentFinancialYear}`)
+      if (!res.ok) throw new Error('Failed to load declaration')
+      const json = await res.json()
+      const existing = json.data?.[0]
+      setDeclaration80C(existing ? String(existing.section80C) : '')
+      setDeclaration80D(existing ? String(existing.section80D) : '')
+    } catch {
+      toast.error('Failed to load investment declaration')
+    } finally {
+      setDeclarationLoading(false)
+    }
+  }, [currentFinancialYear])
+
+  const handleSaveDeclaration = async () => {
+    if (!viewEmployee) return
+    setDeclarationSaving(true)
+    try {
+      const res = await fetch('/api/investment-declarations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: viewEmployee.id,
+          year: currentFinancialYear,
+          section80C: parseFloat(declaration80C) || 0,
+          section80D: parseFloat(declaration80D) || 0,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to save declaration')
+      toast.success('Investment declaration saved — will apply from the next payroll run.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save declaration')
+    } finally {
+      setDeclarationSaving(false)
+    }
+  }
+
   // Delete
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -296,16 +347,24 @@ export default function EmployeesView() {
       if (search) params.set('search', search)
       if (deptFilter && deptFilter !== 'all') params.set('department', deptFilter)
       if (stateFilter && stateFilter !== 'all') params.set('state', stateFilter)
+      params.set('page', String(page))
+      params.set('limit', String(pageSize))
 
       const res = await fetch(`/api/employees?${params.toString()}`)
       if (!res.ok) throw new Error('Failed to fetch employees')
-      const data = await res.json()
-      setEmployees(data)
+      const json = await res.json()
+      setEmployees(json.data ?? [])
+      setTotal(json.total ?? 0)
+      setTotalPages(json.totalPages ?? 1)
     } catch {
       toast.error('Failed to load employees')
     } finally {
       setLoading(false)
     }
+  }, [search, deptFilter, stateFilter, page])
+
+  useEffect(() => {
+    setPage(1)
   }, [search, deptFilter, stateFilter])
 
   useEffect(() => {
@@ -369,6 +428,9 @@ export default function EmployeesView() {
   const openViewDialog = (emp: Employee) => {
     setViewEmployee(emp)
     setViewOpen(true)
+    if (emp.taxRegime === 'old') {
+      fetchDeclaration(emp.id)
+    }
   }
 
   const openDeleteDialog = (id: string) => {
@@ -581,8 +643,8 @@ export default function EmployeesView() {
         </Select>
       </div>
 
-      {/* Table */}
-      <Card>
+      {/* Table (desktop) */}
+      <Card className="hidden md:block">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -699,6 +761,86 @@ export default function EmployeesView() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Card list (mobile) */}
+      <div className="space-y-3 md:hidden">
+        {employees.length === 0 ? (
+          <Card>
+            <CardContent className="py-10 text-center text-muted-foreground">No employees found</CardContent>
+          </Card>
+        ) : (
+          employees.map((emp) => (
+            <Card key={emp.id}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Avatar className="size-9 shrink-0">
+                      <AvatarFallback className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-xs font-semibold">
+                        {getInitials(emp.firstName, emp.lastName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{getFullName(emp)}</div>
+                      <div className="text-muted-foreground text-xs truncate">{emp.employeeCode} · {emp.designation}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <Button variant="ghost" size="icon" className="size-8" onClick={() => openViewDialog(emp)} title="View">
+                      <Eye className="size-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-8" onClick={() => openEditDialog(emp)} title="Edit">
+                      <Pencil className="size-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      onClick={() => openDeleteDialog(emp.id)}
+                      title="Delete"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="secondary" className={DEPT_COLORS[emp.department] || ''}>
+                    {emp.department}
+                  </Badge>
+                  <Badge variant="outline" className="text-xs">{emp.state}</Badge>
+                  <Badge
+                    className={
+                      emp.taxRegime === 'new'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-transparent'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-transparent'
+                    }
+                  >
+                    {emp.taxRegime === 'new' ? 'New Regime' : 'Old Regime'}
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Pagination (shared) */}
+      {total > 0 && (
+        <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+          <span className="hidden sm:inline">
+            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} employees
+          </span>
+          <span className="sm:hidden">{total} employees</span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <span className="text-xs">Page {page} of {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* ─── Add / Edit Dialog ─────────────────────────────────────────────── */}
       <Dialog open={formOpen} onOpenChange={(open) => { if (!open && !submitting) setFormOpen(false) }}>
@@ -1207,6 +1349,11 @@ export default function EmployeesView() {
                   <TabsTrigger value="bank">
                     <Landmark className="size-3.5 mr-1" /> Bank
                   </TabsTrigger>
+                  {viewEmployee.taxRegime === 'old' && (
+                    <TabsTrigger value="tax">
+                      <Shield className="size-3.5 mr-1" /> Tax Declaration
+                    </TabsTrigger>
+                  )}
                 </TabsList>
 
                 {/* Personal Tab */}
@@ -1338,6 +1485,55 @@ export default function EmployeesView() {
                     <InfoItem icon={<FileText className="size-4 text-muted-foreground" />} label="IFSC Code" value={viewEmployee.bankIfsc || '—'} mono />
                   </div>
                 </TabsContent>
+
+                {/* Tax Declaration Tab (old regime only) */}
+                {viewEmployee.taxRegime === 'old' && (
+                  <TabsContent value="tax" className="mt-4 space-y-4">
+                    <p className="text-xs text-muted-foreground">
+                      Financial year {currentFinancialYear} — combined with PF+ESI, 80C is capped at ₹1,50,000 and 80D at ₹25,000.
+                      Changes apply starting with the next payroll run processed for this year.
+                    </p>
+                    {declarationLoading ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="decl-80c" className="text-xs font-medium">Section 80C (LIC, PPF, ELSS, etc.)</Label>
+                          <Input
+                            id="decl-80c"
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={declaration80C}
+                            onChange={(e) => setDeclaration80C(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="decl-80d" className="text-xs font-medium">Section 80D (Health Insurance)</Label>
+                          <Input
+                            id="decl-80d"
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={declaration80D}
+                            onChange={(e) => setDeclaration80D(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <Button
+                      size="sm"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      disabled={declarationSaving || declarationLoading}
+                      onClick={handleSaveDeclaration}
+                    >
+                      {declarationSaving ? 'Saving...' : 'Save Declaration'}
+                    </Button>
+                  </TabsContent>
+                )}
               </Tabs>
 
               <DialogFooter>

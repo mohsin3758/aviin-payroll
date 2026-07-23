@@ -1,6 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
+import { getSession, hashPassword, AuthError } from "@/lib/auth";
+import { apiError, handleApiError } from "@/lib/api-utils";
+import { logAudit } from "@/lib/audit";
+
+const DEFAULT_USERS = [
+  { email: "admin@payrollpro.local", password: "Admin@12345", name: "System Admin", role: "admin" as const },
+  { email: "hr@payrollpro.local", password: "HrManager@12345", name: "HR Manager", role: "hr" as const },
+  { email: "manager@payrollpro.local", password: "Manager@12345", name: "Dept Manager", role: "manager" as const },
+];
 
 // ---------- helper: build SalaryStructure from gross ----------
 function buildSalary(gross: number, pfApplicable: boolean, esiApplicable: boolean) {
@@ -264,13 +273,35 @@ const leaveTypes: Prisma.LeaveTypeCreateManyInput[] = [
 ];
 
 // ---------- current financial year ----------
-const FINANCIAL_YEAR = 2025;
+const FINANCIAL_YEAR = new Date().getFullYear();
 
 // ---------- POST handler ----------
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
+    // Destructive endpoint: requires an explicit confirmation token, and either
+    // an admin session, or (first-run bootstrap only) no users existing yet.
+    const body = await request.json().catch(() => ({}));
+    if (body?.confirm !== "RESET_DEMO_DATA") {
+      return apiError(
+        'Confirmation required: send { "confirm": "RESET_DEMO_DATA" } in the request body.',
+        400
+      );
+    }
+
+    const session = await getSession(request);
+    const userCount = await db.user.count();
+    if (userCount > 0) {
+      if (!session || session.role !== "admin") {
+        throw new AuthError("Forbidden — only an admin may reset demo data once users exist.", 403);
+      }
+    }
+
     // --- Idempotent: wipe existing data in correct FK order ---
     await db.$transaction([
+      db.loanPayment.deleteMany(),
+      db.employeeLoan.deleteMany(),
+      db.salaryArrear.deleteMany(),
+      db.investmentDeclaration.deleteMany(),
       db.payrollDetail.deleteMany(),
       db.payrollRun.deleteMany(),
       db.leaveApplication.deleteMany(),
@@ -279,6 +310,7 @@ export async function POST() {
       db.salaryStructure.deleteMany(),
       db.employee.deleteMany(),
       db.leaveType.deleteMany(),
+      db.holiday.deleteMany(),
       db.company.deleteMany(),
     ]);
 
@@ -378,7 +410,24 @@ export async function POST() {
       );
     }
 
-    // --- 4. Return summary ---
+    // --- 4. Create default users (idempotent — upsert, never wiped by re-seed) ---
+    for (const u of DEFAULT_USERS) {
+      const passwordHash = await hashPassword(u.password);
+      await db.user.upsert({
+        where: { email: u.email },
+        update: {},
+        create: { email: u.email, passwordHash, name: u.name, role: u.role },
+      });
+    }
+
+    await logAudit({
+      session,
+      action: "process",
+      entity: "Database",
+      details: { message: "Demo data reset/seeded" },
+    });
+
+    // --- 5. Return summary ---
     return NextResponse.json({
       success: true,
       message: "Database seeded successfully",
@@ -388,15 +437,13 @@ export async function POST() {
         employees: createdEmployees.length,
         salaryStructures: createdEmployees.length,
         leaveBalances: createdEmployees.length * createdLeaveTypes.length,
+        defaultLoginNote:
+          userCount === 0
+            ? "Default accounts created: admin@payrollpro.local / Admin@12345 (admin), hr@payrollpro.local / HrManager@12345 (hr), manager@payrollpro.local / Manager@12345 (manager). Change these immediately in a real deployment."
+            : undefined,
       },
     });
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Unknown error occurred";
-    console.error("Seed error:", error);
-    return NextResponse.json(
-      { success: false, message: "Seed failed", error: message },
-      { status: 500 }
-    );
+  } catch (error) {
+    return handleApiError(error, "seed database");
   }
 }

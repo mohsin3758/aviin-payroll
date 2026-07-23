@@ -3,6 +3,9 @@
 import { PayrollLayout } from '@/components/payroll/layout';
 import { TopBar } from '@/components/payroll/top-bar';
 import { usePayrollStore } from '@/store/payroll-store';
+import { useSession } from '@/hooks/use-session';
+import { SessionProvider } from '@/hooks/session-context';
+import LoginView from '@/components/payroll/login-view';
 import { lazy, Suspense } from 'react';
 
 const DashboardView = lazy(() => import('@/components/payroll/dashboard-view'));
@@ -45,13 +48,33 @@ function ViewRenderer() {
   );
 }
 
-export default function Home() {
+function LoadingScreen() {
   return (
-    <PayrollLayout>
-      <TopBar />
-      <main className="flex-1 overflow-y-auto p-4 md:p-6">
-        <ViewRenderer />
-      </main>
-    </PayrollLayout>
+    <div className="flex h-screen items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-200 border-t-emerald-600" />
+    </div>
+  );
+}
+
+export default function Home() {
+  const { user, loading, refresh, logout } = useSession();
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (!user) {
+    return <LoginView onLoggedIn={refresh} />;
+  }
+
+  return (
+    <SessionProvider value={{ user, logout }}>
+      <PayrollLayout>
+        <TopBar />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          <ViewRenderer />
+        </main>
+      </PayrollLayout>
+    </SessionProvider>
   );
 }

@@ -22,6 +22,8 @@ export const ESI_WAGE_CEILING = 21000;
 
 export const STANDARD_DEDUCTION_NEW = 75000;
 export const STANDARD_DEDUCTION_OLD = 50000;
+export const SECTION_80C_CAP = 150000;
+export const SECTION_80D_CAP = 25000;
 export const REBATE_87A_NEW = 60000;
 export const REBATE_87A_OLD = 12500;
 export const REBATE_INCOME_LIMIT_NEW = 1200000;
@@ -299,6 +301,7 @@ export interface PayrollResult {
 
   // Totals
   totalDeductions: number;
+  deductionsCapped: boolean;
   netSalary: number;
   grossSalary: number;
   ctc: number;
@@ -431,12 +434,37 @@ export function calculateIncomeTax(annualTaxableIncome: number, regime: "new" | 
   return { tax, cess, total: tax + cess, rebate };
 }
 
+export const OVERTIME_MULTIPLIER = 1.5;
+export const STANDARD_HOURS_PER_DAY = 8;
+
+/**
+ * Overtime pay for hours actually worked beyond the standard 8/day, computed on the
+ * employee's standing (non-prorated) Basic+DA — this is additive to any manually-set
+ * overtimeAllowance on the salary structure, not a replacement for it.
+ */
+export function calculateOvertimePay(
+  standingBasicDA: number,
+  overtimeHours: number,
+  daysInMonth: number
+): number {
+  if (overtimeHours <= 0 || daysInMonth <= 0) return 0;
+  const hourlyRate = standingBasicDA / (daysInMonth * STANDARD_HOURS_PER_DAY);
+  return Math.round(hourlyRate * overtimeHours * OVERTIME_MULTIPLIER);
+}
+
+export interface InvestmentDeclarationInput {
+  section80C: number;
+  section80D: number;
+}
+
 export function processEmployeePayroll(
   emp: EmployeePayrollInput,
   month: number,
   year: number,
   presentDays: number,
-  daysInMonth: number
+  daysInMonth: number,
+  overtimeHours: number = 0,
+  investmentDeclaration: InvestmentDeclarationInput = { section80C: 0, section80D: 0 }
 ): PayrollResult {
   const ss = emp.salaryStructure;
   const paidDays = Math.min(presentDays, daysInMonth);
@@ -449,7 +477,8 @@ export function processEmployeePayroll(
   const conveyance = Math.round(ss.conveyanceAllowance * prorationFactor);
   const medical = Math.round(ss.medicalAllowance * prorationFactor);
   const special = Math.round(ss.specialAllowance * prorationFactor);
-  const overtime = Math.round(ss.overtimeAllowance * prorationFactor);
+  const computedOvertimePay = calculateOvertimePay(ss.basic + ss.dearnessAllowance, overtimeHours, daysInMonth);
+  const overtime = Math.round(ss.overtimeAllowance * prorationFactor) + computedOvertimePay;
   const bonus = Math.round(ss.bonus * prorationFactor);
   const other = Math.round(ss.otherEarnings * prorationFactor);
 
@@ -485,8 +514,14 @@ export function processEmployeePayroll(
     return monthlyPT * 12;
   })();
 
-  let taxableIncome = grossAnnual - stdDeduction - annualPF - annualESI - annualPT;
-  // Standard deduction and 80C (PF + ESI) only available in old regime
+  // Section 80C combines PF + ESI + any declared investments (LIC, PPF, ELSS, etc.), capped at
+  // ₹1.5L total — not each counted separately without limit. 80D (health insurance) is a
+  // separate cap. Both only apply under the old regime; the new regime only gets the standard
+  // deduction.
+  const section80C = Math.min(SECTION_80C_CAP, annualPF + annualESI + investmentDeclaration.section80C);
+  const section80D = Math.min(SECTION_80D_CAP, investmentDeclaration.section80D);
+
+  let taxableIncome = grossAnnual - stdDeduction - section80C - section80D - annualPT;
   if (emp.taxRegime === "new") {
     taxableIncome = grossAnnual - stdDeduction; // Only standard deduction in new regime
   }
@@ -496,7 +531,13 @@ export function processEmployeePayroll(
   const tdsMonthly = Math.round(taxResult.total / 12);
 
   // Total deductions
-  const totalDeductions = pfResult.employeePF + esiResult.employeeESI + tdsMonthly + ptAmount + lwfResult.employee;
+  // TDS/PT/ESI are computed from the employee's standing (full-month) salary structure — a
+  // reasonable approximation in a normal month, but if attendance-based proration has already
+  // reduced totalEarnings to less than the standing deductions (e.g. presentDays=0, unpaid leave,
+  // new joiner mid-month), deductions must never exceed what was actually earned that month.
+  const rawTotalDeductions = pfResult.employeePF + esiResult.employeeESI + tdsMonthly + ptAmount + lwfResult.employee;
+  const totalDeductions = Math.min(rawTotalDeductions, totalEarnings);
+  const deductionsCapped = rawTotalDeductions > totalEarnings;
 
   // Net salary
   const netSalary = totalEarnings - totalDeductions;
@@ -551,6 +592,7 @@ export function processEmployeePayroll(
     standardDeduction: stdDeduction,
     rebate87A: taxResult.rebate,
     totalDeductions,
+    deductionsCapped,
     netSalary,
     grossSalary: totalEarnings,
     ctc: ctcMonthly,

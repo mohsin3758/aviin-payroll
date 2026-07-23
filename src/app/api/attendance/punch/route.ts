@@ -1,18 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireAuth } from "@/lib/auth";
+import { apiError, handleApiError } from "@/lib/api-utils";
+import { logAudit } from "@/lib/audit";
 
 // POST /api/attendance/punch
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireAuth(request);
     const body = await request.json();
     const { employeeId, action, method, faceData, ipAddress, deviceInfo } = body;
 
     // Validate required fields
     if (!employeeId) {
-      return NextResponse.json(
-        { error: "employeeId is required." },
-        { status: 400 }
-      );
+      return apiError("employeeId is required.", 400);
+    }
+
+    const employee = await db.employee.findUnique({ where: { id: employeeId } });
+    if (!employee) {
+      return apiError("Employee not found.", 404);
+    }
+    if (employee.dateOfExit) {
+      return apiError("Cannot record attendance for an exited employee.", 400);
     }
 
     if (!action || !["in", "out"].includes(action)) {
@@ -104,6 +113,8 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await logAudit({ session, action: "create", entity: "Attendance", entityId: record.id, details: { employeeId, punchIn: true } });
+
       return NextResponse.json({ data: record }, { status: 201 });
     }
 
@@ -164,12 +175,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await logAudit({ session, action: "update", entity: "Attendance", entityId: updated.id, details: { employeeId, punchOut: true } });
+
     return NextResponse.json({ data: updated }, { status: 200 });
   } catch (error) {
-    console.error("POST /api/attendance/punch error:", error);
-    return NextResponse.json(
-      { error: "Failed to process punch." },
-      { status: 500 }
-    );
+    return handleApiError(error, "process punch");
   }
 }

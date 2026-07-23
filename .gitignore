@@ -33,6 +33,14 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# local SQLite database (dev data, never ship the file itself)
+db/*.db
+db/*.db-journal
+prisma/db/
+
+# local test artifacts
+cookies*.txt
+
 # vercel
 .vercel
 

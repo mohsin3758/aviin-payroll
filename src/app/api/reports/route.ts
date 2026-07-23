@@ -1,17 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getMonthName } from "@/lib/payroll/engine";
+import Papa from "papaparse";
+import { requireAuth } from "@/lib/auth";
+import { handleApiError } from "@/lib/api-utils";
 
 const VALID_TYPES = ["pf", "esi", "tds", "pt", "lwf", "summary"] as const;
 type ReportType = (typeof VALID_TYPES)[number];
 
-// GET /api/reports?month=1&year=2025&type=pf
+/** Flattens a report's per-employee rows (or per-state employee rows for pt/lwf) into CSV. */
+function toCsv(type: ReportType, data: Record<string, unknown>): string {
+  if (type === "pt" || type === "lwf") {
+    const states = data.states as Array<{ state: string; employees: Record<string, unknown>[] }>;
+    const rows = states.flatMap((s) => s.employees.map((e) => ({ state: s.state, ...e })));
+    return Papa.unparse(rows);
+  }
+  const employees = (data.employees as Record<string, unknown>[]) ?? [];
+  return Papa.unparse(employees);
+}
+
+// GET /api/reports?month=1&year=2025&type=pf&format=csv
 export async function GET(request: NextRequest) {
   try {
+    await requireAuth(request);
     const { searchParams } = new URL(request.url);
     const monthParam = searchParams.get("month");
     const yearParam = searchParams.get("year");
     const type = searchParams.get("type") ?? "summary";
+    const format = searchParams.get("format") ?? "json";
 
     if (!monthParam || !yearParam) {
       return NextResponse.json(
@@ -85,11 +101,11 @@ export async function GET(request: NextRequest) {
     }
 
     const details = payrollRun.details;
+    let reportData: Record<string, unknown>;
 
     switch (type as ReportType) {
       case "pf":
-        return NextResponse.json({
-          data: {
+        reportData = {
             month,
             year,
             monthName: getMonthName(month),
@@ -141,15 +157,14 @@ export async function GET(request: NextRequest) {
                   return s + Math.round(Math.min(basicDA, 15000) * 0.005);
                 }, 0),
             },
-          },
-        });
+          };
+        break;
 
       case "esi": {
         const esiEmployees = details.filter(
           (d) => d.employee.esiApplicable
         );
-        return NextResponse.json({
-          data: {
+        reportData = {
             month,
             year,
             monthName: getMonthName(month),
@@ -176,13 +191,12 @@ export async function GET(request: NextRequest) {
                 0
               ),
             },
-          },
-        });
+          };
+        break;
       }
 
       case "tds":
-        return NextResponse.json({
-          data: {
+        reportData = {
             month,
             year,
             monthName: getMonthName(month),
@@ -213,8 +227,8 @@ export async function GET(request: NextRequest) {
                 (d) => d.employee.taxRegime === "old"
               ).length,
             },
-          },
-        });
+          };
+        break;
 
       case "pt": {
         // Group by state
@@ -225,6 +239,7 @@ export async function GET(request: NextRequest) {
             employeeName: string;
             employeeCode: string;
             department: string;
+            grossSalary: number;
             professionalTax: number;
           }[]
         > = {};
@@ -237,6 +252,7 @@ export async function GET(request: NextRequest) {
             employeeName: `${d.employee.firstName} ${d.employee.lastName ?? ""}`.trim(),
             employeeCode: d.employee.employeeCode,
             department: d.employee.department,
+            grossSalary: d.grossSalary,
             professionalTax: d.professionalTax,
           });
         }
@@ -250,16 +266,15 @@ export async function GET(request: NextRequest) {
           })
         );
 
-        return NextResponse.json({
-          data: {
+        reportData = {
             month,
             year,
             monthName: getMonthName(month),
             company: payrollRun.company,
             totalPT: details.reduce((s, d) => s + d.professionalTax, 0),
             states: stateSummary,
-          },
-        });
+          };
+        break;
       }
 
       case "lwf": {
@@ -296,16 +311,15 @@ export async function GET(request: NextRequest) {
           })
         );
 
-        return NextResponse.json({
-          data: {
+        reportData = {
             month,
             year,
             monthName: getMonthName(month),
             company: payrollRun.company,
             totalLWF: details.reduce((s, d) => s + d.lwf, 0),
             states: stateSummary,
-          },
-        });
+          };
+        break;
       }
 
       case "summary":
@@ -345,8 +359,7 @@ export async function GET(request: NextRequest) {
         );
         const totalLWF = details.reduce((s, d) => s + d.lwf, 0);
 
-        return NextResponse.json({
-          data: {
+        reportData = {
             month,
             year,
             monthName: getMonthName(month),
@@ -390,15 +403,28 @@ export async function GET(request: NextRequest) {
               professionalTax: totalPT,
               lwf: totalLWF,
             },
-          },
-        });
+          };
       }
     }
+
+    if (format === "csv") {
+      const csv =
+        type === "summary"
+          ? Papa.unparse(
+              Object.entries(reportData).filter(([, v]) => typeof v !== "object").map(([metric, value]) => ({ metric, value }))
+            )
+          : toCsv(type as ReportType, reportData);
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${type}-report-${month}-${year}.csv"`,
+        },
+      });
+    }
+
+    return NextResponse.json({ data: reportData });
   } catch (error) {
-    console.error("[REPORTS_GET]", error);
-    return NextResponse.json(
-      { error: "Failed to generate report" },
-      { status: 500 }
-    );
+    return handleApiError(error, "generate report");
   }
 }

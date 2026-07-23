@@ -1,150 +1,195 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { apiError, handleApiError } from "@/lib/api-utils";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 
 // GET /api/leaves/[id]
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  try {
+    await requireAuth(request);
+    const { id } = await params;
 
-  const leaveApplication = await db.leaveApplication.findUnique({
-    where: { id },
-    include: {
-      employee: {
-        select: {
-          firstName: true,
-          lastName: true,
-          employeeCode: true,
+    const leaveApplication = await db.leaveApplication.findUnique({
+      where: { id },
+      include: {
+        employee: {
+          select: {
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+          },
         },
+        leaveType: true,
       },
-      leaveType: true,
-    },
-  });
+    });
 
-  if (!leaveApplication) {
-    return NextResponse.json({ error: "Leave application not found" }, { status: 404 });
+    if (!leaveApplication) {
+      return apiError("Leave application not found", 404);
+    }
+
+    return NextResponse.json(leaveApplication);
+  } catch (error) {
+    return handleApiError(error, "fetch leave application");
   }
-
-  return NextResponse.json(leaveApplication);
 }
 
-// PUT /api/leaves/[id] - Approve or reject a leave application
+// PUT /api/leaves/[id] - Approve or reject a leave application (idempotent: only from "pending")
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const body = await request.json();
-  const { status, approvedBy } = body;
+  try {
+    const session = await requireRole(request, ["admin", "hr", "manager"]);
+    const { id } = await params;
+    const body = await request.json();
+    const { status, approvedBy } = body;
 
-  if (!["approved", "rejected"].includes(status)) {
-    return NextResponse.json({ error: "Invalid status. Must be 'approved' or 'rejected'." }, { status: 400 });
+    if (!["approved", "rejected"].includes(status)) {
+      return apiError("Invalid status. Must be 'approved' or 'rejected'.", 400);
+    }
+
+    const existing = await db.leaveApplication.findUnique({ where: { id } });
+
+    if (!existing) {
+      return apiError("Leave application not found", 404);
+    }
+
+    if (existing.status !== "pending") {
+      return apiError(
+        `Cannot ${status === "approved" ? "approve" : "reject"} a leave application that is already "${existing.status}". Only pending applications can be actioned.`,
+        409
+      );
+    }
+
+    if (status === "approved") {
+      // Update leave application and increment LeaveBalance.used atomically.
+      const result = await db.$transaction(async (tx) => {
+        // Re-check status inside the transaction to close the race window between
+        // the findUnique above and this write (two concurrent approvals of the same app).
+        const current = await tx.leaveApplication.findUnique({ where: { id } });
+        if (!current || current.status !== "pending") {
+          throw new Error("CONFLICT_ALREADY_ACTIONED");
+        }
+
+        const updated = await tx.leaveApplication.update({
+          where: { id },
+          data: {
+            status: "approved",
+            approvedBy: approvedBy ?? null,
+            approvedAt: new Date(),
+          },
+          include: {
+            employee: { select: { firstName: true, lastName: true, employeeCode: true } },
+            leaveType: true,
+          },
+        });
+
+        const year = updated.startDate.getFullYear();
+
+        await tx.leaveBalance.updateMany({
+          where: { employeeId: updated.employeeId, leaveTypeId: updated.leaveTypeId, year },
+          data: { used: { increment: updated.totalDays } },
+        });
+
+        return updated;
+      }).catch((err) => {
+        if (err instanceof Error && err.message === "CONFLICT_ALREADY_ACTIONED") {
+          throw err;
+        }
+        throw err;
+      });
+
+      await logAudit({
+        session,
+        action: "approve",
+        entity: "LeaveApplication",
+        entityId: id,
+        details: { approvedBy },
+      });
+
+      return NextResponse.json(result);
+    }
+
+    // Rejected: just set status (no balance change since it was never deducted)
+    const updated = await db.leaveApplication.update({
+      where: { id },
+      data: {
+        status: "rejected",
+        approvedBy: approvedBy ?? null,
+      },
+      include: {
+        employee: { select: { firstName: true, lastName: true, employeeCode: true } },
+        leaveType: true,
+      },
+    });
+
+    await logAudit({ session, action: "reject", entity: "LeaveApplication", entityId: id });
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    if (error instanceof Error && error.message === "CONFLICT_ALREADY_ACTIONED") {
+      return apiError("This leave application was already actioned by someone else. Refresh and retry.", 409);
+    }
+    return handleApiError(error, "update leave application");
   }
+}
 
-  // Fetch the existing leave application
-  const existing = await db.leaveApplication.findUnique({ where: { id } });
+// DELETE /api/leaves/[id] - Cancel leave (restores LeaveBalance.used if it was previously approved)
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await requireAuth(request);
+    const { id } = await params;
 
-  if (!existing) {
-    return NextResponse.json({ error: "Leave application not found" }, { status: 404 });
-  }
+    const existing = await db.leaveApplication.findUnique({ where: { id } });
 
-  if (status === "approved") {
-    // Update leave application and increment LeaveBalance.used in a transaction
-    const result = await db.$transaction(async (tx) => {
+    if (!existing) {
+      return apiError("Leave application not found", 404);
+    }
+
+    if (existing.status === "cancelled") {
+      return apiError("This leave application is already cancelled.", 409);
+    }
+
+    const wasApproved = existing.status === "approved";
+
+    const cancelled = await db.$transaction(async (tx) => {
       const updated = await tx.leaveApplication.update({
         where: { id },
-        data: {
-          status: "approved",
-          approvedBy: approvedBy ?? null,
-          approvedAt: new Date(),
-        },
+        data: { status: "cancelled" },
         include: {
-          employee: {
-            select: {
-              firstName: true,
-              lastName: true,
-              employeeCode: true,
-            },
-          },
+          employee: { select: { firstName: true, lastName: true, employeeCode: true } },
           leaveType: true,
         },
       });
 
-      // Determine the year from the leave start date
-      const year = updated.startDate.getFullYear();
-
-      // Increment the 'used' field in LeaveBalance
-      await tx.leaveBalance.updateMany({
-        where: {
-          employeeId: updated.employeeId,
-          leaveTypeId: updated.leaveTypeId,
-          year,
-        },
-        data: {
-          used: {
-            increment: updated.totalDays,
-          },
-        },
-      });
+      if (wasApproved) {
+        const year = updated.startDate.getFullYear();
+        await tx.leaveBalance.updateMany({
+          where: { employeeId: updated.employeeId, leaveTypeId: updated.leaveTypeId, year },
+          data: { used: { decrement: updated.totalDays } },
+        });
+      }
 
       return updated;
     });
 
-    return NextResponse.json(result);
+    await logAudit({
+      session,
+      action: "cancel",
+      entity: "LeaveApplication",
+      entityId: id,
+      details: { restoredBalance: wasApproved, days: existing.totalDays },
+    });
+
+    return NextResponse.json(cancelled);
+  } catch (error) {
+    return handleApiError(error, "cancel leave application");
   }
-
-  // Rejected: just set status
-  const updated = await db.leaveApplication.update({
-    where: { id },
-    data: {
-      status: "rejected",
-      approvedBy: approvedBy ?? null,
-    },
-    include: {
-      employee: {
-        select: {
-          firstName: true,
-          lastName: true,
-          employeeCode: true,
-        },
-      },
-      leaveType: true,
-    },
-  });
-
-  return NextResponse.json(updated);
-}
-
-// DELETE /api/leaves/[id] - Cancel leave (set status to "cancelled")
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-
-  const existing = await db.leaveApplication.findUnique({ where: { id } });
-
-  if (!existing) {
-    return NextResponse.json({ error: "Leave application not found" }, { status: 404 });
-  }
-
-  const cancelled = await db.leaveApplication.update({
-    where: { id },
-    data: {
-      status: "cancelled",
-    },
-    include: {
-      employee: {
-        select: {
-          firstName: true,
-          lastName: true,
-          employeeCode: true,
-        },
-      },
-      leaveType: true,
-    },
-  });
-
-  return NextResponse.json(cancelled);
 }

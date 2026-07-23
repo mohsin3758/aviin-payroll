@@ -3,12 +3,17 @@ import { db } from "@/lib/db";
 import {
   processEmployeePayroll,
   getDaysInMonth,
+  STANDARD_HOURS_PER_DAY,
   type EmployeePayrollInput,
 } from "@/lib/payroll/engine";
+import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 
 // GET /api/payroll - List payroll runs with optional filters
 export async function GET(request: NextRequest) {
   try {
+    await requireAuth(request);
     const { searchParams } = new URL(request.url);
     const month = searchParams.get("month");
     const year = searchParams.get("year");
@@ -31,43 +36,75 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(payrollRuns);
   } catch (error) {
-    console.error("Error fetching payroll runs:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch payroll runs" },
-      { status: 500 }
-    );
+    return handleApiError(error, "fetch payroll runs");
   }
 }
 
 // POST /api/payroll - Process payroll for a month
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireRole(request, ["admin", "hr"]);
     const body = await request.json();
-    const { month, year, companyId } = body;
+    const { month, year, force } = body;
 
     if (!month || !year || month < 1 || month > 12) {
-      return NextResponse.json(
-        { error: "Valid month (1-12) and year are required" },
-        { status: 400 }
-      );
+      return apiError("Valid month (1-12) and year are required", 400);
     }
 
-    // 1. Get the company
-    let company;
-    if (companyId) {
-      company = await db.company.findUnique({ where: { id: companyId } });
-    } else {
-      company = await db.company.findFirst();
-    }
+    // 1. Get the company (single-tenant — client-supplied companyId is never trusted)
+    const resolvedCompanyId = await getDefaultCompanyId();
+    const company = await db.company.findUnique({ where: { id: resolvedCompanyId } });
 
     if (!company) {
-      return NextResponse.json(
-        { error: "Company not found" },
-        { status: 404 }
-      );
+      return apiError("Company not found", 404);
+    }
+
+    // Guard: never allow silently overwriting a run that's already paid.
+    // A "processed" (draft-reviewed) run can be recalculated once, explicitly, via force:true.
+    const existingRun = await db.payrollRun.findUnique({
+      where: { companyId_month_year: { companyId: company.id, month, year } },
+    });
+    if (existingRun) {
+      if (existingRun.status === "paid") {
+        return apiError(
+          `Payroll for ${month}/${year} is already marked "paid" and cannot be reprocessed. Reverse/adjust via a correction run instead.`,
+          409
+        );
+      }
+      if (existingRun.status === "processed" && !force) {
+        return apiError(
+          `Payroll for ${month}/${year} was already processed. Pass { "force": true } to explicitly recalculate it (this will replace all existing payroll details for this run).`,
+          409
+        );
+      }
+    }
+
+    // Reprocessing must not double-charge loan EMIs or arrears already recorded against this
+    // run — clear this run's own LoanPayment rows and reset arrears it paid back to "pending"
+    // before recomputing (mirrors how PayrollDetail rows for this run are deleted+recreated below).
+    if (existingRun) {
+      await db.loanPayment.deleteMany({ where: { payrollRunId: existingRun.id } });
+      await db.salaryArrear.updateMany({
+        where: { paidInRunId: existingRun.id },
+        data: { status: "pending", paidInRunId: null },
+      });
     }
 
     const daysInMonth = getDaysInMonth(month, year);
+
+    // Company calendar: holidays and weekly-off days are paid automatically when an employee
+    // has no explicit attendance record for that day (an explicit record, e.g. "absent",
+    // still takes precedence over the auto-paid default).
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const monthEnd = new Date(Date.UTC(year, month, 1));
+    const holidays = await db.holiday.findMany({
+      where: { companyId: company.id, date: { gte: monthStart, lt: monthEnd } },
+    });
+    const holidayDateKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
+    const weeklyOffDays = company.weeklyOffDays
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n) && n >= 0 && n <= 6);
 
     // 2. Get all active employees (no dateOfExit) for that company
     const employees = await db.employee.findMany({
@@ -89,10 +126,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (employees.length === 0) {
-      return NextResponse.json(
-        { error: "No active employees found for this company" },
-        { status: 404 }
-      );
+      return apiError("No active employees found for this company", 404);
     }
 
     // 3 & 4. Process each employee and build aggregates
@@ -110,6 +144,7 @@ export async function POST(request: NextRequest) {
       overtimeAllowance: number;
       bonus: number;
       otherEarnings: number;
+      arrears: number;
       totalEarnings: number;
       employeePF: number;
       employerPF: number;
@@ -118,11 +153,14 @@ export async function POST(request: NextRequest) {
       tds: number;
       professionalTax: number;
       lwf: number;
+      otherDeductions: number;
       totalDeductions: number;
       netSalary: number;
       grossSalary: number;
       ctc: number;
     }> = [];
+    const allLoanPayments: { loanId: string; amount: number }[] = [];
+    const allArrearIdsPaid: string[] = [];
 
     let totalEmployees = 0;
     let totalGrossSalary = 0;
@@ -135,18 +173,35 @@ export async function POST(request: NextRequest) {
     let totalTDS = 0;
     let totalPT = 0;
     let totalLWF = 0;
+    const employeesWithCappedDeductions: string[] = [];
 
     for (const emp of employees) {
       // Skip employees without a salary structure
       if (!emp.salaryStructure) continue;
 
-      // 3b. Calculate presentDays from attendance
+      // 3b. Calculate presentDays and overtime hours, day by day, so company holidays and
+      // weekly-off days are auto-paid when the employee has no explicit attendance record.
+      const attendanceByDate = new Map(
+        emp.attendance.map((record) => [record.date.toISOString().slice(0, 10), record])
+      );
       let presentDays = 0;
-      for (const record of emp.attendance) {
-        if (record.status === "present") {
+      let overtimeHours = 0;
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateObj = new Date(Date.UTC(year, month - 1, day));
+        const dateKey = dateObj.toISOString().slice(0, 10);
+        const record = attendanceByDate.get(dateKey);
+
+        if (record) {
+          if (record.status === "present" || record.status === "holiday" || record.status === "weekly-off") {
+            presentDays += 1;
+          } else if (record.status === "half-day") {
+            presentDays += 0.5;
+          }
+          if (record.totalHours && record.totalHours > STANDARD_HOURS_PER_DAY) {
+            overtimeHours += record.totalHours - STANDARD_HOURS_PER_DAY;
+          }
+        } else if (holidayDateKeys.has(dateKey) || weeklyOffDays.includes(dateObj.getUTCDay())) {
           presentDays += 1;
-        } else if (record.status === "half-day") {
-          presentDays += 0.5;
         }
       }
 
@@ -183,14 +238,56 @@ export async function POST(request: NextRequest) {
         },
       };
 
+      // Old-regime employees can declare real 80C/80D investments; the engine caps them
+      // combined with PF+ESI (80C) and separately (80D) rather than trusting raw inputs.
+      const declaration = await db.investmentDeclaration.findUnique({
+        where: { employeeId_year: { employeeId: emp.id, year } },
+      });
+
       // 3c. Call processEmployeePayroll
       const result = processEmployeePayroll(
         empInput,
         month,
         year,
         presentDays,
-        daysInMonth
+        daysInMonth,
+        overtimeHours,
+        { section80C: declaration?.section80C ?? 0, section80D: declaration?.section80D ?? 0 }
       );
+
+      // Loan/advance EMI deductions: allocate against whatever earnings remain after
+      // statutory deductions, never pushing net salary negative. "Remaining months" is
+      // derived from actual LoanPayment history rather than a mutable counter, so
+      // reprocessing (which clears this run's own payments above) can't double-charge.
+      const activeLoans = await db.employeeLoan.findMany({
+        where: { employeeId: emp.id, status: "active" },
+        include: { _count: { select: { payments: true } } },
+      });
+
+      let availableForLoanDeduction = Math.max(0, result.totalEarnings - result.totalDeductions);
+      let loanDeduction = 0;
+      for (const loan of activeLoans) {
+        const remainingMonths = loan.totalMonths - loan._count.payments;
+        if (remainingMonths <= 0) continue;
+        const amount = Math.min(loan.emiAmount, availableForLoanDeduction);
+        if (amount <= 0) continue;
+        loanDeduction += amount;
+        availableForLoanDeduction -= amount;
+        allLoanPayments.push({ loanId: loan.id, amount });
+      }
+
+      // Arrears / leave-encashment payouts scheduled for this exact month, not prorated.
+      const pendingArrears = await db.salaryArrear.findMany({
+        where: { employeeId: emp.id, payMonth: month, payYear: year, status: "pending" },
+      });
+      const arrearsAmount = pendingArrears.reduce((s, a) => s + a.amount, 0);
+      for (const arrear of pendingArrears) {
+        allArrearIdsPaid.push(arrear.id);
+      }
+
+      const adjustedTotalEarnings = result.totalEarnings + arrearsAmount;
+      const adjustedTotalDeductions = result.totalDeductions + loanDeduction;
+      const adjustedNetSalary = result.netSalary - loanDeduction + arrearsAmount;
 
       // Build detail record data
       const detailData = {
@@ -207,7 +304,8 @@ export async function POST(request: NextRequest) {
         overtimeAllowance: result.overtimeAllowance,
         bonus: result.bonus,
         otherEarnings: result.otherEarnings,
-        totalEarnings: result.totalEarnings,
+        arrears: arrearsAmount,
+        totalEarnings: adjustedTotalEarnings,
         employeePF: result.employeePF,
         employerPF: result.employerPF,
         employeeESI: result.employeeESI,
@@ -215,19 +313,24 @@ export async function POST(request: NextRequest) {
         tds: result.tdsMonthly,
         professionalTax: result.ptAmount,
         lwf: result.lwfEmployee,
-        totalDeductions: result.totalDeductions,
-        netSalary: result.netSalary,
+        otherDeductions: loanDeduction,
+        totalDeductions: adjustedTotalDeductions,
+        netSalary: adjustedNetSalary,
         grossSalary: result.grossSalary,
         ctc: result.ctc,
       };
 
       details.push(detailData);
 
-      // Accumulate totals
+      if (result.deductionsCapped) {
+        employeesWithCappedDeductions.push(emp.employeeCode);
+      }
+
+      // Accumulate totals (post-loan-deduction, post-arrears figures)
       totalEmployees += 1;
       totalGrossSalary += result.grossSalary;
-      totalDeductions += result.totalDeductions;
-      totalNetSalary += result.netSalary;
+      totalDeductions += adjustedTotalDeductions;
+      totalNetSalary += adjustedNetSalary;
       totalEmployerPF += result.employerPF;
       totalEmployerESI += result.employerESI;
       totalEmployeePF += result.employeePF;
@@ -238,10 +341,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (totalEmployees === 0) {
-      return NextResponse.json(
-        { error: "No employees with salary structures found" },
-        { status: 404 }
-      );
+      return apiError("No employees with salary structures found", 404);
     }
 
     // 4. Create/update PayrollRun with aggregated totals
@@ -275,6 +375,7 @@ export async function POST(request: NextRequest) {
         },
       },
       update: {
+        status: "draft", // force-reprocessed run must go through review again before processed/paid
         totalEmployees,
         totalGrossSalary,
         totalDeductions,
@@ -302,12 +403,61 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(payrollRun);
+    if (allLoanPayments.length > 0) {
+      await db.loanPayment.createMany({
+        data: allLoanPayments.map((lp) => ({
+          loanId: lp.loanId,
+          payrollRunId: payrollRun.id,
+          amount: lp.amount,
+          month,
+          year,
+        })),
+      });
+
+      // Auto-close any loan that has now collected its full term.
+      const affectedLoanIds = [...new Set(allLoanPayments.map((lp) => lp.loanId))];
+      for (const loanId of affectedLoanIds) {
+        const loan = await db.employeeLoan.findUnique({
+          where: { id: loanId },
+          include: { _count: { select: { payments: true } } },
+        });
+        if (loan && loan._count.payments >= loan.totalMonths) {
+          await db.employeeLoan.update({ where: { id: loanId }, data: { status: "closed" } });
+        }
+      }
+    }
+
+    if (allArrearIdsPaid.length > 0) {
+      await db.salaryArrear.updateMany({
+        where: { id: { in: allArrearIdsPaid } },
+        data: { status: "paid", paidInRunId: payrollRun.id },
+      });
+    }
+
+    await logAudit({
+      session,
+      action: "process",
+      entity: "PayrollRun",
+      entityId: payrollRun.id,
+      details: {
+        month,
+        year,
+        forced: !!force,
+        employeesWithCappedDeductions:
+          employeesWithCappedDeductions.length > 0 ? employeesWithCappedDeductions : undefined,
+      },
+    });
+
+    return NextResponse.json({
+      ...payrollRun,
+      warnings:
+        employeesWithCappedDeductions.length > 0
+          ? [
+              `${employeesWithCappedDeductions.length} employee(s) had statutory deductions capped at their earned amount this period (likely incomplete attendance): ${employeesWithCappedDeductions.join(", ")}.`,
+            ]
+          : [],
+    });
   } catch (error) {
-    console.error("Error processing payroll:", error);
-    return NextResponse.json(
-      { error: "Failed to process payroll" },
-      { status: 500 }
-    );
+    return handleApiError(error, "process payroll");
   }
 }

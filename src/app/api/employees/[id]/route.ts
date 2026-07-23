@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { updateEmployeeSchema } from "@/lib/validations/employee";
+import { apiError, handleApiError } from "@/lib/api-utils";
+import { logAudit } from "@/lib/audit";
+import { requireAuth, requireRole } from "@/lib/auth";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requireAuth(request);
     const { id } = await params;
 
     const employee = await db.employee.findUnique({
@@ -14,16 +19,12 @@ export async function GET(
     });
 
     if (!employee) {
-      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      return apiError("Employee not found", 404);
     }
 
     return NextResponse.json(employee);
   } catch (error) {
-    console.error("Error fetching employee:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch employee" },
-      { status: 500 }
-    );
+    return handleApiError(error, "fetch employee");
   }
 }
 
@@ -32,9 +33,11 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
     const body = await request.json();
-    const { salaryStructure: salaryStructureData, ...employeeData } = body;
+    const parsed = updateEmployeeSchema.parse(body);
+    const { salaryStructure: salaryStructureData, ...employeeData } = parsed;
 
     const existing = await db.employee.findUnique({
       where: { id },
@@ -42,7 +45,7 @@ export async function PUT(
     });
 
     if (!existing) {
-      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      return apiError("Employee not found", 404);
     }
 
     // Build salary structure update payload
@@ -64,27 +67,32 @@ export async function PUT(
       include: { salaryStructure: true },
     });
 
+    await logAudit({
+      session,
+      action: "update",
+      entity: "Employee",
+      entityId: employee.id,
+      details: { changedFields: Object.keys(employeeData) },
+    });
+
     return NextResponse.json(employee);
   } catch (error) {
-    console.error("Error updating employee:", error);
-    return NextResponse.json(
-      { error: "Failed to update employee" },
-      { status: 500 }
-    );
+    return handleApiError(error, "update employee");
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
 
     const existing = await db.employee.findUnique({ where: { id } });
 
     if (!existing) {
-      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      return apiError("Employee not found", 404);
     }
 
     const employee = await db.employee.update({
@@ -93,12 +101,16 @@ export async function DELETE(
       include: { salaryStructure: true },
     });
 
+    await logAudit({
+      session,
+      action: "delete",
+      entity: "Employee",
+      entityId: employee.id,
+      details: { employeeCode: employee.employeeCode },
+    });
+
     return NextResponse.json(employee);
   } catch (error) {
-    console.error("Error deleting employee:", error);
-    return NextResponse.json(
-      { error: "Failed to delete employee" },
-      { status: 500 }
-    );
+    return handleApiError(error, "delete employee");
   }
 }

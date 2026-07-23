@@ -1,91 +1,155 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { z } from "zod";
+import { apiError, handleApiError } from "@/lib/api-utils";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
+
+const createLeaveSchema = z.object({
+  employeeId: z.string().min(1),
+  leaveTypeId: z.string().min(1),
+  startDate: z.coerce.date(),
+  endDate: z.coerce.date(),
+  reason: z.string().trim().max(500).nullable().optional(),
+});
 
 // GET /api/leaves?types or /api/leaves?employeeId=...&status=...&year=...
 export async function GET(request: NextRequest) {
-  const { searchParams } = request.nextUrl;
+  try {
+    await requireAuth(request);
+    const { searchParams } = request.nextUrl;
 
-  // If "types" query param is present, return all leave types
-  if (searchParams.has("types")) {
-    const leaveTypes = await db.leaveType.findMany({
-      orderBy: { name: "asc" },
-    });
-    return NextResponse.json(leaveTypes);
-  }
+    // If "types" query param is present, return all leave types
+    if (searchParams.has("types")) {
+      const leaveTypes = await db.leaveType.findMany({
+        orderBy: { name: "asc" },
+      });
+      return NextResponse.json(leaveTypes);
+    }
 
-  // Otherwise return leave applications with optional filters
-  const employeeId = searchParams.get("employeeId");
-  const status = searchParams.get("status");
-  const yearParam = searchParams.get("year");
+    // Otherwise return leave applications with optional filters
+    const employeeId = searchParams.get("employeeId");
+    const status = searchParams.get("status");
+    const yearParam = searchParams.get("year");
+    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10) || 50));
 
-  const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {};
 
-  if (employeeId) {
-    where.employeeId = employeeId;
-  }
+    if (employeeId) {
+      where.employeeId = employeeId;
+    }
 
-  if (status) {
-    where.status = status;
-  }
+    if (status) {
+      where.status = status;
+    }
 
-  if (yearParam) {
-    const year = parseInt(yearParam, 10);
-    where.startDate = {
-      gte: new Date(year, 0, 1),
-      lt: new Date(year + 1, 0, 1),
-    };
-  }
+    if (yearParam) {
+      const year = parseInt(yearParam, 10);
+      where.startDate = {
+        gte: new Date(year, 0, 1),
+        lt: new Date(year + 1, 0, 1),
+      };
+    }
 
-  const leaveApplications = await db.leaveApplication.findMany({
-    where,
-    include: {
-      employee: {
-        select: {
-          firstName: true,
-          lastName: true,
-          employeeCode: true,
+    const [leaveApplications, total] = await Promise.all([
+      db.leaveApplication.findMany({
+        where,
+        include: {
+          employee: {
+            select: {
+              firstName: true,
+              lastName: true,
+              employeeCode: true,
+            },
+          },
+          leaveType: true,
         },
-      },
-      leaveType: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      db.leaveApplication.count({ where }),
+    ]);
 
-  return NextResponse.json(leaveApplications);
+    return NextResponse.json({
+      data: leaveApplications,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (error) {
+    return handleApiError(error, "fetch leave applications");
+  }
 }
 
 // POST /api/leaves - Create a leave application
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { employeeId, leaveTypeId, startDate, endDate, reason } = body;
+  try {
+    const session = await requireAuth(request);
+    const body = await request.json();
+    const { employeeId, leaveTypeId, startDate, endDate, reason } = createLeaveSchema.parse(body);
 
-  // Calculate totalDays from startDate to endDate (inclusive)
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const diffMs = Math.abs(end.getTime() - start.getTime());
-  const totalDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1;
+    if (endDate.getTime() < startDate.getTime()) {
+      return apiError("endDate must be on or after startDate.", 400);
+    }
 
-  const leaveApplication = await db.leaveApplication.create({
-    data: {
-      employeeId,
-      leaveTypeId,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      totalDays,
-      reason: reason ?? null,
-      status: "pending",
-    },
-    include: {
-      employee: {
-        select: {
-          firstName: true,
-          lastName: true,
-          employeeCode: true,
-        },
+    const employee = await db.employee.findUnique({ where: { id: employeeId } });
+    if (!employee) {
+      return apiError("Employee not found.", 404);
+    }
+
+    const diffMs = endDate.getTime() - startDate.getTime();
+    const totalDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1;
+
+    const year = startDate.getFullYear();
+    const balance = await db.leaveBalance.findUnique({
+      where: { employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year } },
+    });
+    if (!balance) {
+      return apiError("No leave balance configured for this employee/leave type/year.", 400);
+    }
+    const available = balance.totalAllocated + balance.carryForwarded - balance.used;
+    if (totalDays > available) {
+      return apiError(
+        `Insufficient leave balance: requested ${totalDays} day(s), only ${available} available.`,
+        400
+      );
+    }
+
+    const leaveApplication = await db.leaveApplication.create({
+      data: {
+        employeeId,
+        leaveTypeId,
+        startDate,
+        endDate,
+        totalDays,
+        reason: reason ?? null,
+        status: "pending",
       },
-      leaveType: true,
-    },
-  });
+      include: {
+        employee: {
+          select: {
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+          },
+        },
+        leaveType: true,
+      },
+    });
 
-  return NextResponse.json(leaveApplication, { status: 201 });
+    await logAudit({
+      session,
+      action: "create",
+      entity: "LeaveApplication",
+      entityId: leaveApplication.id,
+      details: { employeeId, leaveTypeId, totalDays },
+    });
+
+    return NextResponse.json(leaveApplication, { status: 201 });
+  } catch (error) {
+    return handleApiError(error, "create leave application");
+  }
 }

@@ -10,6 +10,9 @@ import {
   CheckCircle2,
   AlertCircle,
   ChevronLeft,
+  Download,
+  Wallet,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -130,6 +133,16 @@ interface PayrollRunDetail extends Omit<PayrollRunSummary, '_count'> {
   details: PayrollDetailRow[];
 }
 
+interface ArrearRow {
+  id: string;
+  amount: number;
+  reason: string | null;
+  payMonth: number;
+  payYear: number;
+  status: string;
+  employee: { firstName: string; lastName: string | null; employeeCode: string };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -182,6 +195,18 @@ export default function PayrollView() {
   const [selectedRun, setSelectedRun] = useState<PayrollRunDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
+
+  // Arrears dialog state
+  const [arrearsOpen, setArrearsOpen] = useState(false);
+  const [arrears, setArrears] = useState<ArrearRow[]>([]);
+  const [arrearsLoading, setArrearsLoading] = useState(false);
+  const [arrearsEmployees, setArrearsEmployees] = useState<{ id: string; employeeCode: string; firstName: string; lastName: string | null }[]>([]);
+  const [newArrearEmployeeId, setNewArrearEmployeeId] = useState('');
+  const [newArrearAmount, setNewArrearAmount] = useState('');
+  const [newArrearReason, setNewArrearReason] = useState('');
+  const [newArrearPayMonth, setNewArrearPayMonth] = useState(String(now.getMonth() + 1));
+  const [newArrearPayYear, setNewArrearPayYear] = useState(String(now.getFullYear()));
+  const [creatingArrear, setCreatingArrear] = useState(false);
 
   /* --- Fetch payroll runs --- */
   const fetchRuns = useCallback(async () => {
@@ -260,10 +285,111 @@ export default function PayrollView() {
       // Refresh detail view
       setSelectedRun(data);
       fetchRuns();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Status update failed');
     } finally {
       setStatusUpdating(false);
+    }
+  };
+
+  /* --- Bank file download --- */
+  const handleDownloadBankFile = async (runId: string, monthNum: number, yearNum: number) => {
+    try {
+      const res = await fetch(`/api/payroll/${runId}/bank-file?format=csv`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to generate bank file' }));
+        throw new Error(err.error || 'Failed to generate bank file');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bank-file-${monthNum}-${yearNum}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Bank file downloaded');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to generate bank file');
+    }
+  };
+
+  /* --- Arrears --- */
+  const fetchArrears = useCallback(async () => {
+    setArrearsLoading(true);
+    try {
+      const res = await fetch('/api/arrears');
+      if (!res.ok) throw new Error('Failed to load arrears');
+      const json = await res.json();
+      setArrears(json.data ?? []);
+    } catch {
+      toast.error('Failed to load arrears');
+    } finally {
+      setArrearsLoading(false);
+    }
+  }, []);
+
+  const openArrearsDialog = async () => {
+    setArrearsOpen(true);
+    fetchArrears();
+    if (arrearsEmployees.length === 0) {
+      try {
+        const res = await fetch('/api/employees?limit=200');
+        const json = await res.json();
+        setArrearsEmployees(json.data ?? []);
+      } catch {
+        toast.error('Failed to load employees');
+      }
+    }
+  };
+
+  const handleCreateArrear = async () => {
+    if (!newArrearEmployeeId || !newArrearAmount) {
+      toast.error('Employee and amount are required.');
+      return;
+    }
+    setCreatingArrear(true);
+    try {
+      const res = await fetch('/api/arrears', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: newArrearEmployeeId,
+          amount: Number(newArrearAmount),
+          reason: newArrearReason.trim() || null,
+          payMonth: Number(newArrearPayMonth),
+          payYear: Number(newArrearPayYear),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create arrear');
+      toast.success(`Arrear of ${fmt(Number(newArrearAmount))} scheduled for ${MONTHS[Number(newArrearPayMonth) - 1]} ${newArrearPayYear}`);
+      setNewArrearEmployeeId('');
+      setNewArrearAmount('');
+      setNewArrearReason('');
+      fetchArrears();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create arrear');
+    } finally {
+      setCreatingArrear(false);
+    }
+  };
+
+  const handleCancelArrear = async (id: string) => {
+    if (!confirm('Cancel this scheduled arrear? It will not be paid out.')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/arrears/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to cancel arrear');
+      toast.success('Arrear cancelled');
+      fetchArrears();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel arrear');
     }
   };
 
@@ -335,6 +461,11 @@ export default function PayrollView() {
               className="w-[100px]"
             />
           </div>
+
+          <Button variant="outline" onClick={openArrearsDialog}>
+            <Wallet className="size-4" />
+            Manage Arrears
+          </Button>
 
           <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
             <AlertDialogTrigger asChild>
@@ -512,6 +643,20 @@ export default function PayrollView() {
                 </div>
               )}
 
+              {selectedRun.status !== 'draft' && (
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    onClick={() => handleDownloadBankFile(selectedRun.id, selectedRun.month, selectedRun.year)}
+                  >
+                    <Download className="size-4" />
+                    Download Bank File
+                  </Button>
+                </div>
+              )}
+
               {/* Summary cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="rounded-lg border bg-emerald-50 p-3">
@@ -650,6 +795,129 @@ export default function PayrollView() {
             <Button variant="outline" onClick={() => setDetailOpen(false)}>
               Close
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Arrears Dialog ─────────────────────────────────────────── */}
+      <Dialog open={arrearsOpen} onOpenChange={setArrearsOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Manage Arrears</DialogTitle>
+            <DialogDescription>
+              One-time payments scheduled into a specific month&apos;s payroll — not prorated by attendance.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* New arrear form */}
+            <div className="rounded-lg border p-4 space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Employee</Label>
+                  <Select value={newArrearEmployeeId} onValueChange={setNewArrearEmployeeId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select employee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {arrearsEmployees.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {e.employeeCode} — {e.firstName} {e.lastName ?? ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Amount (₹)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={newArrearAmount}
+                    onChange={(e) => setNewArrearAmount(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs font-medium">Reason</Label>
+                  <Input
+                    placeholder="e.g. Retroactive raise for Q4"
+                    value={newArrearReason}
+                    onChange={(e) => setNewArrearReason(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Pay Month</Label>
+                  <Select value={newArrearPayMonth} onValueChange={setNewArrearPayMonth}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTHS.map((m, i) => (
+                        <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Pay Year</Label>
+                  <Input
+                    type="number"
+                    min={2000}
+                    max={2100}
+                    value={newArrearPayYear}
+                    onChange={(e) => setNewArrearPayYear(e.target.value)}
+                  />
+                </div>
+              </div>
+              <Button size="sm" onClick={handleCreateArrear} disabled={creatingArrear} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                {creatingArrear ? <Loader2 className="size-4 animate-spin" /> : null}
+                Schedule Arrear
+              </Button>
+            </div>
+
+            {/* Existing arrears list */}
+            <div className="divide-y rounded-lg border">
+              {arrearsLoading ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
+              ) : arrears.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">No arrears scheduled yet.</div>
+              ) : (
+                arrears.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                    <div>
+                      <span className="font-medium">{a.employee.employeeCode} — {a.employee.firstName} {a.employee.lastName ?? ''}</span>{' '}
+                      <span className="text-muted-foreground">
+                        · {fmt(a.amount)} · {MONTHS[a.payMonth - 1]} {a.payYear}
+                        {a.reason ? ` · ${a.reason}` : ''}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge
+                        variant="outline"
+                        className={
+                          a.status === 'paid'
+                            ? 'border-emerald-300 text-emerald-700'
+                            : a.status === 'cancelled'
+                            ? 'border-slate-300 text-slate-500'
+                            : 'border-amber-300 text-amber-700'
+                        }
+                      >
+                        {a.status}
+                      </Badge>
+                      {a.status === 'pending' && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleCancelArrear(a.id)}>
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArrearsOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

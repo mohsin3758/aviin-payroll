@@ -1,0 +1,23 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:/app/db/custom.db
+      # Set a real, random secret in production — this is a dev-only fallback.
+      - JWT_SECRET=${JWT_SECRET:-dev-only-insecure-secret-change-me}
+    volumes:
+      - payrollpro-db:/app/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  payrollpro-db:

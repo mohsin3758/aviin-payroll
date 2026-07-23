@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { usePayrollStore, type ViewType } from '@/store/payroll-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -33,9 +34,26 @@ const navItems: { id: ViewType; label: string; icon: React.ElementType }[] = [
 
 export function PayrollLayout({ children }: { children: React.ReactNode }) {
   const { activeView, sidebarOpen, setActiveView, setSidebarOpen } = usePayrollStore();
+  const [fyLabel, setFyLabel] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/settings');
+        const json = await res.json();
+        const start = json.data?.financialYearStart as string | undefined;
+        if (start) {
+          const startYear = new Date(start).getFullYear();
+          setFyLabel(`FY ${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`);
+        }
+      } catch {
+        /* non-critical badge, fail silently */
+      }
+    })();
+  }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-screen overflow-hidden bg-background">
       {/* Mobile overlay */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -143,7 +161,7 @@ export function PayrollLayout({ children }: { children: React.ReactNode }) {
                 className="space-y-2"
               >
                 <Badge variant="outline" className="w-full justify-center border-emerald-600/30 text-emerald-400 text-xs">
-                  FY 2025-26
+                  {fyLabel || '—'}
                 </Badge>
                 <p className="text-center text-[10px] text-slate-500">PF | ESI | TDS | PT | LWF</p>
               </motion.div>

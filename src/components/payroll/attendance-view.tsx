@@ -206,10 +206,10 @@ export default function AttendanceView() {
   const fetchEmployees = useCallback(async () => {
     try {
       setEmployeesLoading(true);
-      const res = await fetch('/api/employees');
+      const res = await fetch('/api/employees?limit=200');
       if (!res.ok) throw new Error('Failed to fetch employees');
-      const data: Employee[] = await res.json();
-      setEmployees(data);
+      const json = await res.json();
+      setEmployees(json.data ?? []);
     } catch {
       toast.error('Failed to load employees');
     } finally {

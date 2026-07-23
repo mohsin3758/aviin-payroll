@@ -232,10 +232,10 @@ export default function LeavesView() {
   const fetchEmployees = useCallback(async () => {
     setLoadingEmployees(true);
     try {
-      const res = await fetch('/api/employees');
+      const res = await fetch('/api/employees?limit=200');
       if (!res.ok) throw new Error('Failed to fetch employees');
-      const data = await res.json();
-      setEmployees(data);
+      const json = await res.json();
+      setEmployees(json.data ?? []);
     } catch (err) {
       console.error(err);
       toast.error('Failed to load employees');
@@ -272,10 +272,11 @@ export default function LeavesView() {
         params.set('status', filterStatus);
       }
       params.set('year', String(currentYear));
+      params.set('limit', '200');
       const res = await fetch(`/api/leaves?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch applications');
-      const data = await res.json();
-      setApplications(data);
+      const json = await res.json();
+      setApplications(json.data ?? []);
     } catch (err) {
       console.error(err);
       toast.error('Failed to load leave applications');

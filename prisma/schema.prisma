@@ -7,6 +7,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id                  String   @id @default(cuid())
+  email               String   @unique
+  passwordHash        String
+  name                String
+  role                String   @default("employee") // "admin", "hr", "manager", "employee"
+  employeeId          String?  @unique
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model AuditLog {
+  id                  String   @id @default(cuid())
+  userId              String?
+  userEmail           String?
+  action              String   // "create", "update", "delete", "approve", "reject", "process", "login"
+  entity              String   // "Employee", "LeaveApplication", "PayrollRun", etc.
+  entityId            String?
+  details             String?  // JSON string of changed fields / summary
+  ipAddress           String?
+  createdAt           DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
 model Company {
   id                  String   @id @default(cuid())
   name                String
@@ -20,11 +48,28 @@ model Company {
   financialYearStart  String   @default("2025-04-01")
   payrollMonth        Int      @default(4)
   payrollYear         Int      @default(2025)
+  // Comma-separated day-of-week numbers that are paid non-working days every week: 0=Sunday..6=Saturday.
+  weeklyOffDays       String   @default("0")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   employees           Employee[]
   payrollRuns         PayrollRun[]
+  holidays            Holiday[]
+}
+
+model Holiday {
+  id                  String   @id @default(cuid())
+  companyId           String
+  name                String
+  date                DateTime
+  type                String   @default("holiday") // "holiday" (mandatory, paid) or "optional"
+  createdAt           DateTime @default(now())
+
+  company             Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, date])
+  @@index([companyId, date])
 }
 
 model Employee {
@@ -67,6 +112,86 @@ model Employee {
   leaveApplications   LeaveApplication[]
   leaveBalances       LeaveBalance[]
   payrollDetails      PayrollDetail[]
+  loans               EmployeeLoan[]
+  arrears             SalaryArrear[]
+  investmentDeclarations InvestmentDeclaration[]
+}
+
+// One declaration per employee per financial year — drives the old tax regime's real
+// 80C/80D deduction instead of only counting PF+ESI toward the 80C cap.
+model InvestmentDeclaration {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  year                Int      // financial year start (matches Company.payrollYear convention)
+  section80C          Float    @default(0) // LIC, PPF, ELSS, etc. — combined with PF+ESI, capped at 1.5L
+  section80D          Float    @default(0) // health insurance premium — capped separately
+  status              String   @default("declared") // "declared" | "verified"
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, year])
+}
+
+// A one-time earning added to a specific month's payroll: a retroactive salary correction
+// (arrear) or a leave-encashment payout. Not prorated by attendance like regular earnings.
+model SalaryArrear {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  amount              Float
+  reason              String?
+  payMonth            Int      // 1-12, the month this should be paid out in
+  payYear             Int
+  status              String   @default("pending") // "pending" | "paid" | "cancelled"
+  paidInRunId         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee   @relation(fields: [employeeId], references: [id])
+  paidInRun           PayrollRun? @relation(fields: [paidInRunId], references: [id])
+
+  @@index([employeeId])
+  @@index([payMonth, payYear])
+}
+
+model EmployeeLoan {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  loanType            String   // "loan" or "advance"
+  principal           Float
+  emiAmount           Float
+  totalMonths         Int
+  startMonth          Int      // 1-12
+  startYear           Int
+  status              String   @default("active") // "active", "closed", "cancelled"
+  reason              String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+  payments            LoanPayment[]
+
+  @@index([employeeId])
+}
+
+// One row per EMI actually deducted in a payroll run — the source of truth for "months paid",
+// rather than a mutable counter, so reprocessing a run (which deletes+recreates its rows) can't
+// double-charge or lose track of how many installments have been collected.
+model LoanPayment {
+  id                  String   @id @default(cuid())
+  loanId              String
+  payrollRunId        String
+  amount              Float
+  month               Int
+  year                Int
+  createdAt           DateTime @default(now())
+
+  loan                EmployeeLoan @relation(fields: [loanId], references: [id])
+  payrollRun          PayrollRun   @relation(fields: [payrollRunId], references: [id])
+
+  @@unique([loanId, payrollRunId])
+  @@index([payrollRunId])
 }
 
 model SalaryStructure {
@@ -111,7 +236,7 @@ model Attendance {
 
   employee            Employee @relation(fields: [employeeId], references: [id])
 
-  @@index([employeeId, date])
+  @@unique([employeeId, date])
 }
 
 model LeaveType {
@@ -161,6 +286,9 @@ model LeaveApplication {
 
   employee            Employee @relation(fields: [employeeId], references: [id])
   leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
 }
 
 model PayrollRun {
@@ -186,6 +314,8 @@ model PayrollRun {
 
   company             Company  @relation(fields: [companyId], references: [id])
   details             PayrollDetail[]
+  loanPayments        LoanPayment[]
+  arrearsPaid         SalaryArrear[]
 
   @@unique([companyId, month, year])
 }
@@ -207,6 +337,7 @@ model PayrollDetail {
   overtimeAllowance   Float
   bonus               Float
   otherEarnings       Float
+  arrears             Float    @default(0)
   totalEarnings       Float
   // Deductions
   employeePF          Float
@@ -229,4 +360,7 @@ model PayrollDetail {
 
   payrollRun          PayrollRun @relation(fields: [payrollRunId], references: [id])
   employee            Employee   @relation(fields: [employeeId], references: [id])
+
+  @@index([payrollRunId])
+  @@index([employeeId])
 }

@@ -51,6 +51,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
+import { useSessionContext } from '@/hooks/session-context';
+import { ScrollText, CalendarDays, Trash2, PlusCircle } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -70,7 +73,7 @@ const INDIAN_STATES = [
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface CompanySettings {
-  companyName: string;
+  name: string;
   address: string;
   pan: string;
   tan: string;
@@ -81,18 +84,64 @@ interface CompanySettings {
   financialYearStart: string;
   payrollMonth: string;
   payrollYear: string;
+  weeklyOffDays: number[];
 }
+
+interface Holiday {
+  id: string;
+  name: string;
+  date: string;
+  type: string;
+}
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 
+interface AuditLogEntry {
+  id: string;
+  userEmail: string | null;
+  action: string;
+  entity: string;
+  entityId: string | null;
+  details: string | null;
+  createdAt: string;
+}
+
 export default function SettingsView() {
   const { refreshKey } = usePayrollStore();
+  const { user } = useSessionContext();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotalPages, setAuditTotalPages] = useState(1);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const fetchAuditLogs = useCallback(async () => {
+    if (user?.role !== 'admin') return;
+    setAuditLoading(true);
+    try {
+      const res = await fetch(`/api/audit-log?page=${auditPage}&limit=20`);
+      if (!res.ok) throw new Error('Failed to load audit log');
+      const json = await res.json();
+      setAuditLogs(json.data ?? []);
+      setAuditTotalPages(json.totalPages ?? 1);
+    } catch {
+      toast.error('Failed to load audit log');
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [user?.role, auditPage]);
+
+  useEffect(() => {
+    fetchAuditLogs();
+  }, [fetchAuditLogs, refreshKey]);
+
   const [form, setForm] = useState<CompanySettings>({
-    companyName: '',
+    name: '',
     address: '',
     pan: '',
     tan: '',
@@ -103,6 +152,7 @@ export default function SettingsView() {
     financialYearStart: '',
     payrollMonth: '',
     payrollYear: '',
+    weeklyOffDays: [0],
   });
 
   const fetchSettings = useCallback(async () => {
@@ -110,8 +160,8 @@ export default function SettingsView() {
     try {
       const res = await fetch('/api/settings');
       if (!res.ok) throw new Error('Failed to fetch settings');
-      const data = await res.json();
-      setForm(data as CompanySettings);
+      const json = await res.json();
+      setForm(json.data as CompanySettings);
     } catch {
       toast.error('Failed to load company settings.');
     } finally {
@@ -122,6 +172,79 @@ export default function SettingsView() {
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings, refreshKey]);
+
+  // ─── Holidays ─────────────────────────────────────────────────────────────
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [holidaysLoading, setHolidaysLoading] = useState(false);
+  const [newHolidayName, setNewHolidayName] = useState('');
+  const [newHolidayDate, setNewHolidayDate] = useState('');
+  const [addingHoliday, setAddingHoliday] = useState(false);
+
+  const fetchHolidays = useCallback(async () => {
+    setHolidaysLoading(true);
+    try {
+      const res = await fetch(`/api/holidays?year=${new Date().getFullYear()}`);
+      if (!res.ok) throw new Error('Failed to load holidays');
+      const json = await res.json();
+      setHolidays(json.data ?? []);
+    } catch {
+      toast.error('Failed to load company holidays');
+    } finally {
+      setHolidaysLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHolidays();
+  }, [fetchHolidays, refreshKey]);
+
+  const handleAddHoliday = async () => {
+    if (!newHolidayName.trim() || !newHolidayDate) {
+      toast.error('Holiday name and date are required.');
+      return;
+    }
+    setAddingHoliday(true);
+    try {
+      const res = await fetch('/api/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newHolidayName.trim(), date: newHolidayDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add holiday');
+      toast.success(`Holiday "${newHolidayName.trim()}" added — applies to all employees.`);
+      setNewHolidayName('');
+      setNewHolidayDate('');
+      fetchHolidays();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add holiday');
+    } finally {
+      setAddingHoliday(false);
+    }
+  };
+
+  const handleDeleteHoliday = async (id: string, name: string) => {
+    if (!confirm(`Remove "${name}" from the company calendar? This affects payroll for every employee.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/holidays/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete holiday');
+      toast.success('Holiday removed');
+      fetchHolidays();
+    } catch {
+      toast.error('Failed to delete holiday');
+    }
+  };
+
+  const toggleWeeklyOffDay = (day: number) => {
+    setForm((prev) => ({
+      ...prev,
+      weeklyOffDays: prev.weeklyOffDays.includes(day)
+        ? prev.weeklyOffDays.filter((d) => d !== day)
+        : [...prev.weeklyOffDays, day].sort(),
+    }));
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -204,8 +327,8 @@ export default function SettingsView() {
                 <Input
                   id="company-name"
                   placeholder="e.g. Acme India Pvt. Ltd."
-                  value={form.companyName}
-                  onChange={(e) => updateField('companyName', e.target.value)}
+                  value={form.name}
+                  onChange={(e) => updateField('name', e.target.value)}
                 />
               </div>
 
@@ -788,6 +911,154 @@ export default function SettingsView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── Company Calendar: Weekly Off + Holidays ─────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CalendarDays className="h-4 w-4 text-emerald-600" />
+            Company Calendar
+          </CardTitle>
+          <CardDescription>
+            Weekly off days and holidays apply automatically to every employee&apos;s attendance and payroll — no manual marking needed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Weekly Off Days */}
+          <div>
+            <Label className="text-xs font-medium">Weekly Off Days</Label>
+            <div className="mt-2 flex flex-wrap gap-3">
+              {DAY_NAMES.map((dayName, idx) => (
+                <label key={idx} className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={form.weeklyOffDays.includes(idx)}
+                    onCheckedChange={() => toggleWeeklyOffDay(idx)}
+                    disabled={user?.role !== 'admin'}
+                  />
+                  {dayName}
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">Saved along with the rest of Company Settings — click Save below.</p>
+          </div>
+
+          <Separator />
+
+          {/* Holidays list */}
+          <div>
+            <Label className="text-xs font-medium">Holidays ({new Date().getFullYear()})</Label>
+            {user?.role !== 'employee' && (
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <Input
+                  placeholder="Holiday name (e.g. Diwali)"
+                  value={newHolidayName}
+                  onChange={(e) => setNewHolidayName(e.target.value)}
+                  className="sm:max-w-xs"
+                />
+                <Input
+                  type="date"
+                  value={newHolidayDate}
+                  onChange={(e) => setNewHolidayDate(e.target.value)}
+                  className="sm:max-w-[180px]"
+                />
+                <Button size="sm" onClick={handleAddHoliday} disabled={addingHoliday} className="gap-1.5">
+                  <PlusCircle className="h-4 w-4" />
+                  Add Holiday
+                </Button>
+              </div>
+            )}
+
+            <div className="mt-3 divide-y rounded-lg border">
+              {holidaysLoading ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
+              ) : holidays.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">No holidays configured yet.</div>
+              ) : (
+                holidays.map((h) => (
+                  <div key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                    <div>
+                      <span className="font-medium">{h.name}</span>{' '}
+                      <span className="text-muted-foreground">
+                        — {new Date(h.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}
+                      </span>
+                      {h.type === 'optional' && <Badge variant="outline" className="ml-2 text-[10px]">Optional</Badge>}
+                    </div>
+                    {user?.role !== 'employee' && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDeleteHoliday(h.id, h.name)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Audit Log (admin only) */}
+      {user?.role === 'admin' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ScrollText className="h-4 w-4 text-slate-500" />
+              Audit Log
+            </CardTitle>
+            <CardDescription>Recent create/update/delete/login activity across the system</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>When</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Entity</TableHead>
+                    <TableHead>Details</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {auditLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">
+                        Loading...
+                      </TableCell>
+                    </TableRow>
+                  ) : auditLogs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">
+                        No audit log entries yet.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    auditLogs.map((log) => (
+                      <TableRow key={log.id}>
+                        <TableCell className="text-xs whitespace-nowrap">{new Date(log.createdAt).toLocaleString('en-IN')}</TableCell>
+                        <TableCell className="text-xs">{log.userEmail ?? '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="capitalize">{log.action}</Badge>
+                        </TableCell>
+                        <TableCell className="text-xs">{log.entity}{log.entityId ? ` (${log.entityId.slice(0, 8)}…)` : ''}</TableCell>
+                        <TableCell className="max-w-xs truncate text-xs text-muted-foreground" title={log.details ?? ''}>{log.details ?? '—'}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+          <CardFooter className="flex items-center justify-between border-t px-6 py-3">
+            <Button variant="outline" size="sm" disabled={auditPage <= 1} onClick={() => setAuditPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <span className="text-xs text-muted-foreground">Page {auditPage} of {auditTotalPages}</span>
+            <Button variant="outline" size="sm" disabled={auditPage >= auditTotalPages} onClick={() => setAuditPage((p) => p + 1)}>
+              Next
+            </Button>
+          </CardFooter>
+        </Card>
+      )}
     </div>
   );
 }

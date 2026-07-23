@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { usePayrollStore } from '@/store/payroll-store';
-import { Menu, Database, User } from 'lucide-react';
+import { Menu, Database, User, LogOut, Sun, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { useSessionContext } from '@/hooks/session-context';
+import { useTheme } from 'next-themes';
 
 const viewTitles: Record<string, string> = {
   dashboard: 'Dashboard',
@@ -21,6 +23,8 @@ const viewTitles: Record<string, string> = {
 
 export function TopBar() {
   const { activeView, setSidebarOpen, triggerRefresh } = usePayrollStore();
+  const { user, logout } = useSessionContext();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   const [seeding, setSeeding] = useState(false);
   const [today, setToday] = useState('');
   const [mounted, setMounted] = useState(false);
@@ -36,9 +40,16 @@ export function TopBar() {
   }, []);
 
   const handleSeed = async () => {
+    if (!confirm('This will reset all demo data (employees, attendance, leaves, payroll runs). Continue?')) {
+      return;
+    }
     setSeeding(true);
     try {
-      const res = await fetch('/api/seed', { method: 'POST' });
+      const res = await fetch('/api/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'RESET_DEMO_DATA' }),
+      });
       const data = await res.json();
       if (data.success) {
         toast.success(data.message || 'Database seeded successfully!');
@@ -54,7 +65,7 @@ export function TopBar() {
   };
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-4 md:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b bg-background px-4 md:px-6">
       <div className="flex items-center gap-3">
         <Button
           variant="ghost"
@@ -65,34 +76,49 @@ export function TopBar() {
           <Menu className="h-5 w-5" />
         </Button>
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">{viewTitles[activeView] || 'Dashboard'}</h2>
+          <h2 className="text-lg font-semibold text-foreground">{viewTitles[activeView] || 'Dashboard'}</h2>
           {mounted && (
-            <p className="hidden text-xs text-slate-500 sm:block">{today}</p>
+            <p className="hidden text-xs text-muted-foreground sm:block">{today}</p>
           )}
         </div>
       </div>
 
       <div className="flex items-center gap-2 md:gap-3">
-        <Button
-          variant="outline"
-          size="sm"
-          className="hidden gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 sm:flex"
-          onClick={handleSeed}
-          disabled={seeding}
-        >
-          <Database className="h-4 w-4" />
-          {seeding ? 'Seeding...' : 'Seed Demo Data'}
-        </Button>
+        {user?.role === 'admin' && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="hidden gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 sm:flex"
+            onClick={handleSeed}
+            disabled={seeding}
+          >
+            <Database className="h-4 w-4" />
+            {seeding ? 'Seeding...' : 'Seed Demo Data'}
+          </Button>
+        )}
 
-        <Badge variant="outline" className="hidden border-emerald-200 text-emerald-700 md:inline-flex">
-          Admin
+        <Badge variant="outline" className="hidden border-emerald-200 text-emerald-700 md:inline-flex capitalize">
+          {user?.role ?? 'guest'}
         </Badge>
 
-        <Avatar className="h-8 w-8">
+        <Button
+          variant="ghost"
+          size="icon"
+          title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+        >
+          {mounted && theme ? (resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />) : <span className="h-4 w-4" />}
+        </Button>
+
+        <Avatar className="h-8 w-8" title={user?.name}>
           <AvatarFallback className="bg-emerald-600 text-xs text-white">
-            <User className="h-4 w-4" />
+            {user?.name ? user.name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() : <User className="h-4 w-4" />}
           </AvatarFallback>
         </Avatar>
+
+        <Button variant="ghost" size="icon" title="Log out" onClick={() => logout()}>
+          <LogOut className="h-4 w-4" />
+        </Button>
       </div>
     </header>
   );
