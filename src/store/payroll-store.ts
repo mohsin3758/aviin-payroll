@@ -6,8 +6,9 @@ export type ViewType =
   | 'attendance' 
   | 'leaves' 
   | 'payroll' 
-  | 'salary-slip' 
-  | 'reports' 
+  | 'salary-slip'
+  | 'form16'
+  | 'reports'
   | 'settings';
 
 interface PayrollStore {

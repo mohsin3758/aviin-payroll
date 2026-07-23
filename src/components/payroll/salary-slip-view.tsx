@@ -7,6 +7,7 @@ import {
   Loader2,
   Download,
   AlertCircle,
+  Mail,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -61,6 +62,7 @@ interface SalarySlipData {
     designation: string;
     department: string;
     pan: string;
+    email: string;
     bankName: string;
     bankAccountNumber: string;
     bankIfsc: string;
@@ -155,6 +157,7 @@ export default function SalarySlipView() {
   const [slip, setSlip] = useState<SalarySlipData | null>(null);
   const [loadingSlip, setLoadingSlip] = useState(false);
   const [slipGenerated, setSlipGenerated] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   /* --- Fetch employees --- */
   const fetchEmployees = useCallback(async () => {
@@ -206,6 +209,37 @@ export default function SalarySlipView() {
   /* --- Print --- */
   const handlePrint = () => {
     window.print();
+  };
+
+  /* --- Email --- */
+  const handleSendEmail = async () => {
+    if (!employeeId) return;
+    setSendingEmail(true);
+    try {
+      const res = await fetch('/api/salary-slip/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeId, month: Number(month), year: Number(year) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send email');
+
+      if (data.previewUrl) {
+        toast.success('Salary slip emailed (test mode)', {
+          description: 'Click to view the sent email',
+          action: {
+            label: 'Open preview',
+            onClick: () => window.open(data.previewUrl, '_blank'),
+          },
+        });
+      } else {
+        toast.success(`Salary slip emailed to ${slip?.employee.email}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send salary slip email');
+    } finally {
+      setSendingEmail(false);
+    }
   };
 
   return (
@@ -537,7 +571,7 @@ export default function SalarySlipView() {
               </div>
 
               {/* ── Print Button (hidden in print) ────────────────── */}
-              <div className="flex justify-center pt-2 no-print">
+              <div className="flex justify-center gap-3 pt-2 no-print">
                 <Button
                   variant="outline"
                   className="bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
@@ -545,6 +579,18 @@ export default function SalarySlipView() {
                 >
                   <Printer className="size-4" />
                   Print Slip
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={sendingEmail || !slip.employee.email}
+                  onClick={handleSendEmail}
+                >
+                  {sendingEmail ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Mail className="size-4" />
+                  )}
+                  Email Slip
                 </Button>
               </div>
             </div>

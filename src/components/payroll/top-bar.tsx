@@ -17,6 +17,7 @@ const viewTitles: Record<string, string> = {
   leaves: 'Leave Management',
   payroll: 'Payroll Processing',
   'salary-slip': 'Salary Slips',
+  form16: 'Form 16',
   reports: 'Compliance Reports',
   settings: 'Company Settings',
 };

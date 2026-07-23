@@ -787,70 +787,115 @@ export default function AttendanceView() {
               <p className="text-sm">No attendance records found for this period.</p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee Code</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Punch In</TableHead>
-                  <TableHead>Punch Out</TableHead>
-                  <TableHead>Total Hours</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {attendanceRecords.map((record, idx) => {
+            <>
+              <Table className="hidden md:table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Punch In</TableHead>
+                    <TableHead>Punch Out</TableHead>
+                    <TableHead>Total Hours</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attendanceRecords.map((record, idx) => {
+                    const statusCfg = STATUS_CONFIG[record.status] ?? STATUS_CONFIG.absent;
+                    const method = record.punchInMethod ?? record.punchOutMethod ?? 'N/A';
+                    return (
+                      <motion.tr
+                        key={record.id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.02 }}
+                        className={`border-b transition-colors hover:bg-muted/50 ${statusCfg.rowClass}`}
+                      >
+                        <TableCell className="font-mono text-xs">{record.employee.employeeCode}</TableCell>
+                        <TableCell className="font-medium">{record.employee.firstName} {record.employee.lastName}</TableCell>
+                        <TableCell className="text-sm">{formatDate(record.date)}</TableCell>
+                        <TableCell className="font-mono text-sm">{formatTime(record.punchIn)}</TableCell>
+                        <TableCell className="font-mono text-sm">{formatTime(record.punchOut)}</TableCell>
+                        <TableCell className="font-mono text-sm">{record.totalHours != null ? `${record.totalHours}h` : '--'}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={METHOD_BADGE[method] || ''}>
+                            {method}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={statusCfg.className}>
+                            {statusCfg.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setMarkEmployeeId(record.employeeId);
+                              setMarkDate(record.date.split('T')[0]);
+                              setMarkPunchIn(record.punchIn ? new Date(record.punchIn).toTimeString().slice(0, 5) : '');
+                              setMarkPunchOut(record.punchOut ? new Date(record.punchOut).toTimeString().slice(0, 5) : '');
+                              setMarkStatus(record.status);
+                              setMarkNotes(record.notes || '');
+                              setMarkDialogOpen(true);
+                            }}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        </TableCell>
+                      </motion.tr>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+
+              {/* Card list (mobile) */}
+              <div className="space-y-2 p-3 md:hidden">
+                {attendanceRecords.map((record) => {
                   const statusCfg = STATUS_CONFIG[record.status] ?? STATUS_CONFIG.absent;
                   const method = record.punchInMethod ?? record.punchOutMethod ?? 'N/A';
                   return (
-                    <motion.tr
-                      key={record.id}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.02 }}
-                      className={`border-b transition-colors hover:bg-muted/50 ${statusCfg.rowClass}`}
-                    >
-                      <TableCell className="font-mono text-xs">{record.employee.employeeCode}</TableCell>
-                      <TableCell className="font-medium">{record.employee.firstName} {record.employee.lastName}</TableCell>
-                      <TableCell className="text-sm">{formatDate(record.date)}</TableCell>
-                      <TableCell className="font-mono text-sm">{formatTime(record.punchIn)}</TableCell>
-                      <TableCell className="font-mono text-sm">{formatTime(record.punchOut)}</TableCell>
-                      <TableCell className="font-mono text-sm">{record.totalHours != null ? `${record.totalHours}h` : '--'}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={METHOD_BADGE[method] || ''}>
-                          {method}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={statusCfg.className}>
-                          {statusCfg.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setMarkEmployeeId(record.employeeId);
-                            setMarkDate(record.date.split('T')[0]);
-                            setMarkPunchIn(record.punchIn ? new Date(record.punchIn).toTimeString().slice(0, 5) : '');
-                            setMarkPunchOut(record.punchOut ? new Date(record.punchOut).toTimeString().slice(0, 5) : '');
-                            setMarkStatus(record.status);
-                            setMarkNotes(record.notes || '');
-                            setMarkDialogOpen(true);
-                          }}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                      </TableCell>
-                    </motion.tr>
+                    <div key={record.id} className={`rounded-lg border p-3 ${statusCfg.rowClass}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{record.employee.firstName} {record.employee.lastName}</div>
+                          <div className="text-xs text-muted-foreground">{record.employee.employeeCode} · {formatDate(record.date)}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Badge variant="outline" className={statusCfg.className}>{statusCfg.label}</Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="size-8 p-0"
+                            onClick={() => {
+                              setMarkEmployeeId(record.employeeId);
+                              setMarkDate(record.date.split('T')[0]);
+                              setMarkPunchIn(record.punchIn ? new Date(record.punchIn).toTimeString().slice(0, 5) : '');
+                              setMarkPunchOut(record.punchOut ? new Date(record.punchOut).toTimeString().slice(0, 5) : '');
+                              setMarkStatus(record.status);
+                              setMarkNotes(record.notes || '');
+                              setMarkDialogOpen(true);
+                            }}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span>In: <span className="font-mono">{formatTime(record.punchIn)}</span></span>
+                        <span>Out: <span className="font-mono">{formatTime(record.punchOut)}</span></span>
+                        <span>{record.totalHours != null ? `${record.totalHours}h` : '--'}</span>
+                        <Badge variant="outline" className={`${METHOD_BADGE[method] || ''} text-[10px]`}>{method}</Badge>
+                      </div>
+                    </div>
                   );
                 })}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

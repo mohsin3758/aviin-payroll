@@ -14,6 +14,7 @@ const AttendanceView = lazy(() => import('@/components/payroll/attendance-view')
 const LeavesView = lazy(() => import('@/components/payroll/leaves-view'));
 const PayrollView = lazy(() => import('@/components/payroll/payroll-view'));
 const SalarySlipView = lazy(() => import('@/components/payroll/salary-slip-view'));
+const Form16View = lazy(() => import('@/components/payroll/form16-view'));
 const ReportsView = lazy(() => import('@/components/payroll/reports-view'));
 const SettingsView = lazy(() => import('@/components/payroll/settings-view'));
 
@@ -42,6 +43,7 @@ function ViewRenderer() {
       {activeView === 'leaves' && <LeavesView key={key} />}
       {activeView === 'payroll' && <PayrollView key={key} />}
       {activeView === 'salary-slip' && <SalarySlipView key={key} />}
+      {activeView === 'form16' && <Form16View key={key} />}
       {activeView === 'reports' && <ReportsView key={key} />}
       {activeView === 'settings' && <SettingsView key={key} />}
     </Suspense>

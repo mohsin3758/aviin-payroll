@@ -15,6 +15,7 @@ import {
   IndianRupee,
   ChevronLeft,
   ChevronRight,
+  Award,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -28,6 +29,7 @@ const navItems: { id: ViewType; label: string; icon: React.ElementType }[] = [
   { id: 'leaves', label: 'Leave Mgmt', icon: CalendarOff },
   { id: 'payroll', label: 'Payroll', icon: Calculator },
   { id: 'salary-slip', label: 'Salary Slips', icon: FileText },
+  { id: 'form16', label: 'Form 16', icon: Award },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];

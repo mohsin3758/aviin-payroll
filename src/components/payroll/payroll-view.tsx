@@ -531,58 +531,85 @@ export default function PayrollView() {
               <p className="text-sm">No payroll runs found. Process your first payroll above.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Month</TableHead>
-                    <TableHead>Year</TableHead>
-                    <TableHead className="text-right">Employees</TableHead>
-                    <TableHead className="text-right">Total Gross</TableHead>
-                    <TableHead className="text-right">Total Deductions</TableHead>
-                    <TableHead className="text-right">Total Net</TableHead>
-                    <TableHead className="text-right">Total PF</TableHead>
-                    <TableHead className="text-right">Total ESI</TableHead>
-                    <TableHead className="text-right">Total TDS</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {runs.map((run) => (
-                    <TableRow key={run.id}>
-                      <TableCell className="font-medium">{MONTHS[run.month - 1]}</TableCell>
-                      <TableCell>{run.year}</TableCell>
-                      <TableCell className="text-right">{run.totalEmployees}</TableCell>
-                      <TableCell className="text-right">{fmt(run.totalGrossSalary)}</TableCell>
-                      <TableCell className="text-right">{fmt(run.totalDeductions)}</TableCell>
-                      <TableCell className="text-right font-semibold">{fmt(run.totalNetSalary)}</TableCell>
-                      <TableCell className="text-right">{fmt(run.totalEmployeePF)}</TableCell>
-                      <TableCell className="text-right">{fmt(run.totalEmployeeESI)}</TableCell>
-                      <TableCell className="text-right">{fmt(run.totalTDS)}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={statusColor[run.status] || ''}
-                        >
-                          {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openDetail(run.id)}
-                        >
-                          <Eye className="size-4 mr-1" />
-                          View
-                        </Button>
-                      </TableCell>
+            <>
+              <div className="hidden overflow-x-auto md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Month</TableHead>
+                      <TableHead>Year</TableHead>
+                      <TableHead className="text-right">Employees</TableHead>
+                      <TableHead className="text-right">Total Gross</TableHead>
+                      <TableHead className="text-right">Total Deductions</TableHead>
+                      <TableHead className="text-right">Total Net</TableHead>
+                      <TableHead className="text-right">Total PF</TableHead>
+                      <TableHead className="text-right">Total ESI</TableHead>
+                      <TableHead className="text-right">Total TDS</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => (
+                      <TableRow key={run.id}>
+                        <TableCell className="font-medium">{MONTHS[run.month - 1]}</TableCell>
+                        <TableCell>{run.year}</TableCell>
+                        <TableCell className="text-right">{run.totalEmployees}</TableCell>
+                        <TableCell className="text-right">{fmt(run.totalGrossSalary)}</TableCell>
+                        <TableCell className="text-right">{fmt(run.totalDeductions)}</TableCell>
+                        <TableCell className="text-right font-semibold">{fmt(run.totalNetSalary)}</TableCell>
+                        <TableCell className="text-right">{fmt(run.totalEmployeePF)}</TableCell>
+                        <TableCell className="text-right">{fmt(run.totalEmployeeESI)}</TableCell>
+                        <TableCell className="text-right">{fmt(run.totalTDS)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={statusColor[run.status] || ''}
+                          >
+                            {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openDetail(run.id)}
+                          >
+                            <Eye className="size-4 mr-1" />
+                            View
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Card list (mobile) */}
+              <div className="space-y-2 md:hidden">
+                {runs.map((run) => (
+                  <div key={run.id} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-medium">{MONTHS[run.month - 1]} {run.year}</div>
+                        <div className="text-xs text-muted-foreground">{run.totalEmployees} employees</div>
+                      </div>
+                      <Badge variant="outline" className={statusColor[run.status] || ''}>
+                        {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Net Salary</span>
+                      <span className="font-semibold">{fmt(run.totalNetSalary)}</span>
+                    </div>
+                    <Button variant="outline" size="sm" className="mt-2 w-full" onClick={() => openDetail(run.id)}>
+                      <Eye className="size-4 mr-1" />
+                      View Details
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
