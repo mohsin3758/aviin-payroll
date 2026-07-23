@@ -164,7 +164,7 @@ export default function DashboardView() {
         /* non-critical widget, fail silently */
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   /* ---- Derived ---- */
