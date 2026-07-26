@@ -35,6 +35,15 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Settings,
   Building2,
@@ -48,6 +57,9 @@ import {
   Banknote,
   FileCheck,
   Users,
+  KeyRound,
+  UserPlus,
+  Ban,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
@@ -107,6 +119,24 @@ interface AuditLogEntry {
   details: string | null;
   createdAt: string;
 }
+
+type UserRole = 'admin' | 'hr' | 'manager' | 'employee';
+
+interface ManagedUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  active: boolean;
+  createdAt: string;
+}
+
+const ROLE_BADGE: Record<UserRole, string> = {
+  admin: 'bg-red-100 text-red-800 border-red-200',
+  hr: 'bg-violet-100 text-violet-800 border-violet-200',
+  manager: 'bg-blue-100 text-blue-800 border-blue-200',
+  employee: 'bg-slate-100 text-slate-800 border-slate-200',
+};
 
 export default function SettingsView() {
   const { refreshKey } = usePayrollStore();
@@ -286,6 +316,165 @@ export default function SettingsView() {
     { range: 'Above ₹10,00,000', rate: '30%' },
   ];
 
+  // ─── Users: change own password ──────────────────────────────────────────────
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const handleChangeMyPassword = async () => {
+    if (newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('New password and confirmation do not match.');
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to change password');
+
+      toast.success('Password changed successfully.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to change password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  // ─── Users: admin management ─────────────────────────────────────────────────
+
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
+
+  const fetchUsers = useCallback(async () => {
+    if (user?.role !== 'admin') return;
+    setUsersLoading(true);
+    try {
+      const res = await fetch('/api/users');
+      if (!res.ok) throw new Error('Failed to load users');
+      const json = await res.json();
+      setUsers(json.data ?? []);
+    } catch {
+      toast.error('Failed to load users');
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [user?.role]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers, refreshKey]);
+
+  const handleToggleActive = async (target: ManagedUser) => {
+    setTogglingUserId(target.id);
+    try {
+      const res = await fetch(`/api/users/${target.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !target.active }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update user');
+
+      toast.success(`${target.name} ${target.active ? 'deactivated' : 'reactivated'}.`);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update user');
+    } finally {
+      setTogglingUserId(null);
+    }
+  };
+
+  // Add user dialog
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('employee');
+  const [creatingUser, setCreatingUser] = useState(false);
+
+  const handleCreateUser = async () => {
+    if (!newUserEmail.trim() || !newUserName.trim()) {
+      toast.error('Name and email are required.');
+      return;
+    }
+    if (newUserPassword.length < 8) {
+      toast.error('Password must be at least 8 characters.');
+      return;
+    }
+    setCreatingUser(true);
+    try {
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: newUserEmail.trim(),
+          name: newUserName.trim(),
+          password: newUserPassword,
+          role: newUserRole,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create user');
+
+      toast.success(`User "${newUserName.trim()}" created.`);
+      setAddUserOpen(false);
+      setNewUserEmail('');
+      setNewUserName('');
+      setNewUserPassword('');
+      setNewUserRole('employee');
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create user');
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  // Reset password dialog
+  const [resetTarget, setResetTarget] = useState<ManagedUser | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+
+  const handleResetPassword = async () => {
+    if (!resetTarget) return;
+    if (resetPasswordValue.length < 8) {
+      toast.error('New password must be at least 8 characters.');
+      return;
+    }
+    setResettingPassword(true);
+    try {
+      const res = await fetch(`/api/users/${resetTarget.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: resetPasswordValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to reset password');
+
+      toast.success(`Password reset for ${resetTarget.name}.`);
+      setResetTarget(null);
+      setResetPasswordValue('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reset password');
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -302,6 +491,20 @@ export default function SettingsView() {
           </p>
         </div>
       </div>
+
+      <Tabs defaultValue="company">
+        <TabsList>
+          <TabsTrigger value="company" className="gap-1.5">
+            <Building2 className="size-4" />
+            Company
+          </TabsTrigger>
+          <TabsTrigger value="users" className="gap-1.5">
+            <Users className="size-4" />
+            Users
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="company" className="space-y-6">
 
       {/* ─── 1. Company Information ──────────────────────────────────────────── */}
       <Card>
@@ -1059,6 +1262,229 @@ export default function SettingsView() {
           </CardFooter>
         </Card>
       )}
+
+        </TabsContent>
+
+        <TabsContent value="users" className="space-y-6">
+          {/* ─── Change My Password ──────────────────────────────────────────── */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound className="h-4 w-4 text-emerald-600" />
+                Change My Password
+              </CardTitle>
+              <CardDescription>Update the password for your own account ({user?.email})</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 max-w-md">
+              <div className="space-y-1.5">
+                <Label htmlFor="current-password">Current Password</Label>
+                <Input
+                  id="current-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="new-password">New Password</Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm-new-password">Confirm New Password</Label>
+                <Input
+                  id="confirm-new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                />
+              </div>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={changingPassword || !currentPassword || !newPassword}
+                onClick={handleChangeMyPassword}
+              >
+                {changingPassword ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+                Change Password
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* ─── Manage Users (admin only) ───────────────────────────────────── */}
+          {user?.role === 'admin' && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Users className="h-4 w-4 text-emerald-600" />
+                    Manage Users
+                  </CardTitle>
+                  <CardDescription>Create logins and control access for your team</CardDescription>
+                </div>
+                <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
+                  <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setAddUserOpen(true)}>
+                    <UserPlus className="h-4 w-4" />
+                    Add User
+                  </Button>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add User</DialogTitle>
+                      <DialogDescription>Create a new login for a team member.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="new-user-name">Name</Label>
+                        <Input id="new-user-name" value={newUserName} onChange={(e) => setNewUserName(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="new-user-email">Email</Label>
+                        <Input id="new-user-email" type="email" value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="new-user-password">Password</Label>
+                        <Input id="new-user-password" type="password" autoComplete="new-password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="new-user-role">Role</Label>
+                        <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as UserRole)}>
+                          <SelectTrigger id="new-user-role" className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="hr">HR</SelectItem>
+                            <SelectItem value="manager">Manager</SelectItem>
+                            <SelectItem value="employee">Employee</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setAddUserOpen(false)} disabled={creatingUser}>
+                        Cancel
+                      </Button>
+                      <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleCreateUser} disabled={creatingUser}>
+                        {creatingUser ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
+                        Create User
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {usersLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">
+                            Loading...
+                          </TableCell>
+                        </TableRow>
+                      ) : users.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">
+                            No users found.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        users.map((u) => (
+                          <TableRow key={u.id}>
+                            <TableCell className="font-medium">
+                              {u.name}
+                              {u.id === user?.id && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
+                            </TableCell>
+                            <TableCell className="text-xs">{u.email}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`${ROLE_BADGE[u.role]} capitalize`}>{u.role}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={u.active ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}>
+                                {u.active ? 'Active' : 'Deactivated'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1.5">
+                                <Button variant="ghost" size="sm" onClick={() => { setResetTarget(u); setResetPasswordValue(''); }}>
+                                  <KeyRound className="size-3.5 mr-1" />
+                                  Reset Password
+                                </Button>
+                                {u.id !== user?.id && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className={u.active ? 'text-red-600 hover:text-red-700' : 'text-emerald-600 hover:text-emerald-700'}
+                                    disabled={togglingUserId === u.id}
+                                    onClick={() => handleToggleActive(u)}
+                                  >
+                                    {togglingUserId === u.id ? (
+                                      <Loader2 className="size-3.5 mr-1 animate-spin" />
+                                    ) : (
+                                      <Ban className="size-3.5 mr-1" />
+                                    )}
+                                    {u.active ? 'Deactivate' : 'Reactivate'}
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ─── Reset Password Dialog ───────────────────────────────────────── */}
+          <Dialog open={!!resetTarget} onOpenChange={(open) => !open && setResetTarget(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Reset Password</DialogTitle>
+                <DialogDescription>
+                  Set a new password for {resetTarget?.name} ({resetTarget?.email}). They will need to use it on their next login.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-1.5">
+                <Label htmlFor="reset-password-value">New Password</Label>
+                <Input
+                  id="reset-password-value"
+                  type="password"
+                  autoComplete="new-password"
+                  value={resetPasswordValue}
+                  onChange={(e) => setResetPasswordValue(e.target.value)}
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setResetTarget(null)} disabled={resettingPassword}>
+                  Cancel
+                </Button>
+                <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleResetPassword} disabled={resettingPassword}>
+                  {resettingPassword ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+                  Reset Password
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
