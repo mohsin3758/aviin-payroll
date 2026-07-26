@@ -6,6 +6,14 @@ import { Menu, Database, User, LogOut, Sun, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { useSessionContext } from '@/hooks/session-context';
 import { useTheme } from 'next-themes';
@@ -111,15 +119,31 @@ export function TopBar() {
           {mounted && theme ? (resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />) : <span className="h-4 w-4" />}
         </Button>
 
-        <Avatar className="h-8 w-8" title={user?.name}>
-          <AvatarFallback className="bg-emerald-600 text-xs text-white">
-            {user?.name ? user.name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() : <User className="h-4 w-4" />}
-          </AvatarFallback>
-        </Avatar>
-
-        <Button variant="ghost" size="icon" title="Log out" onClick={() => logout()}>
-          <LogOut className="h-4 w-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="rounded-full outline-none ring-emerald-600 focus-visible:ring-2">
+              <Avatar className="h-8 w-8 cursor-pointer" title={user?.name}>
+                <AvatarFallback className="bg-emerald-600 text-xs text-white">
+                  {user?.name ? user.name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() : <User className="h-4 w-4" />}
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>
+              <div className="font-medium">{user?.name}</div>
+              <div className="text-xs font-normal text-muted-foreground">{user?.email}</div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => logout()}
+            >
+              <LogOut className="h-4 w-4" />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
