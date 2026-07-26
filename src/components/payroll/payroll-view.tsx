@@ -13,6 +13,7 @@ import {
   Download,
   Wallet,
   X,
+  Mail,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -195,6 +196,8 @@ export default function PayrollView() {
   const [selectedRun, setSelectedRun] = useState<PayrollRunDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [emailingSlips, setEmailingSlips] = useState(false);
+  const [emailConfirmOpen, setEmailConfirmOpen] = useState(false);
 
   // Arrears dialog state
   const [arrearsOpen, setArrearsOpen] = useState(false);
@@ -310,6 +313,30 @@ export default function PayrollView() {
       toast.success('Bank file downloaded');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to generate bank file');
+    }
+  };
+
+  /* --- Bulk email slips --- */
+  const handleEmailAllSlips = async (runId: string) => {
+    setEmailingSlips(true);
+    try {
+      const res = await fetch('/api/salary-slip/send-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payrollRunId: runId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to email salary slips');
+
+      const parts = [`${data.sent} sent`];
+      if (data.skipped) parts.push(`${data.skipped} skipped (no email)`);
+      if (data.failed) parts.push(`${data.failed} failed`);
+      toast[data.failed ? 'warning' : 'success'](`Salary slips: ${parts.join(', ')}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to email salary slips');
+    } finally {
+      setEmailingSlips(false);
+      setEmailConfirmOpen(false);
     }
   };
 
@@ -671,7 +698,38 @@ export default function PayrollView() {
               )}
 
               {selectedRun.status !== 'draft' && (
-                <div className="flex justify-end">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <AlertDialog open={emailConfirmOpen} onOpenChange={setEmailConfirmOpen}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      >
+                        <Mail className="size-4" />
+                        Email All Slips
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Email All Salary Slips</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Send a salary slip email to all {selectedRun.totalEmployees} employees in this{' '}
+                          {MONTHS[selectedRun.month - 1]} {selectedRun.year} payroll run?
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={emailingSlips}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => handleEmailAllSlips(selectedRun.id)}
+                          disabled={emailingSlips}
+                        >
+                          <Mail className="size-4" />
+                          Send Emails
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                   <Button
                     size="sm"
                     variant="outline"

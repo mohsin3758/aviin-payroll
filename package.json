@@ -20,7 +20,6 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.4.0",
-    "@mdxeditor/editor": "^3.55.0",
     "@prisma/client": "^6.19.3",
     "@radix-ui/react-accordion": "^1.2.17",
     "@radix-ui/react-alert-dialog": "^1.1.20",
@@ -74,7 +73,6 @@
     "react-hook-form": "^7.82.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.6",
-    "react-syntax-highlighter": "^15.6.6",
     "recharts": "^2.15.4",
     "sharp": "^0.35.3",
     "sonner": "^2.0.7",
@@ -84,6 +82,17 @@
     "z-ai-web-dev-sdk": "^0.0.18",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.22",
+      "sharp": "^0.35.3"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": {
+        "brace-expansion": "^5.0.8"
+      }
+    }
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

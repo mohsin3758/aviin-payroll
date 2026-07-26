@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Award, Printer, Loader2, AlertCircle } from 'lucide-react';
+import { Award, Printer, Loader2, AlertCircle, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { usePayrollStore } from '@/store/payroll-store';
 
 /* ------------------------------------------------------------------ */
@@ -102,6 +113,9 @@ export default function Form16View() {
   const [loading, setLoading] = useState(false);
   const [generated, setGenerated] = useState(false);
 
+  const [bulkSending, setBulkSending] = useState(false);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+
   const fetchEmployees = useCallback(async () => {
     setLoadingEmps(true);
     try {
@@ -145,6 +159,29 @@ export default function Form16View() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleBulkSend = async () => {
+    setBulkSending(true);
+    try {
+      const res = await fetch('/api/form16/send-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fyStartYear: Number(fyStartYear) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send Form 16 emails');
+
+      const parts = [`${data.sent} sent`];
+      if (data.skipped) parts.push(`${data.skipped} skipped (no data or email)`);
+      if (data.failed) parts.push(`${data.failed} failed`);
+      toast[data.failed ? 'warning' : 'success'](`Form 16: ${parts.join(', ')}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send Form 16 emails');
+    } finally {
+      setBulkSending(false);
+      setBulkConfirmOpen(false);
+    }
   };
 
   return (
@@ -241,6 +278,32 @@ export default function Form16View() {
               )}
               Generate Form 16
             </Button>
+
+            <AlertDialog open={bulkConfirmOpen} onOpenChange={setBulkConfirmOpen}>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline">
+                  <Mail className="size-4" />
+                  Email All Employees
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Email Form 16 to All Employees</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Send Form 16 (Part B) for FY {fyStartYear}-{String((Number(fyStartYear) + 1) % 100).padStart(2, '0')}{' '}
+                    to every employee with processed payroll in that year? Employees with no data for
+                    this FY will be skipped automatically.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={bulkSending}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleBulkSend} disabled={bulkSending}>
+                    <Mail className="size-4" />
+                    Send Emails
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </CardContent>
       </Card>
