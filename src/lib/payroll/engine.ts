@@ -604,6 +604,71 @@ export function getDaysInMonth(month: number, year: number): number {
   return new Date(year, month, 0).getDate();
 }
 
+// ============================================================
+// Alternate pay modes: daily wage, hourly, contractor
+// ============================================================
+// These bypass the monthly slab-based salaried engine above entirely — no PF/ESI/PT/LWF/TDS
+// slab computation, since daily-wage/hourly/contractor workers are paid per unit worked (or a
+// flat invoiced amount for contractors) rather than a prorated standing monthly structure.
+
+// Default TDS rate for contractor payments, u/s 194J (professional/technical fees). Real
+// contract-work payments (194C) are often 1-2% instead — which section actually applies
+// depends on the nature of the engagement and requires case-by-case CA/legal judgment, so this
+// is deliberately exposed as a configurable rate rather than a silently-assumed determination.
+export const CONTRACTOR_TDS_RATE = 0.10;
+
+export type AlternateWageType = "daily_wage" | "hourly" | "contractor";
+
+export interface AlternatePayrollResult {
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  wageType: AlternateWageType;
+  unitsWorked: number; // days, hours, or invoiced units depending on wageType
+  rate: number;
+  grossPay: number;
+  tds: number;
+  netPay: number;
+}
+
+export function calculateDailyWagePay(dailyRate: number, daysWorked: number): number {
+  return Math.round(dailyRate * daysWorked);
+}
+
+export function calculateHourlyWagePay(hourlyRate: number, hoursWorked: number): number {
+  return Math.round(hourlyRate * hoursWorked);
+}
+
+export function processAlternateEmployeePayroll(
+  emp: { id: string; employeeCode: string; firstName: string; lastName: string | null },
+  wageType: AlternateWageType,
+  rate: number,
+  unitsWorked: number,
+  contractorTdsRate: number = CONTRACTOR_TDS_RATE
+): AlternatePayrollResult {
+  const grossPay =
+    wageType === "daily_wage"
+      ? calculateDailyWagePay(rate, unitsWorked)
+      : wageType === "hourly"
+        ? calculateHourlyWagePay(rate, unitsWorked)
+        : Math.round(rate * unitsWorked); // contractor: rate is a flat per-unit/invoice amount
+
+  const tds = wageType === "contractor" ? Math.round(grossPay * contractorTdsRate) : 0;
+  const netPay = grossPay - tds;
+
+  return {
+    employeeId: emp.id,
+    employeeCode: emp.employeeCode,
+    employeeName: `${emp.firstName} ${emp.lastName ?? ""}`.trim(),
+    wageType,
+    unitsWorked,
+    rate,
+    grossPay,
+    tds,
+    netPay,
+  };
+}
+
 // Helper: Get month name
 export function getMonthName(month: number): string {
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];

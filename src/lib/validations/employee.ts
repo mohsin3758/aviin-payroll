@@ -21,6 +21,8 @@ const salaryStructureSchema = z.object({
   employerPF: z.coerce.number().min(0).default(0),
   employerESI: z.coerce.number().min(0).default(0),
   gratuity: z.coerce.number().min(0).default(0),
+  dailyRate: z.coerce.number().min(0).nullable().optional(),
+  hourlyRate: z.coerce.number().min(0).nullable().optional(),
 });
 
 // Explicit allowlist — this is the entire set of client-writable Employee fields.
@@ -41,6 +43,7 @@ export const createEmployeeSchema = z.object({
   designation: z.string().trim().min(1).max(100),
   department: z.string().trim().min(1).max(100),
   state: z.string().trim().min(1).max(50).default("Maharashtra"),
+  employmentType: z.enum(["permanent", "contractor", "daily_wage", "hourly"]).default("permanent"),
   panNumber: z
     .string()
     .trim()

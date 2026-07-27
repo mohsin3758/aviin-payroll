@@ -23,6 +23,7 @@ ENV HOSTNAME=0.0.0.0
 # Overridden by docker-compose / -e for a real deployment; this default is dev-only.
 ENV JWT_SECRET=dev-only-insecure-secret-change-me
 ENV DATABASE_URL=file:/app/db/custom.db
+ENV UPLOADS_DIR=/app/uploads
 
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs
@@ -40,7 +41,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY docker/healthcheck.js ./healthcheck.js
 COPY docker/docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh \
-  && mkdir -p /app/db \
+  && mkdir -p /app/db /app/uploads \
   && chown -R nextjs:nodejs /app
 
 USER nextjs

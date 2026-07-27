@@ -18,11 +18,16 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get("month");
     const year = searchParams.get("year");
     const status = searchParams.get("status");
+    // Defaults to the regular monthly cycle so this list — and the Payroll Processing view
+    // built around it — isn't unexpectedly mixed with off-cycle/alternate-pay runs. Pass
+    // ?runType=all to see everything, or a specific value to filter to just that type.
+    const runType = searchParams.get("runType") ?? "regular";
 
     const where: Record<string, unknown> = {};
     if (month) where.month = parseInt(month, 10);
     if (year) where.year = parseInt(year, 10);
     if (status) where.status = status;
+    if (runType !== "all") where.runType = runType;
 
     const payrollRuns = await db.payrollRun.findMany({
       where,
@@ -62,7 +67,7 @@ export async function POST(request: NextRequest) {
     // Guard: never allow silently overwriting a run that's already paid.
     // A "processed" (draft-reviewed) run can be recalculated once, explicitly, via force:true.
     const existingRun = await db.payrollRun.findUnique({
-      where: { companyId_month_year: { companyId: company.id, month, year } },
+      where: { companyId_month_year_runType: { companyId: company.id, month, year, runType: "regular" } },
     });
     if (existingRun) {
       if (existingRun.status === "paid") {
@@ -347,10 +352,11 @@ export async function POST(request: NextRequest) {
     // 4. Create/update PayrollRun with aggregated totals
     const payrollRun = await db.payrollRun.upsert({
       where: {
-        companyId_month_year: {
+        companyId_month_year_runType: {
           companyId: company.id,
           month,
           year,
+          runType: "regular",
         },
       },
       create: {

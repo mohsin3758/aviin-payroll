@@ -7,6 +7,7 @@ export const createUserSchema = z.object({
   password: z.string().min(8).max(100),
   name: z.string().trim().min(1).max(100),
   role: z.enum(ROLES),
+  employeeId: z.string().min(1).nullable().optional(),
 });
 
 export const updateUserSchema = z.object({

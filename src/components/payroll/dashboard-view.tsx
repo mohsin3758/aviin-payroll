@@ -26,6 +26,9 @@ import {
   Building2,
   DollarSign,
   CalendarDays,
+  Clock,
+  LogOut,
+  TrendingDown,
 } from 'lucide-react';
 import {
   PieChart,
@@ -89,6 +92,12 @@ interface DashboardData {
   salaryStats: SalaryStats | null;
   departmentCounts: DepartmentCount[];
   stateCounts: { state: string; count: number }[];
+  exitAnalytics: {
+    pendingExitApprovals: number;
+    employeesInNotice: number;
+    exitsThisMonth: number;
+    exitsThisQuarter: number;
+  };
   recentPayrollRuns: PayrollRunRow[];
 }
 
@@ -634,6 +643,72 @@ export default function DashboardView() {
             </Button>
           </CardContent>
         </Card>
+      </div>
+
+      {/* ============================================================ */}
+      {/*  Exit Analytics                                              */}
+      {/* ============================================================ */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Exit Analytics</h3>
+          <Button variant="ghost" size="sm" className="text-emerald-700" onClick={() => setActiveView('exit-management')}>
+            View Exit Management
+          </Button>
+        </div>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Card className="bg-white rounded-xl border shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="flex size-12 items-center justify-center rounded-full bg-amber-50 text-amber-600">
+                  <ClipboardCheck className="size-6" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{data.exitAnalytics.pendingExitApprovals}</p>
+                  <p className="text-sm text-muted-foreground">Pending Exit Approvals</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-white rounded-xl border shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="flex size-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                  <Clock className="size-6" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{data.exitAnalytics.employeesInNotice}</p>
+                  <p className="text-sm text-muted-foreground">Serving Notice Period</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-white rounded-xl border shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="flex size-12 items-center justify-center rounded-full bg-red-50 text-red-600">
+                  <LogOut className="size-6" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{data.exitAnalytics.exitsThisMonth}</p>
+                  <p className="text-sm text-muted-foreground">Exits This Month</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-white rounded-xl border shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="flex size-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+                  <TrendingDown className="size-6" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{data.exitAnalytics.exitsThisQuarter}</p>
+                  <p className="text-sm text-muted-foreground">Exits This Quarter</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

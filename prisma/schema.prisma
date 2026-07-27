@@ -17,6 +17,8 @@ model User {
   active              Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  employee            Employee? @relation(fields: [employeeId], references: [id])
 }
 
 model AuditLog {
@@ -48,6 +50,7 @@ model Company {
   financialYearStart  String   @default("2025-04-01")
   payrollMonth        Int      @default(4)
   payrollYear         Int      @default(2025)
+  defaultNoticePeriodDays Int  @default(30)
   // Comma-separated day-of-week numbers that are paid non-working days every week: 0=Sunday..6=Saturday.
   weeklyOffDays       String   @default("0")
   createdAt           DateTime @default(now())
@@ -85,6 +88,7 @@ model Employee {
   designation         String
   department          String
   state               String   @default("Maharashtra")
+  employmentType      String   @default("permanent") // "permanent" | "contractor" | "daily_wage" | "hourly"
   panNumber           String?
   aadhaarNumber       String?
   bankName            String?
@@ -115,6 +119,19 @@ model Employee {
   loans               EmployeeLoan[]
   arrears             SalaryArrear[]
   investmentDeclarations InvestmentDeclaration[]
+  user                User?
+  familyMembers       EmployeeFamilyMember[]
+  education           EmployeeEducation[]
+  experiences         EmployeeExperience[]
+  documents           EmployeeDocument[]
+  assets              EmployeeAsset[]
+  helpDeskTickets     HelpDeskTicket[]
+  onboardingTasks     OnboardingTask[]
+  exitRequest         ExitRequest?
+  finalSettlements    FinalSettlement[]
+  salaryRevisions     SalaryRevision[]
+  expenseClaims       ExpenseClaim[]
+  employeeShifts      EmployeeShift[]
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
@@ -134,12 +151,14 @@ model InvestmentDeclaration {
   @@unique([employeeId, year])
 }
 
-// A one-time earning added to a specific month's payroll: a retroactive salary correction
-// (arrear) or a leave-encashment payout. Not prorated by attendance like regular earnings.
+// A one-time earning (or, when type="recovery", a clawback) added to a specific month's
+// payroll: a retroactive salary correction, a leave-encashment payout, an approved expense
+// reimbursement, or a retro-payroll recovery. Not prorated by attendance like regular earnings.
 model SalaryArrear {
   id                  String   @id @default(cuid())
   employeeId          String
   amount              Float
+  type                String   @default("arrear") // "arrear" | "recovery"
   reason              String?
   payMonth            Int      // 1-12, the month this should be paid out in
   payYear             Int
@@ -210,6 +229,8 @@ model SalaryStructure {
   employerPF          Float    @default(0) // for CTC display
   employerESI         Float    @default(0) // for CTC display
   gratuity            Float    @default(0) // for CTC display
+  dailyRate           Float?   // only used when Employee.employmentType = "daily_wage"
+  hourlyRate          Float?   // only used when Employee.employmentType = "hourly"
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -296,6 +317,7 @@ model PayrollRun {
   companyId           String
   month               Int      // 1-12
   year                Int
+  runType             String   @default("regular") // "regular" | "off_cycle" — lets an off-cycle run (e.g. bonus-only) coexist with the regular run in the same month
   status              String   @default("draft") // "draft", "processed", "paid"
   totalEmployees      Int      @default(0)
   totalGrossSalary    Float    @default(0)
@@ -317,7 +339,7 @@ model PayrollRun {
   loanPayments        LoanPayment[]
   arrearsPaid         SalaryArrear[]
 
-  @@unique([companyId, month, year])
+  @@unique([companyId, month, year, runType])
 }
 
 model PayrollDetail {
@@ -362,5 +384,280 @@ model PayrollDetail {
   employee            Employee   @relation(fields: [employeeId], references: [id])
 
   @@index([payrollRunId])
+  @@index([employeeId])
+}
+
+model EmployeeFamilyMember {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  name                String
+  relation            String   // "spouse" | "father" | "mother" | "child" | "other"
+  dateOfBirth         DateTime?
+  occupation          String?
+  isDependent         Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+}
+
+model EmployeeEducation {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  degree              String
+  institution         String
+  yearOfPassing       Int
+  grade               String?
+  createdAt           DateTime @default(now())
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+}
+
+model EmployeeExperience {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  companyName         String
+  designation         String
+  fromDate            DateTime
+  toDate              DateTime?
+  reasonForLeaving    String?
+  createdAt           DateTime @default(now())
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+}
+
+// Uploaded/generated files (ID proofs, offer/appointment/experience/relieving letters, etc.),
+// stored on local disk under a Docker-volume-backed uploads directory. verifiedStatus backs a
+// manual HR-attestation flow — there is no real UIDAI/NSDL government verification API wired
+// here (that requires regulated API access this deployment doesn't have).
+model EmployeeDocument {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  docType             String   // "pan" | "aadhaar" | "passport" | "offer_letter" | "appointment_letter" | "experience_letter" | "relieving_letter" | "other"
+  fileName            String
+  filePath            String   // relative path under the uploads volume
+  mimeType            String
+  uploadedBy          String?  // User id
+  verifiedStatus      String   @default("pending") // "pending" | "verified" | "rejected"
+  verifiedBy          String?
+  verifiedAt          DateTime?
+  createdAt           DateTime @default(now())
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@index([docType])
+}
+
+model EmployeeAsset {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  assetType           String   // "laptop" | "phone" | "id_card" | "other"
+  assetTag            String?
+  allocatedDate       DateTime @default(now())
+  returnedDate        DateTime?
+  condition           String?
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+}
+
+model Notification {
+  id                  String   @id @default(cuid())
+  userId              String
+  title               String
+  message             String
+  category            String   @default("general") // "leave" | "payroll" | "exit" | "onboarding" | "helpdesk" | "general"
+  link                String?  // optional deep-link (a ViewType string)
+  isRead              Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model HelpDeskTicket {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  subject             String
+  message             String
+  category            String   @default("general") // "payroll" | "leave" | "it" | "hr" | "general"
+  status              String   @default("open") // "open" | "in_progress" | "resolved" | "closed"
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+  replies             HelpDeskReply[]
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+model HelpDeskReply {
+  id                  String   @id @default(cuid())
+  ticketId            String
+  authorUserId        String
+  authorName          String
+  message             String
+  createdAt           DateTime @default(now())
+
+  ticket              HelpDeskTicket @relation(fields: [ticketId], references: [id])
+
+  @@index([ticketId])
+}
+
+model OnboardingTask {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  taskName            String
+  isCompleted         Boolean  @default(false)
+  completedBy         String?
+  completedAt         DateTime?
+  order               Int      @default(0)
+  createdAt           DateTime @default(now())
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+}
+
+// Two-stage resignation approval: employee submits -> reporting manager approves/rejects ->
+// HR approves/rejects. lastWorkingDate is computed at creation (resignationDate + notice
+// period) so the checklist/final-settlement flow has a fixed target date to work against.
+model ExitRequest {
+  id                  String   @id @default(cuid())
+  employeeId          String   @unique
+  resignationDate     DateTime
+  noticePeriodDays    Int
+  lastWorkingDate     DateTime
+  reason              String?
+  status              String   @default("pending_manager") // "pending_manager" | "pending_hr" | "approved" | "rejected" | "withdrawn"
+  managerApprovedBy   String?
+  managerApprovedAt   DateTime?
+  managerComment      String?
+  hrApprovedBy        String?
+  hrApprovedAt        DateTime?
+  hrComment           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+  checklistItems      ExitChecklistItem[]
+  finalSettlement     FinalSettlement?
+
+  @@index([status])
+}
+
+model ExitChecklistItem {
+  id                  String   @id @default(cuid())
+  exitRequestId       String
+  taskName            String
+  isCompleted         Boolean  @default(false)
+  completedBy         String?
+  completedAt         DateTime?
+  order               Int      @default(0)
+  createdAt           DateTime @default(now())
+
+  exitRequest         ExitRequest @relation(fields: [exitRequestId], references: [id])
+
+  @@index([exitRequestId])
+}
+
+// One computed full-and-final settlement per exit — aggregates leave encashment (the full
+// remaining balance, a different formula from the mid-service excess-over-cap encashment
+// route), pending arrears, and gratuity (5-year vesting per the Payment of Gratuity Act),
+// minus outstanding loan recovery and any notice-period shortfall.
+model FinalSettlement {
+  id                    String   @id @default(cuid())
+  exitRequestId         String   @unique
+  employeeId            String
+  leaveEncashmentAmount Float    @default(0)
+  pendingArrearsAmount  Float    @default(0)
+  gratuityAmount        Float    @default(0)
+  loanRecoveryAmount    Float    @default(0)
+  noticeShortfallAmount Float    @default(0)
+  netSettlementAmount   Float
+  status                String   @default("draft") // "draft" | "finalized" | "paid"
+  finalizedBy           String?
+  finalizedAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  exitRequest           ExitRequest @relation(fields: [exitRequestId], references: [id])
+  employee              Employee    @relation(fields: [employeeId], references: [id])
+}
+
+// Append-only audit trail of salary changes (increment/promotion/correction). SalaryStructure
+// itself stays a simple mutable 1:1 row (unchanged) to avoid touching the several existing
+// read sites that assume that shape — this model is purely additive history alongside it.
+model SalaryRevision {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  effectiveDate       DateTime
+  reason              String   // "increment" | "promotion" | "correction" | "other"
+  previousBasic       Float
+  newBasic            Float
+  previousGross       Float
+  newGross            Float
+  approvedBy          String?
+  notes               String?
+  createdAt           DateTime @default(now())
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+}
+
+model ExpenseClaim {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  category            String   // "travel" | "food" | "accommodation" | "medical" | "other"
+  amount              Float
+  description         String?
+  expenseDate         DateTime
+  status              String   @default("pending") // "pending" | "approved" | "rejected" | "paid"
+  approvedBy          String?
+  approvedAt          DateTime?
+  paidInRunId         String?  // SalaryArrear.id created once approved+paid
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+model Shift {
+  id                  String   @id @default(cuid())
+  name                String
+  startTime           String   // "09:00"
+  endTime             String   // "18:00"
+  gracePeriodMinutes  Int      @default(15)
+  createdAt           DateTime @default(now())
+
+  employeeShifts      EmployeeShift[]
+}
+
+model EmployeeShift {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  shiftId             String
+  effectiveFrom       DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+  shift               Shift    @relation(fields: [shiftId], references: [id])
+
   @@index([employeeId])
 }

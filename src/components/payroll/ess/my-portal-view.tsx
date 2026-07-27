@@ -1,0 +1,1041 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import {
+  UserCircle, Loader2, Plus, Trash2, Upload, Download, Printer,
+  FileText, Award, Wallet, PiggyBank, Receipt, Save,
+} from 'lucide-react';
+import { toast } from 'sonner';
+
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { usePayrollStore } from '@/store/payroll-store';
+
+const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
+const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+const STATUS_BADGE: Record<string, string> = {
+  present: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  absent: 'bg-red-100 text-red-700 border-red-200',
+  'half-day': 'bg-amber-100 text-amber-700 border-amber-200',
+  holiday: 'bg-purple-100 text-purple-700 border-purple-200',
+  'weekly-off': 'bg-gray-100 text-gray-600 border-gray-200',
+  pending: 'bg-amber-100 text-amber-800 border-amber-200',
+  approved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  rejected: 'bg-red-100 text-red-800 border-red-200',
+  cancelled: 'bg-gray-100 text-gray-700 border-gray-200',
+  verified: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  paid: 'bg-slate-100 text-slate-800 border-slate-200',
+  open: 'bg-amber-100 text-amber-800 border-amber-200',
+  in_progress: 'bg-blue-100 text-blue-800 border-blue-200',
+  resolved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  closed: 'bg-gray-100 text-gray-700 border-gray-200',
+};
+const badge = (status: string) => STATUS_BADGE[status] ?? 'bg-gray-100 text-gray-600 border-gray-200';
+
+interface Profile {
+  id: string; employeeCode: string; firstName: string; lastName: string | null;
+  email: string; phone: string | null; designation: string; department: string;
+  dateOfJoining: string; gender: string; dateOfBirth: string | null; bloodGroup: string | null;
+  emergencyContact: string | null; currentAddress: string | null; permanentAddress: string | null;
+  panNumber: string | null; aadhaarNumber: string | null; uanNumber: string | null; esiNumber: string | null;
+  bankName: string | null; bankAccountNumber: string | null; bankIfsc: string | null;
+  employmentType: string;
+  company: { name: string; address: string | null };
+  salaryStructure: { basic: number; houseRentAllowance: number } | null;
+  familyMembers: { id: string; name: string; relation: string; occupation: string | null; isDependent: boolean }[];
+  education: { id: string; degree: string; institution: string; yearOfPassing: number; grade: string | null }[];
+  experiences: { id: string; companyName: string; designation: string; fromDate: string; toDate: string | null }[];
+}
+
+export default function MyPortalView() {
+  const { refreshKey } = usePayrollStore();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+
+  const fetchProfile = useCallback(async () => {
+    setLoadingProfile(true);
+    try {
+      const res = await fetch('/api/ess/profile');
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to load profile');
+      setProfile(json.data);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load profile');
+    } finally {
+      setLoadingProfile(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchProfile(); }, [fetchProfile, refreshKey]);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+          <UserCircle className="h-5 w-5" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">My Portal</h1>
+          <p className="text-sm text-muted-foreground">
+            {loadingProfile ? 'Loading…' : profile ? `${profile.firstName} ${profile.lastName ?? ''} · ${profile.employeeCode}` : ''}
+          </p>
+        </div>
+      </div>
+
+      {loadingProfile ? (
+        <Skeleton className="h-64 w-full" />
+      ) : !profile ? (
+        <Card><CardContent className="py-16 text-center text-muted-foreground">Could not load your profile.</CardContent></Card>
+      ) : (
+        <Tabs defaultValue="profile">
+          <TabsList className="flex flex-wrap h-auto">
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
+            <TabsTrigger value="attendance">Attendance</TabsTrigger>
+            <TabsTrigger value="leaves">Leaves</TabsTrigger>
+            <TabsTrigger value="payslip">Payslips</TabsTrigger>
+            <TabsTrigger value="form16">Form 16</TabsTrigger>
+            <TabsTrigger value="loans">Loans</TabsTrigger>
+            <TabsTrigger value="investment">Investment Declaration</TabsTrigger>
+            <TabsTrigger value="expenses">Expense Claims</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="profile" className="space-y-6"><ProfileTab profile={profile} onSaved={fetchProfile} /></TabsContent>
+          <TabsContent value="documents" className="space-y-6"><DocumentsTab employeeId={profile.id} /></TabsContent>
+          <TabsContent value="attendance" className="space-y-6"><AttendanceTab /></TabsContent>
+          <TabsContent value="leaves" className="space-y-6"><LeavesTab /></TabsContent>
+          <TabsContent value="payslip" className="space-y-6"><PayslipTab /></TabsContent>
+          <TabsContent value="form16" className="space-y-6"><Form16Tab /></TabsContent>
+          <TabsContent value="loans" className="space-y-6"><LoansTab /></TabsContent>
+          <TabsContent value="investment" className="space-y-6"><InvestmentTab /></TabsContent>
+          <TabsContent value="expenses" className="space-y-6"><ExpensesTab /></TabsContent>
+        </Tabs>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Profile Tab                                                        */
+/* ------------------------------------------------------------------ */
+
+function ProfileTab({ profile, onSaved }: { profile: Profile; onSaved: () => void }) {
+  const [phone, setPhone] = useState(profile.phone ?? '');
+  const [bloodGroup, setBloodGroup] = useState(profile.bloodGroup ?? '');
+  const [emergencyContact, setEmergencyContact] = useState(profile.emergencyContact ?? '');
+  const [currentAddress, setCurrentAddress] = useState(profile.currentAddress ?? '');
+  const [permanentAddress, setPermanentAddress] = useState(profile.permanentAddress ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/ess/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, bloodGroup, emergencyContact, currentAddress, permanentAddress }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save');
+      toast.success('Profile updated');
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Personal Information</CardTitle>
+          <CardDescription>Designation, bank, and statutory numbers are read-only here — contact HR to correct those.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+            <div><span className="text-muted-foreground">Designation</span><div className="font-medium">{profile.designation}</div></div>
+            <div><span className="text-muted-foreground">Department</span><div className="font-medium">{profile.department}</div></div>
+            <div><span className="text-muted-foreground">Date of Joining</span><div className="font-medium">{fmtDate(profile.dateOfJoining)}</div></div>
+            <div><span className="text-muted-foreground">Employment Type</span><div className="font-medium capitalize">{profile.employmentType.replace('_', ' ')}</div></div>
+            <div><span className="text-muted-foreground">PAN</span><div className="font-mono">{profile.panNumber ?? '—'}</div></div>
+            <div><span className="text-muted-foreground">UAN</span><div className="font-mono">{profile.uanNumber ?? '—'}</div></div>
+            <div><span className="text-muted-foreground">Bank Account</span><div className="font-mono">{profile.bankAccountNumber ?? '—'} ({profile.bankIfsc ?? '—'})</div></div>
+          </div>
+          <Separator />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Phone</Label>
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Blood Group</Label>
+              <Input value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} placeholder="e.g. O+" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Emergency Contact</Label>
+              <Input value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder="Name, phone" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Current Address</Label>
+              <Textarea value={currentAddress} onChange={(e) => setCurrentAddress(e.target.value)} rows={2} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Permanent Address</Label>
+              <Textarea value={permanentAddress} onChange={(e) => setPermanentAddress(e.target.value)} rows={2} />
+            </div>
+          </div>
+          <Button onClick={handleSave} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            Save Changes
+          </Button>
+        </CardContent>
+      </Card>
+
+      <FamilyCard employeeId={profile.id} members={profile.familyMembers} onChanged={onSaved} />
+      <EducationCard employeeId={profile.id} records={profile.education} onChanged={onSaved} />
+      <ExperienceCard employeeId={profile.id} records={profile.experiences} onChanged={onSaved} />
+    </>
+  );
+}
+
+function FamilyCard({ members, onChanged }: { employeeId: string; members: Profile['familyMembers']; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [relation, setRelation] = useState('spouse');
+  const [occupation, setOccupation] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async () => {
+    if (!name.trim()) { toast.error('Name is required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/ess/family', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), relation, occupation: occupation.trim() || null, isDependent: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add');
+      toast.success('Family member added');
+      setOpen(false); setName(''); setOccupation('');
+      onChanged();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to add'); } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ess/family/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
+      onChanged();
+    } catch { toast.error('Failed to delete'); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base">Family Details</CardTitle>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}><Plus className="size-4" />Add</Button>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Family Member</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5"><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+              <div className="space-y-1.5">
+                <Label>Relation</Label>
+                <Select value={relation} onValueChange={setRelation}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="spouse">Spouse</SelectItem>
+                    <SelectItem value="father">Father</SelectItem>
+                    <SelectItem value="mother">Mother</SelectItem>
+                    <SelectItem value="child">Child</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label>Occupation</Label><Input value={occupation} onChange={(e) => setOccupation(e.target.value)} /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={handleAdd} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">Add</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {members.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">No family members added yet.</p>
+        ) : (
+          <div className="divide-y">
+            {members.map((m) => (
+              <div key={m.id} className="flex items-center justify-between py-2 text-sm">
+                <div><span className="font-medium">{m.name}</span> <span className="text-muted-foreground capitalize">— {m.relation}{m.occupation ? `, ${m.occupation}` : ''}</span></div>
+                <Button variant="ghost" size="icon" className="size-7 text-red-500" onClick={() => handleDelete(m.id)}><Trash2 className="size-3.5" /></Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EducationCard({ records, onChanged }: { employeeId: string; records: Profile['education']; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [degree, setDegree] = useState('');
+  const [institution, setInstitution] = useState('');
+  const [yearOfPassing, setYearOfPassing] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async () => {
+    if (!degree.trim() || !institution.trim() || !yearOfPassing) { toast.error('All fields are required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/ess/education', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ degree: degree.trim(), institution: institution.trim(), yearOfPassing: Number(yearOfPassing) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add');
+      toast.success('Education added');
+      setOpen(false); setDegree(''); setInstitution(''); setYearOfPassing('');
+      onChanged();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to add'); } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ess/education/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
+      onChanged();
+    } catch { toast.error('Failed to delete'); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base">Education</CardTitle>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}><Plus className="size-4" />Add</Button>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Education</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5"><Label>Degree</Label><Input value={degree} onChange={(e) => setDegree(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Institution</Label><Input value={institution} onChange={(e) => setInstitution(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Year of Passing</Label><Input type="number" value={yearOfPassing} onChange={(e) => setYearOfPassing(e.target.value)} /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={handleAdd} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">Add</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {records.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">No education records added yet.</p>
+        ) : (
+          <div className="divide-y">
+            {records.map((r) => (
+              <div key={r.id} className="flex items-center justify-between py-2 text-sm">
+                <div><span className="font-medium">{r.degree}</span> <span className="text-muted-foreground">— {r.institution}, {r.yearOfPassing}</span></div>
+                <Button variant="ghost" size="icon" className="size-7 text-red-500" onClick={() => handleDelete(r.id)}><Trash2 className="size-3.5" /></Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExperienceCard({ records, onChanged }: { employeeId: string; records: Profile['experiences']; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [designation, setDesignation] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async () => {
+    if (!companyName.trim() || !designation.trim() || !fromDate) { toast.error('Company, designation, and from date are required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/ess/experience', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyName: companyName.trim(), designation: designation.trim(), fromDate, toDate: toDate || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add');
+      toast.success('Experience added');
+      setOpen(false); setCompanyName(''); setDesignation(''); setFromDate(''); setToDate('');
+      onChanged();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to add'); } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ess/experience/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
+      onChanged();
+    } catch { toast.error('Failed to delete'); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base">Prior Experience</CardTitle>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}><Plus className="size-4" />Add</Button>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add Experience</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5"><Label>Company</Label><Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Designation</Label><Input value={designation} onChange={(e) => setDesignation(e.target.value)} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><Label>From</Label><Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>To</Label><Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={handleAdd} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">Add</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {records.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">No prior experience added yet.</p>
+        ) : (
+          <div className="divide-y">
+            {records.map((r) => (
+              <div key={r.id} className="flex items-center justify-between py-2 text-sm">
+                <div><span className="font-medium">{r.designation}</span> <span className="text-muted-foreground">at {r.companyName} ({fmtDate(r.fromDate)} – {r.toDate ? fmtDate(r.toDate) : 'Present'})</span></div>
+                <Button variant="ghost" size="icon" className="size-7 text-red-500" onClick={() => handleDelete(r.id)}><Trash2 className="size-3.5" /></Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Documents Tab                                                      */
+/* ------------------------------------------------------------------ */
+
+interface DocRow { id: string; docType: string; fileName: string; verifiedStatus: string; createdAt: string; }
+
+function DocumentsTab({ employeeId }: { employeeId: string }) {
+  const [docs, setDocs] = useState<DocRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [docType, setDocType] = useState('pan');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const fetchDocs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/documents?employeeId=${employeeId}`);
+      const data = await res.json();
+      setDocs(data.data ?? []);
+    } catch { toast.error('Failed to load documents'); } finally { setLoading(false); }
+  }, [employeeId]);
+
+  useEffect(() => { fetchDocs(); }, [fetchDocs]);
+
+  const handleUpload = async () => {
+    if (!file) { toast.error('Select a file first'); return; }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('docType', docType);
+      const res = await fetch('/api/documents', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      toast.success('Document uploaded — pending HR verification');
+      setFile(null);
+      fetchDocs();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Upload failed'); } finally { setUploading(false); }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">My Documents</CardTitle>
+        <CardDescription>Upload ID proofs for HR to verify. Accepted: JPEG, PNG, PDF (max 10MB).</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1.5">
+            <Label>Document Type</Label>
+            <Select value={docType} onValueChange={setDocType}>
+              <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pan">PAN Card</SelectItem>
+                <SelectItem value="aadhaar">Aadhaar Card</SelectItem>
+                <SelectItem value="passport">Passport</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>File</Label>
+            <Input type="file" accept="image/jpeg,image/png,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          </div>
+          <Button onClick={handleUpload} disabled={uploading || !file} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+            Upload
+          </Button>
+        </div>
+        <Separator />
+        {loading ? <Skeleton className="h-24 w-full" /> : docs.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">No documents uploaded yet.</p>
+        ) : (
+          <Table>
+            <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>File</TableHead><TableHead>Status</TableHead><TableHead>Uploaded</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {docs.map((d) => (
+                <TableRow key={d.id}>
+                  <TableCell className="capitalize">{d.docType.replace('_', ' ')}</TableCell>
+                  <TableCell className="truncate max-w-[200px]">{d.fileName}</TableCell>
+                  <TableCell><Badge variant="outline" className={badge(d.verifiedStatus)}>{d.verifiedStatus}</Badge></TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{fmtDate(d.createdAt)}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" onClick={() => window.open(`/api/documents/${d.id}`, '_blank')}><Download className="size-3.5 mr-1" />Download</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Attendance Tab                                                     */
+/* ------------------------------------------------------------------ */
+
+function AttendanceTab() {
+  const now = new Date();
+  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [records, setRecords] = useState<{ id: string; date: string; status: string; punchIn: string | null; punchOut: string | null; totalHours: number | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/ess/attendance?month=${month}&year=${year}`)
+      .then((r) => r.json())
+      .then((d) => setRecords(d.data ?? []))
+      .catch(() => toast.error('Failed to load attendance'))
+      .finally(() => setLoading(false));
+  }, [month, year]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">My Attendance</CardTitle>
+        <div className="flex gap-3 pt-2">
+          <Select value={month} onValueChange={setMonth}>
+            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>{MONTHS.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-[100px]" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? <Skeleton className="h-40 w-full" /> : records.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No attendance records for this month.</p>
+        ) : (
+          <Table>
+            <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Status</TableHead><TableHead>Punch In</TableHead><TableHead>Punch Out</TableHead><TableHead className="text-right">Hours</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {records.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{fmtDate(r.date)}</TableCell>
+                  <TableCell><Badge variant="outline" className={badge(r.status)}>{r.status}</Badge></TableCell>
+                  <TableCell className="font-mono text-xs">{r.punchIn ? new Date(r.punchIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--'}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.punchOut ? new Date(r.punchOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--'}</TableCell>
+                  <TableCell className="text-right">{r.totalHours ?? '--'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Leaves Tab                                                         */
+/* ------------------------------------------------------------------ */
+
+interface LeaveBalanceRow { id: string; leaveType: { id: string; name: string; shortCode: string }; totalAllocated: number; used: number; carryForwarded: number; }
+interface LeaveAppRow { id: string; leaveType: { name: string }; startDate: string; endDate: string; totalDays: number; status: string; reason: string | null; }
+
+function LeavesTab() {
+  const [balances, setBalances] = useState<LeaveBalanceRow[]>([]);
+  const [applications, setApplications] = useState<LeaveAppRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [leaveTypeId, setLeaveTypeId] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [applying, setApplying] = useState(false);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [balRes, appRes] = await Promise.all([
+        fetch(`/api/ess/leaves/balance?year=${new Date().getFullYear()}`),
+        fetch('/api/ess/leaves'),
+      ]);
+      const balData = await balRes.json();
+      const appData = await appRes.json();
+      setBalances(balData.data ?? []);
+      setApplications(appData.data ?? []);
+    } catch { toast.error('Failed to load leave data'); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const handleApply = async () => {
+    if (!leaveTypeId || !startDate || !endDate) { toast.error('All fields are required'); return; }
+    setApplying(true);
+    try {
+      const res = await fetch('/api/ess/leaves', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leaveTypeId, startDate, endDate, reason: reason.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to apply');
+      toast.success('Leave application submitted');
+      setApplyOpen(false); setLeaveTypeId(''); setStartDate(''); setEndDate(''); setReason('');
+      fetchAll();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to apply'); } finally { setApplying(false); }
+  };
+
+  const handleCancel = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ess/leaves/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to cancel');
+      toast.success('Leave cancelled');
+      fetchAll();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to cancel'); }
+  };
+
+  if (loading) return <Skeleton className="h-64 w-full" />;
+
+  return (
+    <>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {balances.map((b) => (
+          <Card key={b.id}>
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground">{b.leaveType.name}</p>
+              <p className="text-xl font-bold">{(b.totalAllocated + b.carryForwarded - b.used).toFixed(1)}</p>
+              <p className="text-[10px] text-muted-foreground">of {b.totalAllocated + b.carryForwarded} available</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">My Leave Applications</CardTitle>
+          <Dialog open={applyOpen} onOpenChange={setApplyOpen}>
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setApplyOpen(true)}><Plus className="size-4" />Apply for Leave</Button>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Apply for Leave</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Leave Type</Label>
+                  <Select value={leaveTypeId} onValueChange={setLeaveTypeId}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
+                    <SelectContent>{balances.map((b) => <SelectItem key={b.leaveType.id} value={b.leaveType.id}>{b.leaveType.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5"><Label>Start Date</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
+                  <div className="space-y-1.5"><Label>End Date</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></div>
+                </div>
+                <div className="space-y-1.5"><Label>Reason</Label><Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} /></div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setApplyOpen(false)}>Cancel</Button>
+                <Button onClick={handleApply} disabled={applying} className="bg-emerald-600 hover:bg-emerald-700 text-white">Submit</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          {applications.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No leave applications yet.</p>
+          ) : (
+            <div className="divide-y">
+              {applications.map((a) => (
+                <div key={a.id} className="flex items-center justify-between py-2.5 text-sm">
+                  <div>
+                    <span className="font-medium">{a.leaveType.name}</span>{' '}
+                    <span className="text-muted-foreground">{fmtDate(a.startDate)} – {fmtDate(a.endDate)} ({a.totalDays}d)</span>
+                    {a.reason && <p className="text-xs text-muted-foreground mt-0.5">{a.reason}</p>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className={badge(a.status)}>{a.status}</Badge>
+                    {(a.status === 'pending' || a.status === 'approved') && (
+                      <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleCancel(a.id)}>Cancel</Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Payslip Tab                                                        */
+/* ------------------------------------------------------------------ */
+
+function PayslipTab() {
+  const now = new Date();
+  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [loading, setLoading] = useState(false);
+  const [slip, setSlip] = useState<{ monthName: string; year: number; totals: { totalEarnings: number; totalDeductions: number; netSalary: number }; earnings: Record<string, number>; deductions: Record<string, number> } | null>(null);
+
+  const handleGenerate = async () => {
+    setLoading(true); setSlip(null);
+    try {
+      const res = await fetch(`/api/ess/payslip?month=${month}&year=${year}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate');
+      setSlip(data.data);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to generate payslip'); } finally { setLoading(false); }
+  };
+
+  return (
+    <Card>
+      <style dangerouslySetInnerHTML={{ __html: `@media print { body * { visibility: hidden; } #ess-payslip-preview, #ess-payslip-preview * { visibility: visible; } #ess-payslip-preview { position: absolute; left: 0; top: 0; width: 100%; } #ess-payslip-preview .no-print { display: none !important; } }` }} />
+      <CardHeader className="no-print">
+        <CardTitle className="text-base flex items-center gap-2"><FileText className="size-4 text-emerald-600" />My Payslips</CardTitle>
+        <div className="flex flex-wrap items-end gap-3 pt-2">
+          <Select value={month} onValueChange={setMonth}>
+            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>{MONTHS.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-[100px]" />
+          <Button onClick={handleGenerate} disabled={loading} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}Generate
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {slip && (
+          <div id="ess-payslip-preview" className="max-w-lg mx-auto space-y-4 border rounded-lg p-4">
+            <h3 className="text-center font-bold">{slip.monthName} {slip.year} Salary Slip</h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><p className="text-muted-foreground">Total Earnings</p><p className="font-semibold">{fmt(slip.totals.totalEarnings)}</p></div>
+              <div><p className="text-muted-foreground">Total Deductions</p><p className="font-semibold">{fmt(slip.totals.totalDeductions)}</p></div>
+            </div>
+            <Separator />
+            <div className="flex justify-between font-bold text-emerald-700"><span>Net Salary</span><span>{fmt(slip.totals.netSalary)}</span></div>
+            <Button variant="outline" className="w-full no-print" onClick={() => window.print()}><Printer className="size-4" />Print</Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Form 16 Tab                                                        */
+/* ------------------------------------------------------------------ */
+
+function Form16Tab() {
+  const now = new Date();
+  const currentFyStart = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  const [fyStartYear, setFyStartYear] = useState(String(currentFyStart));
+  const [loading, setLoading] = useState(false);
+  const [form16, setForm16] = useState<{ financialYear: string; grossSalary: { total: number }; totalTaxableIncome: number; taxComputation: { totalTaxPayable: number }; tdsDeducted: { totalDeducted: number } } | null>(null);
+
+  const handleGenerate = async () => {
+    setLoading(true); setForm16(null);
+    try {
+      const res = await fetch(`/api/ess/form16?fyStartYear=${fyStartYear}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate');
+      setForm16(data.data);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to generate Form 16'); } finally { setLoading(false); }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><Award className="size-4 text-emerald-600" />My Form 16 (Part B)</CardTitle>
+        <div className="flex flex-wrap items-end gap-3 pt-2">
+          <Input type="number" value={fyStartYear} onChange={(e) => setFyStartYear(e.target.value)} className="w-[140px]" />
+          <Button onClick={handleGenerate} disabled={loading} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <Award className="size-4" />}Generate
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {form16 && (
+          <div className="max-w-lg mx-auto space-y-4 border rounded-lg p-4">
+            <h3 className="text-center font-bold">FY {form16.financialYear} — Form 16 Part B</h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><p className="text-muted-foreground">Gross Salary</p><p className="font-semibold">{fmt(form16.grossSalary.total)}</p></div>
+              <div><p className="text-muted-foreground">Taxable Income</p><p className="font-semibold">{fmt(form16.totalTaxableIncome)}</p></div>
+              <div><p className="text-muted-foreground">Total Tax Payable</p><p className="font-semibold">{fmt(form16.taxComputation.totalTaxPayable)}</p></div>
+              <div><p className="text-muted-foreground">TDS Deducted</p><p className="font-semibold">{fmt(form16.tdsDeducted.totalDeducted)}</p></div>
+            </div>
+            <Button variant="outline" className="w-full" onClick={() => window.print()}><Printer className="size-4" />Print</Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Loans Tab                                                          */
+/* ------------------------------------------------------------------ */
+
+function LoansTab() {
+  const [loans, setLoans] = useState<{ id: string; loanType: string; principal: number; emiAmount: number; totalMonths: number; remainingMonths: number; status: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/ess/loans').then((r) => r.json()).then((d) => setLoans(d.data ?? [])).catch(() => toast.error('Failed to load loans')).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <Skeleton className="h-40 w-full" />;
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Wallet className="size-4 text-emerald-600" />My Loans &amp; Advances</CardTitle></CardHeader>
+      <CardContent>
+        {loans.length === 0 ? <p className="text-sm text-muted-foreground py-8 text-center">No loans or advances on record.</p> : (
+          <Table>
+            <TableHeader><TableRow><TableHead>Type</TableHead><TableHead className="text-right">Principal</TableHead><TableHead className="text-right">EMI</TableHead><TableHead className="text-right">Remaining</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {loans.map((l) => (
+                <TableRow key={l.id}>
+                  <TableCell className="capitalize">{l.loanType}</TableCell>
+                  <TableCell className="text-right">{fmt(l.principal)}</TableCell>
+                  <TableCell className="text-right">{fmt(l.emiAmount)}</TableCell>
+                  <TableCell className="text-right">{l.remainingMonths} / {l.totalMonths} mo</TableCell>
+                  <TableCell><Badge variant="outline" className="capitalize">{l.status}</Badge></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Investment Declaration Tab                                         */
+/* ------------------------------------------------------------------ */
+
+function InvestmentTab() {
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [section80C, setSection80C] = useState('0');
+  const [section80D, setSection80D] = useState('0');
+  const [status, setStatus] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const fetchDeclaration = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/ess/investment-declaration?year=${year}`);
+      const data = await res.json();
+      if (data.data) {
+        setSection80C(String(data.data.section80C));
+        setSection80D(String(data.data.section80D));
+        setStatus(data.data.status);
+      } else {
+        setSection80C('0'); setSection80D('0'); setStatus(null);
+      }
+    } catch { toast.error('Failed to load declaration'); } finally { setLoading(false); }
+  }, [year]);
+
+  useEffect(() => { fetchDeclaration(); }, [fetchDeclaration]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/ess/investment-declaration', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: Number(year), section80C: Number(section80C), section80D: Number(section80D) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save');
+      toast.success('Investment declaration saved');
+      fetchDeclaration();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to save'); } finally { setSaving(false); }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2"><PiggyBank className="size-4 text-emerald-600" />Investment Declaration</CardTitle>
+        <CardDescription>Only applies under the Old Tax Regime. HR verifies declarations against submitted proofs.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 max-w-md">
+        <div className="space-y-1.5"><Label>Financial Year (start)</Label><Input type="number" value={year} onChange={(e) => setYear(e.target.value)} /></div>
+        {loading ? <Skeleton className="h-24 w-full" /> : (
+          <>
+            {status && <Badge variant="outline" className={badge(status)}>{status}</Badge>}
+            <div className="space-y-1.5"><Label>Section 80C (LIC, PPF, ELSS, etc.)</Label><Input type="number" value={section80C} onChange={(e) => setSection80C(e.target.value)} disabled={status === 'verified'} /></div>
+            <div className="space-y-1.5"><Label>Section 80D (health insurance)</Label><Input type="number" value={section80D} onChange={(e) => setSection80D(e.target.value)} disabled={status === 'verified'} /></div>
+            <Button onClick={handleSave} disabled={saving || status === 'verified'} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Save
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Expense Claims Tab                                                 */
+/* ------------------------------------------------------------------ */
+
+function ExpensesTab() {
+  const [claims, setClaims] = useState<{ id: string; category: string; amount: number; description: string | null; expenseDate: string; status: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState('travel');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [expenseDate, setExpenseDate] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchClaims = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/ess/expense-claims');
+      const data = await res.json();
+      setClaims(data.data ?? []);
+    } catch { toast.error('Failed to load expense claims'); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchClaims(); }, [fetchClaims]);
+
+  const handleSubmit = async () => {
+    if (!amount || !expenseDate) { toast.error('Amount and date are required'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/ess/expense-claims', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category, amount: Number(amount), description: description.trim() || null, expenseDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit');
+      toast.success('Expense claim submitted');
+      setOpen(false); setAmount(''); setDescription(''); setExpenseDate('');
+      fetchClaims();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to submit'); } finally { setSubmitting(false); }
+  };
+
+  const handleWithdraw = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ess/expense-claims/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to withdraw');
+      toast.success('Claim withdrawn');
+      fetchClaims();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to withdraw'); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base flex items-center gap-2"><Receipt className="size-4 text-emerald-600" />Expense Claims</CardTitle>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setOpen(true)}><Plus className="size-4" />Submit Claim</Button>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Submit Expense Claim</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Category</Label>
+                <Select value={category} onValueChange={setCategory}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="travel">Travel</SelectItem>
+                    <SelectItem value="food">Food</SelectItem>
+                    <SelectItem value="accommodation">Accommodation</SelectItem>
+                    <SelectItem value="medical">Medical</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label>Amount</Label><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Expense Date</Label><Input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Description</Label><Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={handleSubmit} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700 text-white">Submit</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {loading ? <Skeleton className="h-32 w-full" /> : claims.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">No expense claims yet.</p>
+        ) : (
+          <div className="divide-y">
+            {claims.map((c) => (
+              <div key={c.id} className="flex items-center justify-between py-2.5 text-sm">
+                <div>
+                  <span className="font-medium capitalize">{c.category}</span> <span className="text-muted-foreground">— {fmt(c.amount)} on {fmtDate(c.expenseDate)}</span>
+                  {c.description && <p className="text-xs text-muted-foreground mt-0.5">{c.description}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className={badge(c.status)}>{c.status}</Badge>
+                  {c.status === 'pending' && <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleWithdraw(c.id)}>Withdraw</Button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

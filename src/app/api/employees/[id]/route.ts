@@ -4,6 +4,7 @@ import { updateEmployeeSchema } from "@/lib/validations/employee";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, requireRole } from "@/lib/auth";
+import { calculateGrossSalary } from "@/lib/payroll/engine";
 
 export async function GET(
   request: NextRequest,
@@ -74,6 +75,27 @@ export async function PUT(
       entityId: employee.id,
       details: { changedFields: Object.keys(employeeData) },
     });
+
+    // Append-only salary revision history — logged whenever an edit actually changes the
+    // structure, alongside (not instead of) the mutable SalaryStructure row itself.
+    if (existing.salaryStructure && employee.salaryStructure) {
+      const previousGross = calculateGrossSalary(existing.salaryStructure);
+      const newGross = calculateGrossSalary(employee.salaryStructure);
+      if (previousGross !== newGross || existing.salaryStructure.basic !== employee.salaryStructure.basic) {
+        await db.salaryRevision.create({
+          data: {
+            employeeId: employee.id,
+            effectiveDate: new Date(),
+            reason: "correction",
+            previousBasic: existing.salaryStructure.basic,
+            newBasic: employee.salaryStructure.basic,
+            previousGross,
+            newGross,
+            approvedBy: session.userId,
+          },
+        });
+      }
+    }
 
     return NextResponse.json(employee);
   } catch (error) {

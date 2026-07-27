@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { usePayrollStore } from '@/store/payroll-store';
-import { Menu, Database, User, LogOut, Sun, Moon } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { usePayrollStore, type ViewType } from '@/store/payroll-store';
+import { Menu, Database, User, LogOut, Sun, Moon, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -20,23 +20,79 @@ import { useTheme } from 'next-themes';
 
 const viewTitles: Record<string, string> = {
   dashboard: 'Dashboard',
+  'my-portal': 'My Portal',
   employees: 'Employee Management',
+  onboarding: 'Employee Onboarding',
+  'exit-management': 'Exit Management',
   attendance: 'Attendance Management',
   leaves: 'Leave Management',
   payroll: 'Payroll Processing',
   'salary-slip': 'Salary Slips',
   form16: 'Form 16',
   reports: 'Compliance Reports',
+  helpdesk: 'Help Desk',
   settings: 'Company Settings',
 };
 
+interface NotificationRow {
+  id: string;
+  title: string;
+  message: string;
+  category: string;
+  link: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export function TopBar() {
-  const { activeView, setSidebarOpen, triggerRefresh } = usePayrollStore();
+  const { activeView, setActiveView, setSidebarOpen, triggerRefresh } = usePayrollStore();
   const { user, logout } = useSessionContext();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [seeding, setSeeding] = useState(false);
   const [today, setToday] = useState('');
   const [mounted, setMounted] = useState(false);
+
+  const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch('/api/notifications');
+      if (!res.ok) return;
+      const data = await res.json();
+      setNotifications(data.data ?? []);
+      setUnreadCount(data.unreadCount ?? 0);
+    } catch {
+      // non-critical, fail silently
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 60000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const handleNotificationClick = async (n: NotificationRow) => {
+    if (!n.isRead) {
+      try {
+        await fetch(`/api/notifications/${n.id}`, { method: 'PUT' });
+        fetchNotifications();
+      } catch {
+        // non-critical
+      }
+    }
+    if (n.link) setActiveView(n.link as ViewType);
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await fetch('/api/notifications/mark-all-read', { method: 'POST' });
+      fetchNotifications();
+    } catch {
+      toast.error('Failed to mark notifications read');
+    }
+  };
 
   useEffect(() => {
     setToday(new Date().toLocaleDateString('en-IN', {
@@ -118,6 +174,47 @@ export function TopBar() {
         >
           {mounted && theme ? (resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />) : <span className="h-4 w-4" />}
         </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="relative" title="Notifications">
+              <Bell className="h-4 w-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80">
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <DropdownMenuLabel className="p-0 font-medium">Notifications</DropdownMenuLabel>
+              {unreadCount > 0 && (
+                <button onClick={handleMarkAllRead} className="text-xs text-emerald-600 hover:underline">
+                  Mark all read
+                </button>
+              )}
+            </div>
+            <DropdownMenuSeparator />
+            <div className="max-h-80 overflow-y-auto">
+              {notifications.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-muted-foreground">No notifications yet.</p>
+              ) : (
+                notifications.map((n) => (
+                  <DropdownMenuItem
+                    key={n.id}
+                    onClick={() => handleNotificationClick(n)}
+                    className={`flex-col items-start gap-0.5 whitespace-normal ${n.isRead ? '' : 'bg-emerald-50 dark:bg-emerald-950/20'}`}
+                  >
+                    <span className="text-sm font-medium">{n.title}</span>
+                    <span className="text-xs text-muted-foreground">{n.message}</span>
+                    <span className="text-[10px] text-muted-foreground">{new Date(n.createdAt).toLocaleString('en-IN')}</span>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

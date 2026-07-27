@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
@@ -16,9 +16,11 @@ import {
   AlertCircle,
   MonitorSmartphone,
   Pencil,
+  Upload,
 } from 'lucide-react';
 
 import { usePayrollStore } from '@/store/payroll-store';
+import { useSessionContext } from '@/hooks/session-context';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -140,7 +142,36 @@ function nowInIST(): Date {
 // ---------------------------------------------------------------------------
 
 export default function AttendanceView() {
-  const { refreshKey } = usePayrollStore();
+  const { refreshKey, triggerRefresh } = usePayrollStore();
+  const { user } = useSessionContext();
+  const isStaff = user?.role === 'admin' || user?.role === 'hr';
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/attendance/import', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Import failed');
+      const { imported, skipped, totalRows } = data.data;
+      if (skipped > 0) {
+        toast.warning(`Imported ${imported}/${totalRows} rows — ${skipped} skipped (check employeeCode/date/status columns)`);
+      } else {
+        toast.success(`Imported ${imported} attendance record(s)`);
+      }
+      triggerRefresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   // ---- State: Filters ----
   const [currentMonth, setCurrentMonth] = useState(() => new Date().getMonth() + 1);
@@ -609,6 +640,15 @@ export default function AttendanceView() {
             <Pencil className="size-4" />
             Mark Attendance
           </Button>
+          {isStaff && (
+            <>
+              <input ref={importInputRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
+              <Button variant="outline" disabled={importing} onClick={() => importInputRef.current?.click()} title="CSV columns: employeeCode,date,status,punchIn,punchOut,notes">
+                {importing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                Import CSV
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

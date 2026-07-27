@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePayrollStore, type ViewType } from '@/store/payroll-store';
+import { useSessionContext } from '@/hooks/session-context';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -16,27 +17,52 @@ import {
   ChevronLeft,
   ChevronRight,
   Award,
+  UserCircle,
+  UserPlus,
+  UserMinus,
+  LifeBuoy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-const navItems: { id: ViewType; label: string; icon: React.ElementType }[] = [
+interface NavItem {
+  id: ViewType;
+  label: string;
+  icon: React.ElementType;
+  /** Only shown when the current login is linked to an Employee record. */
+  requiresEmployeeId?: boolean;
+  /** Only shown to these roles. Undefined = visible to everyone (preserves prior behavior). */
+  roles?: Array<'admin' | 'hr' | 'manager' | 'employee'>;
+}
+
+const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'my-portal', label: 'My Portal', icon: UserCircle, requiresEmployeeId: true },
   { id: 'employees', label: 'Employees', icon: Users },
+  { id: 'onboarding', label: 'Onboarding', icon: UserPlus, roles: ['admin', 'hr'] },
+  { id: 'exit-management', label: 'Exit Management', icon: UserMinus, roles: ['admin', 'hr'] },
   { id: 'attendance', label: 'Attendance', icon: Fingerprint },
   { id: 'leaves', label: 'Leave Mgmt', icon: CalendarOff },
   { id: 'payroll', label: 'Payroll', icon: Calculator },
   { id: 'salary-slip', label: 'Salary Slips', icon: FileText },
   { id: 'form16', label: 'Form 16', icon: Award },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
+  { id: 'helpdesk', label: 'Help Desk', icon: LifeBuoy },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 export function PayrollLayout({ children }: { children: React.ReactNode }) {
   const { activeView, sidebarOpen, setActiveView, setSidebarOpen } = usePayrollStore();
+  const { user } = useSessionContext();
   const [fyLabel, setFyLabel] = useState('');
+
+  const visibleNavItems = navItems.filter(
+    (item) =>
+      (!item.roles || item.roles.includes(user?.role ?? 'employee')) &&
+      (!item.requiresEmployeeId || !!user?.employeeId)
+  );
 
   useEffect(() => {
     (async () => {
@@ -102,7 +128,7 @@ export function PayrollLayout({ children }: { children: React.ReactNode }) {
         {/* Navigation */}
         <TooltipProvider delayDuration={0}>
           <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeView === item.id;
 

@@ -11,6 +11,7 @@ const userSelect = {
   name: true,
   role: true,
   active: true,
+  employeeId: true,
   createdAt: true,
 } as const;
 
@@ -40,6 +41,17 @@ export async function POST(request: NextRequest) {
       return apiError("A user with this email already exists.", 409);
     }
 
+    if (parsed.employeeId) {
+      const employee = await db.employee.findUnique({ where: { id: parsed.employeeId } });
+      if (!employee) {
+        return apiError("Employee not found.", 404);
+      }
+      const alreadyLinked = await db.user.findUnique({ where: { employeeId: parsed.employeeId } });
+      if (alreadyLinked) {
+        return apiError("This employee already has a portal login.", 409);
+      }
+    }
+
     const passwordHash = await hashPassword(parsed.password);
     const user = await db.user.create({
       data: {
@@ -47,6 +59,7 @@ export async function POST(request: NextRequest) {
         name: parsed.name,
         role: parsed.role,
         passwordHash,
+        employeeId: parsed.employeeId ?? null,
       },
       select: userSelect,
     });

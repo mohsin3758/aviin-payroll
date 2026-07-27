@@ -122,6 +122,8 @@ interface SalaryStructure {
   employerPF: number
   employerESI: number
   gratuity: number
+  dailyRate: number | null
+  hourlyRate: number | null
 }
 
 interface Employee {
@@ -136,6 +138,7 @@ interface Employee {
   designation: string
   department: string
   state: string
+  employmentType: string
   panNumber: string | null
   aadhaarNumber: string | null
   bankName: string | null
@@ -169,6 +172,7 @@ interface FormData {
   designation: string
   department: string
   state: string
+  employmentType: string
   panNumber: string
   aadhaarNumber: string
   bankName: string
@@ -194,6 +198,8 @@ interface FormData {
   conveyanceAllowance: string
   medicalAllowance: string
   specialAllowance: string
+  dailyRate: string
+  hourlyRate: string
 }
 
 const emptyForm: FormData = {
@@ -206,6 +212,7 @@ const emptyForm: FormData = {
   designation: '',
   department: '',
   state: 'Maharashtra',
+  employmentType: 'permanent',
   panNumber: '',
   aadhaarNumber: '',
   bankName: '',
@@ -230,6 +237,8 @@ const emptyForm: FormData = {
   conveyanceAllowance: '1600',
   medicalAllowance: '1250',
   specialAllowance: '',
+  dailyRate: '',
+  hourlyRate: '',
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -396,6 +405,7 @@ export default function EmployeesView() {
       designation: emp.designation,
       department: emp.department,
       state: emp.state,
+      employmentType: emp.employmentType || 'permanent',
       panNumber: emp.panNumber || '',
       aadhaarNumber: emp.aadhaarNumber || '',
       bankName: emp.bankName || '',
@@ -420,6 +430,8 @@ export default function EmployeesView() {
       conveyanceAllowance: emp.salaryStructure?.conveyanceAllowance?.toString() || '1600',
       medicalAllowance: emp.salaryStructure?.medicalAllowance?.toString() || '1250',
       specialAllowance: emp.salaryStructure?.specialAllowance?.toString() || '',
+      dailyRate: emp.salaryStructure?.dailyRate?.toString() || '',
+      hourlyRate: emp.salaryStructure?.hourlyRate?.toString() || '',
     })
     setSalaryOpen(false)
     setFormOpen(true)
@@ -475,6 +487,7 @@ export default function EmployeesView() {
         designation: form.designation.trim(),
         department: form.department,
         state: form.state,
+        employmentType: form.employmentType,
         panNumber: form.panNumber.trim() || null,
         aadhaarNumber: form.aadhaarNumber.trim() || null,
         bankName: form.bankName.trim() || null,
@@ -502,6 +515,8 @@ export default function EmployeesView() {
           specialAllowance: parseFloat(form.specialAllowance) || 0,
           employerPF: salary.employerPF,
           employerESI: salary.employerESI,
+          dailyRate: form.dailyRate ? parseFloat(form.dailyRate) : null,
+          hourlyRate: form.hourlyRate ? parseFloat(form.hourlyRate) : null,
         },
       }
 
@@ -1012,6 +1027,21 @@ export default function EmployeesView() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-1.5">
+                  <Label>Employment Type</Label>
+                  <Select value={form.employmentType} onValueChange={(v) => updateField('employmentType', v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="permanent">Permanent</SelectItem>
+                      <SelectItem value="contractor">Contractor</SelectItem>
+                      <SelectItem value="daily_wage">Daily Wage</SelectItem>
+                      <SelectItem value="hourly">Hourly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">Non-permanent types are paid via Payroll &gt; Contractor/Daily-Wage/Hourly Pay, not the regular monthly run.</p>
+                </div>
               </div>
             </div>
 
@@ -1209,6 +1239,26 @@ export default function EmployeesView() {
                 )}
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-4">
+                {form.employmentType !== 'permanent' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    {form.employmentType === 'daily_wage' && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="dailyRate">Daily Rate</Label>
+                        <Input id="dailyRate" type="number" value={form.dailyRate} onChange={(e) => updateField('dailyRate', e.target.value)} placeholder="800" />
+                      </div>
+                    )}
+                    {form.employmentType === 'hourly' && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="hourlyRate">Hourly Rate</Label>
+                        <Input id="hourlyRate" type="number" value={form.hourlyRate} onChange={(e) => updateField('hourlyRate', e.target.value)} placeholder="150" />
+                      </div>
+                    )}
+                    {form.employmentType === 'contractor' && (
+                      <p className="text-xs text-muted-foreground sm:col-span-2">Contractors are paid a flat invoiced amount each run — no standing rate needed here.</p>
+                    )}
+                    <p className="text-xs text-muted-foreground sm:col-span-2">The monthly salary fields below don&apos;t apply to this employment type — they&apos;re only used if you later switch this employee back to Permanent.</p>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label htmlFor="basic">Basic Salary</Label>

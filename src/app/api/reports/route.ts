@@ -58,9 +58,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch payroll run and details with employee info
+    // Fetch payroll run and details with employee info. Scoped to the regular monthly cycle —
+    // statutory PF/ESI/TDS/PT/LWF figures must come from the real payroll run, never an
+    // off-cycle bonus or alternate-pay run (which carry zero PF/ESI/PT by design).
     const payrollRun = await db.payrollRun.findFirst({
-      where: { month, year },
+      where: { month, year, runType: "regular" },
       include: {
         details: {
           include: {

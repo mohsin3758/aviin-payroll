@@ -7,10 +7,20 @@ services:
       - "3000:3000"
     environment:
       - DATABASE_URL=file:/app/db/custom.db
+      - UPLOADS_DIR=/app/uploads
       # Set a real, random secret in production — this is a dev-only fallback.
       - JWT_SECRET=${JWT_SECRET:-dev-only-insecure-secret-change-me}
+      # Optional: set these for real email delivery; omitted, sending falls back to an
+      # auto-provisioned Ethereal test inbox (see src/lib/mailer.ts).
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
     volumes:
       - payrollpro-db:/app/db
+      - payrollpro-uploads:/app/uploads
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "healthcheck.js"]
@@ -21,3 +31,4 @@ services:
 
 volumes:
   payrollpro-db:
+  payrollpro-uploads:

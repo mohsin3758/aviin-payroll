@@ -12,6 +12,11 @@ export async function GET(request: NextRequest) {
     const startOfNextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
+    const startOfQuarter = new Date(now.getFullYear(), quarterStartMonth, 1);
+
     // Run all independent queries in parallel
     const [
       totalEmployees,
@@ -21,6 +26,10 @@ export async function GET(request: NextRequest) {
       recentPayrollRuns,
       departmentCounts,
       stateCounts,
+      pendingExitApprovals,
+      employeesInNotice,
+      exitsThisMonth,
+      exitsThisQuarter,
     ] = await Promise.all([
       // 1. Total active employees
       db.employee.count({
@@ -44,13 +53,16 @@ export async function GET(request: NextRequest) {
         },
       }),
 
-      // 4. Latest payroll run (for monthly summary)
+      // 4. Latest REGULAR payroll run (for monthly summary) — off-cycle/alternate-pay runs
+      // are a separate concept and must not be mistaken for the monthly summary here.
       db.payrollRun.findFirst({
+        where: { runType: "regular" },
         orderBy: [{ year: "desc" }, { month: "desc" }],
       }),
 
-      // 5. Recent payroll runs (last 6)
+      // 5. Recent regular payroll runs (last 6)
       db.payrollRun.findMany({
+        where: { runType: "regular" },
         orderBy: [{ year: "desc" }, { month: "desc" }],
         take: 6,
       }),
@@ -70,6 +82,25 @@ export async function GET(request: NextRequest) {
         _count: { state: true },
         orderBy: { _count: { state: "desc" } },
       }),
+
+      // 8. Exit requests still awaiting either approval stage
+      db.exitRequest.count({ where: { status: { in: ["pending_manager", "pending_hr"] } } }),
+
+      // 9. Approved resignations whose last working day hasn't arrived yet (serving notice) —
+      // excludes anyone already fully settled, since finalizing doesn't change ExitRequest.status.
+      db.exitRequest.count({
+        where: {
+          status: "approved",
+          lastWorkingDate: { gte: startOfDay },
+          OR: [{ finalSettlement: null }, { finalSettlement: { is: { status: { notIn: ["finalized", "paid"] } } } }],
+        },
+      }),
+
+      // 10. Attrition — actually exited this calendar month
+      db.employee.count({ where: { dateOfExit: { gte: startOfMonth, lt: startOfNextMonth } } }),
+
+      // 11. Attrition — actually exited this quarter
+      db.employee.count({ where: { dateOfExit: { gte: startOfQuarter, lt: startOfNextMonth } } }),
     ]);
 
     // Build monthly payroll summary from latest run
@@ -113,6 +144,12 @@ export async function GET(request: NextRequest) {
         state: s.state,
         count: s._count.state,
       })),
+      exitAnalytics: {
+        pendingExitApprovals,
+        employeesInNotice,
+        exitsThisMonth,
+        exitsThisQuarter,
+      },
       recentPayrollRuns: recentPayrollRuns.map((r) => ({
         id: r.id,
         month: r.month,

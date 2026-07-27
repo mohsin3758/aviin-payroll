@@ -17,6 +17,10 @@ const SalarySlipView = lazy(() => import('@/components/payroll/salary-slip-view'
 const Form16View = lazy(() => import('@/components/payroll/form16-view'));
 const ReportsView = lazy(() => import('@/components/payroll/reports-view'));
 const SettingsView = lazy(() => import('@/components/payroll/settings-view'));
+const MyPortalView = lazy(() => import('@/components/payroll/ess/my-portal-view'));
+const OnboardingView = lazy(() => import('@/components/payroll/onboarding-view'));
+const ExitManagementView = lazy(() => import('@/components/payroll/exit-management-view'));
+const HelpDeskView = lazy(() => import('@/components/payroll/helpdesk-view'));
 
 function LoadingFallback() {
   return (
@@ -46,6 +50,10 @@ function ViewRenderer() {
       {activeView === 'form16' && <Form16View key={key} />}
       {activeView === 'reports' && <ReportsView key={key} />}
       {activeView === 'settings' && <SettingsView key={key} />}
+      {activeView === 'my-portal' && <MyPortalView key={key} />}
+      {activeView === 'onboarding' && <OnboardingView key={key} />}
+      {activeView === 'exit-management' && <ExitManagementView key={key} />}
+      {activeView === 'helpdesk' && <HelpDeskView key={key} />}
     </Suspense>
   );
 }

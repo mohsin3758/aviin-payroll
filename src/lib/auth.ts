@@ -79,3 +79,16 @@ export async function requireRole(request: NextRequest, allowed: Role[]): Promis
   }
   return session;
 }
+
+/**
+ * For the Employee Self-Service surface: requires a valid session AND that it's linked to an
+ * Employee record, returning that employeeId. Used so ESS routes always derive "whose data is
+ * this" from the session server-side — never from client-supplied input.
+ */
+export async function requireOwnEmployeeId(request: NextRequest): Promise<{ session: SessionPayload; employeeId: string }> {
+  const session = await requireAuth(request);
+  if (!session.employeeId) {
+    throw new AuthError("Your login isn't linked to an employee record.", 403);
+  }
+  return { session, employeeId: session.employeeId };
+}

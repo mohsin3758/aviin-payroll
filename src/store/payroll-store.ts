@@ -9,7 +9,11 @@ export type ViewType =
   | 'salary-slip'
   | 'form16'
   | 'reports'
-  | 'settings';
+  | 'settings'
+  | 'my-portal'
+  | 'onboarding'
+  | 'exit-management'
+  | 'helpdesk';
 
 interface PayrollStore {
   activeView: ViewType;

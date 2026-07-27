@@ -44,8 +44,10 @@ export async function getSalarySlipData(employeeId: string, month: number, year:
 
   const daysInMonth = getDaysInMonth(month, year);
 
+  // Scoped to the regular monthly cycle — a salary slip must reflect the real monthly payroll,
+  // never an off-cycle bonus or alternate-pay run that happens to exist for the same month.
   const payrollRun = await db.payrollRun.findFirst({
-    where: { companyId: employee.companyId, month, year },
+    where: { companyId: employee.companyId, month, year, runType: "regular" },
   });
 
   type PayrollDetailRecord = Awaited<ReturnType<typeof db.payrollDetail.findFirst>>;

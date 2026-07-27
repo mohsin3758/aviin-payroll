@@ -66,6 +66,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { usePayrollStore } from '@/store/payroll-store';
+import PayrollExtras from '@/components/payroll/payroll-extras';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -1006,6 +1007,8 @@ export default function PayrollView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PayrollExtras />
     </div>
   );
 }

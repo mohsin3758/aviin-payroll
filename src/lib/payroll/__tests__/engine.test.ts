@@ -9,6 +9,10 @@ import {
   calculateOvertimePay,
   processEmployeePayroll,
   getDaysInMonth,
+  calculateDailyWagePay,
+  calculateHourlyWagePay,
+  processAlternateEmployeePayroll,
+  CONTRACTOR_TDS_RATE,
   type EmployeePayrollInput,
   type SalaryStructureInput,
 } from "../engine";
@@ -234,5 +238,44 @@ describe("processEmployeePayroll", () => {
     const withoutDeclaration = processEmployeePayroll(emp, 7, 2026, 31, 31, 0, { section80C: 0, section80D: 0 });
     const withDeclaration = processEmployeePayroll(emp, 7, 2026, 31, 31, 0, { section80C: 150000, section80D: 25000 });
     expect(withDeclaration.taxableIncome).toBe(withoutDeclaration.taxableIncome);
+  });
+});
+
+describe("alternate pay modes (daily wage / hourly / contractor)", () => {
+  const emp = { id: "e1", employeeCode: "EMP0099", firstName: "Alt", lastName: "Worker" };
+
+  it("calculates daily wage pay as rate x days worked", () => {
+    expect(calculateDailyWagePay(800, 22)).toBe(17600);
+  });
+
+  it("calculates hourly pay as rate x hours worked", () => {
+    expect(calculateHourlyWagePay(150, 37.5)).toBe(5625);
+  });
+
+  it("daily-wage employees have no TDS deducted", () => {
+    const result = processAlternateEmployeePayroll(emp, "daily_wage", 800, 22);
+    expect(result.grossPay).toBe(17600);
+    expect(result.tds).toBe(0);
+    expect(result.netPay).toBe(17600);
+  });
+
+  it("hourly employees have no TDS deducted", () => {
+    const result = processAlternateEmployeePayroll(emp, "hourly", 150, 40);
+    expect(result.grossPay).toBe(6000);
+    expect(result.tds).toBe(0);
+    expect(result.netPay).toBe(6000);
+  });
+
+  it("contractor payments deduct TDS at the configured rate (default 10%, u/s 194J)", () => {
+    const result = processAlternateEmployeePayroll(emp, "contractor", 1, 50000);
+    expect(result.grossPay).toBe(50000);
+    expect(result.tds).toBe(Math.round(50000 * CONTRACTOR_TDS_RATE));
+    expect(result.netPay).toBe(50000 - result.tds);
+  });
+
+  it("contractor TDS rate is configurable (e.g. 1% for 194C contract work)", () => {
+    const result = processAlternateEmployeePayroll(emp, "contractor", 1, 50000, 0.01);
+    expect(result.tds).toBe(500);
+    expect(result.netPay).toBe(49500);
   });
 });

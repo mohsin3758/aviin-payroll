@@ -38,6 +38,10 @@ export async function getForm16Data(employeeId: string, fyStartYear: number) {
       employeeId,
       payrollRun: {
         companyId: employee.companyId,
+        // Regular + off-cycle (bonus) runs are both real salary income with real TDS withheld
+        // and belong in the annual certificate. alternate_pay (contractor/daily-wage/hourly)
+        // is deliberately excluded — that isn't salary income under Form 16's scope.
+        runType: { in: ["regular", "off_cycle"] },
         OR: pairs.map((p) => ({ month: p.month, year: p.year })),
       },
     },
