@@ -60,12 +60,15 @@ import {
   KeyRound,
   UserPlus,
   Ban,
+  Mail,
+  Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
 import { ScrollText, CalendarDays, Trash2, PlusCircle } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -202,6 +205,91 @@ export default function SettingsView() {
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings, refreshKey]);
+
+  // ─── SMTP (Email) ─────────────────────────────────────────────────────────
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState('587');
+  const [smtpSecure, setSmtpSecure] = useState(false);
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPassword, setSmtpPassword] = useState('');
+  const [smtpFrom, setSmtpFrom] = useState('');
+  const [smtpPasswordSet, setSmtpPasswordSet] = useState(false);
+  const [savingSmtp, setSavingSmtp] = useState(false);
+  const [testEmailAddress, setTestEmailAddress] = useState('');
+  const [sendingTest, setSendingTest] = useState(false);
+
+  const fetchSmtpSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const json = await res.json();
+      setSmtpHost(json.data.smtpHost ?? '');
+      setSmtpPort(json.data.smtpPort ? String(json.data.smtpPort) : '587');
+      setSmtpSecure(!!json.data.smtpSecure);
+      setSmtpUser(json.data.smtpUser ?? '');
+      setSmtpFrom(json.data.smtpFrom ?? '');
+      setSmtpPasswordSet(!!json.data.smtpPasswordSet);
+    } catch {
+      // non-critical; the main fetchSettings() call already surfaces a toast on failure
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSmtpSettings();
+  }, [fetchSmtpSettings, refreshKey]);
+
+  const handleSaveSmtp = async () => {
+    if (!smtpHost.trim()) {
+      toast.error('SMTP host is required.');
+      return;
+    }
+    setSavingSmtp(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          smtpHost: smtpHost.trim(),
+          smtpPort: Number(smtpPort) || 587,
+          smtpSecure,
+          smtpUser: smtpUser.trim() || null,
+          ...(smtpPassword.trim() ? { smtpPassword: smtpPassword.trim() } : {}),
+          smtpFrom: smtpFrom.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save SMTP settings');
+      toast.success('SMTP settings saved — emails will now send through your own mail server.');
+      setSmtpPassword('');
+      setSmtpPasswordSet(!!data.data.smtpPasswordSet);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save SMTP settings');
+    } finally {
+      setSavingSmtp(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailAddress.trim()) {
+      toast.error('Enter an email address to send the test to.');
+      return;
+    }
+    setSendingTest(true);
+    try {
+      const res = await fetch('/api/settings/test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testEmailAddress.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send test email');
+      toast.success(`Test email sent to ${testEmailAddress.trim()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send test email');
+    } finally {
+      setSendingTest(false);
+    }
+  };
 
   // ─── Holidays ─────────────────────────────────────────────────────────────
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -1198,6 +1286,69 @@ export default function SettingsView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── Email (SMTP) Configuration (admin only) ─────────────────────────── */}
+      {user?.role === 'admin' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Mail className="h-4 w-4 text-emerald-600" />
+              Email (SMTP) Configuration
+            </CardTitle>
+            <CardDescription>
+              Configure your own mail server so salary slips, Form 16, and letters send to real inboxes.
+              Leave unconfigured to keep using the built-in Ethereal test inbox (previews only, nothing delivered for real).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="smtp-host">SMTP Host</Label>
+                <Input id="smtp-host" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder="smtp.gmail.com" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="smtp-port">Port</Label>
+                <Input id="smtp-port" type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} placeholder="587" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="smtp-user">Username</Label>
+                <Input id="smtp-user" value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} placeholder="you@yourdomain.com" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="smtp-password">
+                  Password {smtpPasswordSet && <span className="text-xs font-normal text-emerald-600">(configured — leave blank to keep it)</span>}
+                </Label>
+                <Input id="smtp-password" type="password" autoComplete="new-password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} placeholder={smtpPasswordSet ? '••••••••' : ''} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="smtp-from">From Address</Label>
+                <Input id="smtp-from" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)} placeholder='"PayrollPro" <payroll@yourdomain.com>' />
+              </div>
+              <div className="flex items-center gap-2 pt-6">
+                <Switch id="smtp-secure" checked={smtpSecure} onCheckedChange={setSmtpSecure} />
+                <Label htmlFor="smtp-secure" className="cursor-pointer">Use SSL/TLS (port 465)</Label>
+              </div>
+            </div>
+            <Button onClick={handleSaveSmtp} disabled={savingSmtp} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingSmtp ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              Save SMTP Settings
+            </Button>
+
+            <Separator />
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5 flex-1 min-w-[220px]">
+                <Label htmlFor="smtp-test-to">Send a test email to</Label>
+                <Input id="smtp-test-to" type="email" value={testEmailAddress} onChange={(e) => setTestEmailAddress(e.target.value)} placeholder="you@yourdomain.com" />
+              </div>
+              <Button variant="outline" onClick={handleSendTestEmail} disabled={sendingTest}>
+                {sendingTest ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                Send Test Email
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Audit Log (admin only) */}
       {user?.role === 'admin' && (

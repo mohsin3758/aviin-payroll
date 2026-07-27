@@ -27,18 +27,25 @@ function parseWeeklyOffDays(value: string): number[] {
     .filter((n) => !isNaN(n) && n >= 0 && n <= 6);
 }
 
-// GET /api/settings — return company settings (first record) or defaults
+// GET /api/settings — return company settings (first record) or defaults.
+// smtpPassword is NEVER returned (this route only requires requireAuth, not admin) — only
+// whether one is set, so the Settings UI can show "configured" without exposing the secret.
 export async function GET(request: NextRequest) {
   try {
     await requireAuth(request);
     const company = await db.company.findFirst();
 
     if (!company) {
-      return NextResponse.json({ data: DEFAULT_COMPANY });
+      return NextResponse.json({ data: { ...DEFAULT_COMPANY, smtpPasswordSet: false } });
     }
 
+    const { smtpPassword, ...safeCompany } = company;
     return NextResponse.json({
-      data: { ...company, weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays) },
+      data: {
+        ...safeCompany,
+        weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays),
+        smtpPasswordSet: !!smtpPassword,
+      },
     });
   } catch (error) {
     return handleApiError(error, "fetch company settings");
@@ -75,6 +82,12 @@ export async function PUT(request: NextRequest) {
           ...(body.payrollMonth !== undefined && { payrollMonth: body.payrollMonth }),
           ...(body.payrollYear !== undefined && { payrollYear: body.payrollYear }),
           ...(weeklyOffDaysStr !== undefined && { weeklyOffDays: weeklyOffDaysStr }),
+          ...(body.smtpHost !== undefined && { smtpHost: body.smtpHost }),
+          ...(body.smtpPort !== undefined && { smtpPort: body.smtpPort }),
+          ...(body.smtpSecure !== undefined && { smtpSecure: body.smtpSecure }),
+          ...(body.smtpUser !== undefined && { smtpUser: body.smtpUser }),
+          ...(body.smtpPassword && { smtpPassword: body.smtpPassword }),
+          ...(body.smtpFrom !== undefined && { smtpFrom: body.smtpFrom }),
         },
       });
     } else {
@@ -93,14 +106,21 @@ export async function PUT(request: NextRequest) {
           payrollMonth: body.payrollMonth ?? DEFAULT_COMPANY.payrollMonth,
           payrollYear: body.payrollYear ?? DEFAULT_COMPANY.payrollYear,
           weeklyOffDays: weeklyOffDaysStr ?? DEFAULT_COMPANY.weeklyOffDays.join(","),
+          smtpHost: body.smtpHost ?? null,
+          smtpPort: body.smtpPort ?? null,
+          smtpSecure: body.smtpSecure ?? false,
+          smtpUser: body.smtpUser ?? null,
+          smtpPassword: body.smtpPassword || null,
+          smtpFrom: body.smtpFrom ?? null,
         },
       });
     }
 
-    await logAudit({ session, action: "update", entity: "Company", entityId: company.id });
+    await logAudit({ session, action: "update", entity: "Company", entityId: company.id, details: { smtpChanged: body.smtpHost !== undefined || !!body.smtpPassword } });
 
+    const { smtpPassword, ...safeCompany } = company;
     return NextResponse.json({
-      data: { ...company, weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays) },
+      data: { ...safeCompany, weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays), smtpPasswordSet: !!smtpPassword },
     });
   } catch (error) {
     return handleApiError(error, "update company settings");

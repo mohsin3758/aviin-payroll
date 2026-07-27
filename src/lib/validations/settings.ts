@@ -29,4 +29,12 @@ export const updateSettingsSchema = z.object({
   payrollYear: z.coerce.number().int().min(2000).max(2100).optional(),
   // Array of day-of-week numbers (0=Sunday..6=Saturday) that are paid non-working days every week.
   weeklyOffDays: z.array(z.coerce.number().int().min(0).max(6)).max(7).optional(),
+  smtpHost: z.string().trim().max(200).nullable().optional(),
+  smtpPort: z.coerce.number().int().min(1).max(65535).nullable().optional(),
+  smtpSecure: z.boolean().optional(),
+  smtpUser: z.string().trim().max(200).nullable().optional(),
+  // Omit entirely (or send "") to leave the currently-saved password untouched — this is how
+  // the Settings UI can show the SMTP form as "configured" without ever re-displaying it.
+  smtpPassword: z.string().trim().max(500).optional(),
+  smtpFrom: z.string().trim().max(200).nullable().optional(),
 });

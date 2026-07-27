@@ -53,6 +53,16 @@ model Company {
   defaultNoticePeriodDays Int  @default(30)
   // Comma-separated day-of-week numbers that are paid non-working days every week: 0=Sunday..6=Saturday.
   weeklyOffDays       String   @default("0")
+  // Admin-configured SMTP, set via Settings so a real deployment doesn't require VPS/env-var
+  // access to enable email. Falls back to SMTP_* env vars, then to an Ethereal test inbox, if
+  // unset. smtpPassword is stored in plaintext (no secrets-manager in this deployment) and is
+  // never returned by GET /api/settings — only a smtpPasswordSet boolean is.
+  smtpHost            String?
+  smtpPort            Int?
+  smtpSecure          Boolean  @default(false)
+  smtpUser            String?
+  smtpPassword        String?
+  smtpFrom            String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
