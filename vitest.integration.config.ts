@@ -8,5 +8,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.integration.test.ts'],
+    // These hit a live `next dev` server with Turbopack's per-route lazy compilation — the
+    // first request to any given route can take several seconds to compile, especially right
+    // after a cache clear. Hermetic unit tests don't need this; these do.
+    hookTimeout: 30_000,
+    testTimeout: 20_000,
   },
 })

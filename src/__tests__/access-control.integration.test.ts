@@ -281,6 +281,125 @@ describe("Access control fixes (requires live dev server)", () => {
     });
   });
 
+  // ---- Second-pass findings: 10 more routes with the identical unscoped-employeeId /
+  // missing-auth pattern, found by an audit of every remaining route after the first 9 fixes.
+  describe("second-pass access-control fixes", () => {
+    it("salary-slip send: was completely unauthenticated — now blocks employee/manager, allows admin", async () => {
+      const asEmployee = await fetch(`${BASE}/api/salary-slip/send`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: employeeCookie },
+        body: JSON.stringify({ employeeId: selfId, month: 1, year: 2025 }),
+      });
+      expect(asEmployee.status).toBe(403);
+      const asManager = await fetch(`${BASE}/api/salary-slip/send`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: managerCookie },
+        body: JSON.stringify({ employeeId: selfId, month: 1, year: 2025 }),
+      });
+      expect(asManager.status).toBe(403);
+      const asAdmin = await fetch(`${BASE}/api/salary-slip/send`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ employeeId: selfId, month: 1, year: 2025 }),
+      });
+      expect(asAdmin.status).not.toBe(403); // whatever the data-availability outcome, auth passed
+    });
+
+    it("payroll run detail: blocks employee/manager, allows admin (full bank/PAN/Aadhaar for every employee in the run)", async () => {
+      const reportYear = 2100; // same fixture slot as the reports test
+      const runList = await fetch(`${BASE}/api/payroll?month=11&year=${reportYear}`, { headers: { Cookie: adminCookie } });
+      const runs = await runList.json();
+      const runId = runs[0]?.id;
+      expect(runId).toBeTruthy();
+
+      const asEmployee = await fetch(`${BASE}/api/payroll/${runId}`, { headers: { Cookie: employeeCookie } });
+      expect(asEmployee.status).toBe(403);
+      const asManager = await fetch(`${BASE}/api/payroll/${runId}`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(403);
+      const asAdmin = await fetch(`${BASE}/api/payroll/${runId}`, { headers: { Cookie: adminCookie } });
+      expect(asAdmin.status).toBe(200);
+    });
+
+    it("employee detail: self/admin see salaryStructure, manager doesn't, employee-on-other is blocked", async () => {
+      const asOther = await fetch(`${BASE}/api/employees/${otherId}`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/employees/${selfId}`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      expect("salaryStructure" in (await asSelf.json())).toBe(true);
+      const asManager = await fetch(`${BASE}/api/employees/${otherId}`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(200);
+      expect("salaryStructure" in (await asManager.json())).toBe(false);
+      const asAdmin = await fetch(`${BASE}/api/employees/${otherId}`, { headers: { Cookie: adminCookie } });
+      expect(asAdmin.status).toBe(200);
+    });
+
+    it("salary revisions: self/admin allowed, manager and employee-on-other blocked", async () => {
+      const asOther = await fetch(`${BASE}/api/employees/${otherId}/salary-revisions`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/employees/${selfId}/salary-revisions`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      const asManager = await fetch(`${BASE}/api/employees/${otherId}/salary-revisions`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(403);
+      const asAdmin = await fetch(`${BASE}/api/employees/${otherId}/salary-revisions`, { headers: { Cookie: adminCookie } });
+      expect(asAdmin.status).toBe(200);
+    });
+
+    it("shift assignment: self/manager/admin allowed, employee-on-other blocked (operational, not financial)", async () => {
+      const asOther = await fetch(`${BASE}/api/employees/${otherId}/shift`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/employees/${selfId}/shift`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      const asManager = await fetch(`${BASE}/api/employees/${otherId}/shift`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(200);
+    });
+
+    it("allocated assets: self/manager/admin allowed, employee-on-other blocked (operational, not financial)", async () => {
+      const asOther = await fetch(`${BASE}/api/employees/${otherId}/assets`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/employees/${selfId}/assets`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      const asManager = await fetch(`${BASE}/api/employees/${otherId}/assets`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(200);
+    });
+
+    it("loans: self/admin allowed, manager and employee-on-other blocked; unscoped list is admin/hr only", async () => {
+      const asOther = await fetch(`${BASE}/api/loans?employeeId=${otherId}`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/loans?employeeId=${selfId}`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      const asManager = await fetch(`${BASE}/api/loans?employeeId=${otherId}`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(403);
+      const listAsEmployee = await fetch(`${BASE}/api/loans`, { headers: { Cookie: employeeCookie } });
+      expect(listAsEmployee.status).toBe(403);
+      const listAsAdmin = await fetch(`${BASE}/api/loans`, { headers: { Cookie: adminCookie } });
+      expect(listAsAdmin.status).toBe(200);
+    });
+
+    it("investment declarations: self/admin allowed, manager and employee-on-other blocked", async () => {
+      const asOther = await fetch(`${BASE}/api/investment-declarations?employeeId=${otherId}`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/investment-declarations?employeeId=${selfId}`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      const asManager = await fetch(`${BASE}/api/investment-declarations?employeeId=${otherId}`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(403);
+    });
+
+    it("arrears: self/admin allowed, manager and employee-on-other blocked", async () => {
+      const asOther = await fetch(`${BASE}/api/arrears?employeeId=${otherId}`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/arrears?employeeId=${selfId}`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      const asManager = await fetch(`${BASE}/api/arrears?employeeId=${otherId}`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(403);
+    });
+
+    it("onboarding tasks: self/admin allowed, manager and employee-on-other blocked", async () => {
+      const asOther = await fetch(`${BASE}/api/onboarding/tasks?employeeId=${otherId}`, { headers: { Cookie: employeeCookie } });
+      expect(asOther.status).toBe(403);
+      const asSelf = await fetch(`${BASE}/api/onboarding/tasks?employeeId=${selfId}`, { headers: { Cookie: employeeCookie } });
+      expect(asSelf.status).toBe(200);
+      const asManager = await fetch(`${BASE}/api/onboarding/tasks?employeeId=${otherId}`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(403);
+    });
+  });
+
   // ---- Geofence (gap 4) ----
   describe("geofence", () => {
     afterAll(async () => {

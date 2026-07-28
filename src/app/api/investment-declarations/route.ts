@@ -2,16 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { upsertInvestmentDeclarationSchema } from "@/lib/validations/investment-declaration";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
-// GET /api/investment-declarations?employeeId=...&year=...
+// GET /api/investment-declarations?employeeId=...&year=... — tax-declaration financial data,
+// same tier as loans/salary-slip: self or admin/hr only, not manager.
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
     const { searchParams } = request.nextUrl;
     const employeeId = searchParams.get("employeeId");
     const year = searchParams.get("year");
+
+    if (employeeId) {
+      await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+    } else {
+      await requireRole(request, ["admin", "hr"]);
+    }
 
     const where: Record<string, unknown> = {};
     if (employeeId) where.employeeId = employeeId;

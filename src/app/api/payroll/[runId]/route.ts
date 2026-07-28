@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
 type Params = {
@@ -17,7 +17,9 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 // GET /api/payroll/[runId] - Get a payroll run with all details
 export async function GET(request: NextRequest, { params }: Params) {
   try {
-    await requireAuth(request);
+    // Returns full bank/PAN/Aadhaar + salary detail for every employee in the run — matches
+    // its bank-file sibling and the payroll list route: admin/hr only, not self-or-manager.
+    await requireRole(request, ["admin", "hr"]);
     const { runId } = await params;
 
     const payrollRun = await db.payrollRun.findUnique({

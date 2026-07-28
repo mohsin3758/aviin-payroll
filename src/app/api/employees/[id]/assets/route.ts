@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -11,11 +11,11 @@ const allocateAssetSchema = z.object({
   notes: z.string().trim().max(500).nullable().optional(),
 });
 
-// GET /api/employees/[id]/assets
+// GET /api/employees/[id]/assets — operational, not financial: self, or admin/hr/manager.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth(request);
     const { id } = await params;
+    await requireSelfOrRole(request, id, ["admin", "hr", "manager"]);
     const assets = await db.employeeAsset.findMany({ where: { employeeId: id }, orderBy: { allocatedDate: "desc" } });
     return NextResponse.json({ data: assets });
   } catch (error) {

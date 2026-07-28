@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSalarySlipData, SalarySlipError } from "@/lib/payroll/salary-slip";
 import { buildSalarySlipEmailHtml } from "@/lib/payroll/salary-slip-email";
 import { sendEmail } from "@/lib/mailer";
+import { requireRole } from "@/lib/auth";
+import { handleApiError } from "@/lib/api-utils";
 
-// POST /api/salary-slip/send  { employeeId, month, year }
+// POST /api/salary-slip/send  { employeeId, month, year } — admin/hr only, matching its
+// sibling send-bulk/route.ts. Only ever called from admin/hr-only pages (Payroll, Salary
+// Slips); an employee views/prints their own slip via My Portal instead, they don't trigger
+// this send action.
 export async function POST(request: NextRequest) {
   try {
+    await requireRole(request, ["admin", "hr"]);
     const body = await request.json();
     const { employeeId, month: monthRaw, year: yearRaw } = body;
 
@@ -51,7 +57,6 @@ export async function POST(request: NextRequest) {
     if (error instanceof SalarySlipError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error("[SALARY_SLIP_SEND]", error);
-    return NextResponse.json({ error: "Failed to send salary slip" }, { status: 500 });
+    return handleApiError(error, "send salary slip");
   }
 }

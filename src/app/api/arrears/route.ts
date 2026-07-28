@@ -2,16 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createArrearSchema } from "@/lib/validations/arrear";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
-// GET /api/arrears?employeeId=...&status=...
+// GET /api/arrears?employeeId=...&status=... — financial data (arrears/recoveries), same
+// tier as loans/investment-declarations: self or admin/hr only, not manager.
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
     const { searchParams } = request.nextUrl;
     const employeeId = searchParams.get("employeeId");
     const status = searchParams.get("status");
+
+    if (employeeId) {
+      await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+    } else {
+      await requireRole(request, ["admin", "hr"]);
+    }
 
     const where: Record<string, unknown> = {};
     if (employeeId) where.employeeId = employeeId;

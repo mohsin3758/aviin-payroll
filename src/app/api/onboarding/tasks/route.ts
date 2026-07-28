@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -11,13 +11,14 @@ const createTaskSchema = z.object({
   order: z.number().int().min(0).default(0),
 });
 
-// GET /api/onboarding/tasks?employeeId=
+// GET /api/onboarding/tasks?employeeId= — self or admin/hr (Onboarding is admin/hr-only
+// elsewhere in the app; not extended to manager here either).
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
     const { searchParams } = request.nextUrl;
     const employeeId = searchParams.get("employeeId");
     if (!employeeId) return apiError("employeeId is required", 400);
+    await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
 
     const tasks = await db.onboardingTask.findMany({
       where: { employeeId },

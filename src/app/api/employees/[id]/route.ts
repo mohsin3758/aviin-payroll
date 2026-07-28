@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { updateEmployeeSchema } from "@/lib/validations/employee";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { calculateGrossSalary } from "@/lib/payroll/engine";
 
 export async function GET(
@@ -11,12 +11,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth(request);
     const { id } = await params;
+    // Matches the employees-list policy: self, or admin/hr/manager may view any record, but
+    // manager never sees salaryStructure (full PAN/Aadhaar/bank/DOB/address is fine for
+    // manager to see here, same as the list route — only compensation figures are stripped).
+    const session = await requireSelfOrRole(request, id, ["admin", "hr", "manager"]);
 
     const employee = await db.employee.findUnique({
       where: { id },
-      include: { salaryStructure: true },
+      include: { salaryStructure: session.role !== "manager" },
     });
 
     if (!employee) {

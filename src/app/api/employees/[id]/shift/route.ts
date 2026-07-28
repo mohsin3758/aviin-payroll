@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
 const assignSchema = z.object({ shiftId: z.string().min(1) });
 
 // GET /api/employees/[id]/shift — the employee's current (most recent) shift assignment.
+// Operational scheduling data, not financial — self, or admin/hr/manager (same tier as
+// attendance/leave oversight).
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth(request);
     const { id } = await params;
+    await requireSelfOrRole(request, id, ["admin", "hr", "manager"]);
     const assignment = await db.employeeShift.findFirst({
       where: { employeeId: id },
       include: { shift: true },

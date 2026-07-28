@@ -2,16 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createLoanSchema } from "@/lib/validations/loan";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
-// GET /api/loans?employeeId=...&status=... — includes computed remainingMonths per loan
+// GET /api/loans?employeeId=...&status=... — includes computed remainingMonths per loan.
+// Financial data, same tier as salary-slip/form16: self or admin/hr only, not manager.
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
     const { searchParams } = request.nextUrl;
     const employeeId = searchParams.get("employeeId");
     const status = searchParams.get("status");
+
+    if (employeeId) {
+      await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+    } else {
+      // No specific target requested — this is a company-wide listing, admin/hr only.
+      await requireRole(request, ["admin", "hr"]);
+    }
 
     const where: Record<string, unknown> = {};
     if (employeeId) where.employeeId = employeeId;
