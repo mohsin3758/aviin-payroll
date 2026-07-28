@@ -62,6 +62,7 @@ import {
   Ban,
   Mail,
   Send,
+  MapPin,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
@@ -288,6 +289,63 @@ export default function SettingsView() {
       toast.error(err instanceof Error ? err.message : 'Failed to send test email');
     } finally {
       setSendingTest(false);
+    }
+  };
+
+  // ─── Office Location, Geofencing & Login-based Attendance ──────────────────
+  const [officeLatitude, setOfficeLatitude] = useState('');
+  const [officeLongitude, setOfficeLongitude] = useState('');
+  const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState('200');
+  const [enforceGeofence, setEnforceGeofence] = useState(false);
+  const [enableLoginAttendance, setEnableLoginAttendance] = useState(false);
+  const [savingGeofence, setSavingGeofence] = useState(false);
+
+  const fetchGeofenceSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const json = await res.json();
+      setOfficeLatitude(json.data.officeLatitude != null ? String(json.data.officeLatitude) : '');
+      setOfficeLongitude(json.data.officeLongitude != null ? String(json.data.officeLongitude) : '');
+      setGeofenceRadiusMeters(json.data.geofenceRadiusMeters != null ? String(json.data.geofenceRadiusMeters) : '200');
+      setEnforceGeofence(!!json.data.enforceGeofence);
+      setEnableLoginAttendance(!!json.data.enableLoginAttendance);
+    } catch {
+      // non-critical; the main fetchSettings() call already surfaces a toast on failure
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchGeofenceSettings();
+  }, [fetchGeofenceSettings, refreshKey]);
+
+  const handleSaveGeofence = async () => {
+    const lat = officeLatitude.trim() ? Number(officeLatitude) : null;
+    const lon = officeLongitude.trim() ? Number(officeLongitude) : null;
+    if ((lat == null) !== (lon == null)) {
+      toast.error('Set both latitude and longitude, or leave both blank.');
+      return;
+    }
+    setSavingGeofence(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          officeLatitude: lat,
+          officeLongitude: lon,
+          geofenceRadiusMeters: geofenceRadiusMeters.trim() ? Number(geofenceRadiusMeters) : null,
+          enforceGeofence,
+          enableLoginAttendance,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save location settings');
+      toast.success('Office location & attendance settings saved.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save location settings');
+    } finally {
+      setSavingGeofence(false);
     }
   };
 
@@ -1346,6 +1404,55 @@ export default function SettingsView() {
                 Send Test Email
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─── Office Location & Attendance (admin only) ────────────────────────── */}
+      {user?.role === 'admin' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapPin className="h-4 w-4 text-emerald-600" />
+              Office Location &amp; Attendance
+            </CardTitle>
+            <CardDescription>
+              Optional: set an office location to log how far each punch was from it. Leave blank and nothing
+              changes — no location is ever requested from employees until coordinates are set here.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="office-lat">Office Latitude</Label>
+                <Input id="office-lat" type="number" step="any" value={officeLatitude} onChange={(e) => setOfficeLatitude(e.target.value)} placeholder="19.0760" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="office-lon">Office Longitude</Label>
+                <Input id="office-lon" type="number" step="any" value={officeLongitude} onChange={(e) => setOfficeLongitude(e.target.value)} placeholder="72.8777" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="geofence-radius">Allowed Radius (meters)</Label>
+                <Input id="geofence-radius" type="number" value={geofenceRadiusMeters} onChange={(e) => setGeofenceRadiusMeters(e.target.value)} placeholder="200" />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch id="enforce-geofence" checked={enforceGeofence} onCheckedChange={setEnforceGeofence} />
+              <Label htmlFor="enforce-geofence" className="cursor-pointer">
+                Block punches outside the radius <span className="text-xs font-normal text-muted-foreground">(off by default — until then, distance is only logged, never enforced)</span>
+              </Label>
+            </div>
+            <Separator />
+            <div className="flex items-center gap-2">
+              <Switch id="enable-login-attendance" checked={enableLoginAttendance} onCheckedChange={setEnableLoginAttendance} />
+              <Label htmlFor="enable-login-attendance" className="cursor-pointer">
+                Automatically mark an employee present when they log in
+              </Label>
+            </div>
+            <Button onClick={handleSaveGeofence} disabled={savingGeofence} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingGeofence ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              Save Location &amp; Attendance Settings
+            </Button>
           </CardContent>
         </Card>
       )}

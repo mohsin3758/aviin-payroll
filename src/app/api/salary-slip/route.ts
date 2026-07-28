@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSalarySlipData, SalarySlipError } from "@/lib/payroll/salary-slip";
+import { requireSelfOrRole } from "@/lib/auth";
+import { handleApiError } from "@/lib/api-utils";
 
 // GET /api/salary-slip?employeeId=xxx&month=1&year=2025
 export async function GET(request: NextRequest) {
@@ -15,6 +17,9 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Carries one named person's PAN + full pay breakup — self or admin/hr only, not manager.
+    await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
 
     const month = parseInt(monthParam, 10);
     const year = parseInt(yearParam, 10);
@@ -39,10 +44,6 @@ export async function GET(request: NextRequest) {
     if (error instanceof SalarySlipError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error("[SALARY_SLIP_GET]", error);
-    return NextResponse.json(
-      { error: "Failed to generate salary slip" },
-      { status: 500 }
-    );
+    return handleApiError(error, "generate salary slip");
   }
 }

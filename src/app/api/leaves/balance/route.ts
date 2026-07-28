@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireAuth } from "@/lib/auth";
+import { requireSelfOrRole } from "@/lib/auth";
 
 // GET /api/leaves/balance?employeeId=...&year=...
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
     const { searchParams } = request.nextUrl;
 
     const employeeId = searchParams.get("employeeId");
@@ -14,6 +13,10 @@ export async function GET(request: NextRequest) {
     if (!employeeId) {
       return apiError("employeeId query parameter is required", 400);
     }
+
+    // Same category of gap as the rest of this pass: found while writing the integration
+    // tests below, not one of the original 7, but the identical missing-ownership-check bug.
+    await requireSelfOrRole(request, employeeId, ["admin", "hr", "manager"]);
 
     const yearParam = searchParams.get("year");
     const year = yearParam ? parseInt(yearParam, 10) : new Date().getFullYear();

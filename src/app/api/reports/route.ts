@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getMonthName } from "@/lib/payroll/engine";
 import Papa from "papaparse";
-import { requireAuth } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-utils";
 
 const VALID_TYPES = ["pf", "esi", "tds", "pt", "lwf", "summary"] as const;
@@ -22,7 +22,9 @@ function toCsv(type: ReportType, data: Record<string, unknown>): string {
 // GET /api/reports?month=1&year=2025&type=pf&format=csv
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
+    // Aggregate statutory reports (PF/ESI/TDS/PT/LWF/summary) — company-wide figures, not tied
+    // to one employee, so manager gets the same access as admin/hr rather than self-scoping.
+    await requireRole(request, ["admin", "hr", "manager"]);
     const { searchParams } = new URL(request.url);
     const monthParam = searchParams.get("month");
     const yearParam = searchParams.get("year");

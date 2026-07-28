@@ -56,6 +56,10 @@ export async function POST(request: NextRequest) {
     if (!employee) return apiError("Employee not found", 404);
     if (employee.dateOfExit) return apiError("This employee has already exited.", 409);
 
+    // employeeId is @unique on ExitRequest (a 1:1 relation to Employee), so a prior
+    // rejected/withdrawn request must be reused (reset to a fresh cycle) rather than a second
+    // row inserted — a second insert would violate that constraint. Only a currently-ACTIVE
+    // request (not rejected/withdrawn) actually blocks a new resignation.
     const existing = await db.exitRequest.findUnique({ where: { employeeId } });
     if (existing && existing.status !== "rejected" && existing.status !== "withdrawn") {
       return apiError("An exit request is already in progress for this employee.", 409);
@@ -68,15 +72,24 @@ export async function POST(request: NextRequest) {
     const lastWorkingDate = new Date(parsed.resignationDate);
     lastWorkingDate.setDate(lastWorkingDate.getDate() + noticePeriodDays);
 
-    const exitRequest = await db.exitRequest.create({
-      data: {
-        employeeId,
-        resignationDate: parsed.resignationDate,
-        noticePeriodDays,
-        lastWorkingDate,
-        reason: parsed.reason ?? null,
-        status: "pending_manager",
-      },
+    const freshCycle = {
+      resignationDate: parsed.resignationDate,
+      noticePeriodDays,
+      lastWorkingDate,
+      reason: parsed.reason ?? null,
+      status: "pending_manager",
+      managerApprovedBy: null,
+      managerApprovedAt: null,
+      managerComment: null,
+      hrApprovedBy: null,
+      hrApprovedAt: null,
+      hrComment: null,
+    };
+
+    const exitRequest = await db.exitRequest.upsert({
+      where: { employeeId },
+      create: { employeeId, ...freshCycle },
+      update: freshCycle,
     });
 
     await logAudit({ session, action: "create", entity: "ExitRequest", entityId: exitRequest.id });

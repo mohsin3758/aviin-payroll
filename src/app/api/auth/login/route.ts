@@ -5,6 +5,7 @@ import { verifyPassword, signSession, SESSION_COOKIE_NAME, SESSION_MAX_AGE } fro
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { recordPunch } from "@/lib/attendance-punch";
 
 const loginSchema = z.object({
   email: z.string().trim().email(),
@@ -47,6 +48,25 @@ export async function POST(request: NextRequest) {
       entityId: user.id,
       ipAddress: ip,
     });
+
+    // Gap 6 fix: login-based attendance is opt-in (Company.enableLoginAttendance, default
+    // false) and only applies to logins linked to an employee record. Never let a failure here
+    // (including the very common "already punched in today") affect the login response itself.
+    if (user.employeeId) {
+      try {
+        const company = await db.company.findFirst();
+        if (company?.enableLoginAttendance) {
+          await recordPunch({
+            employeeId: user.employeeId,
+            action: "in",
+            method: "login",
+            ipAddress: ip,
+          });
+        }
+      } catch (err) {
+        console.error("[LOGIN_ATTENDANCE] Failed to auto-mark attendance on login:", err);
+      }
+    }
 
     const res = NextResponse.json({
       user: { id: user.id, email: user.email, name: user.name, role: user.role, employeeId: user.employeeId },

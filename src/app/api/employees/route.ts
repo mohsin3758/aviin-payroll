@@ -3,11 +3,14 @@ import { db } from "@/lib/db";
 import { createEmployeeSchema } from "@/lib/validations/employee";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
+    // employee role: silently restricted to their own record (matches the ESS routes'
+    // pattern) rather than 403ing, since this route also backs an employee's own lookups.
+    // manager: sees everyone, but never salary figures — see include below.
+    const { session, forcedEmployeeId } = await scopeToOwnEmployeeIfSelf(request);
     const { searchParams } = request.nextUrl;
     const search = searchParams.get("search") ?? "";
     const department = searchParams.get("department");
@@ -19,28 +22,32 @@ export async function GET(request: NextRequest) {
       dateOfExit: null,
     };
 
-    if (search) {
-      // Note: SQLite's Prisma provider doesn't support `mode: "insensitive"` (unlike
-      // Postgres/MySQL) — `contains` is already case-insensitive for ASCII on SQLite by default.
-      where.OR = [
-        { firstName: { contains: search } },
-        { lastName: { contains: search } },
-        { employeeCode: { contains: search } },
-      ];
-    }
+    if (forcedEmployeeId) {
+      where.id = forcedEmployeeId;
+    } else {
+      if (search) {
+        // Note: SQLite's Prisma provider doesn't support `mode: "insensitive"` (unlike
+        // Postgres/MySQL) — `contains` is already case-insensitive for ASCII on SQLite by default.
+        where.OR = [
+          { firstName: { contains: search } },
+          { lastName: { contains: search } },
+          { employeeCode: { contains: search } },
+        ];
+      }
 
-    if (department) {
-      where.department = department;
-    }
+      if (department) {
+        where.department = department;
+      }
 
-    if (state) {
-      where.state = state;
+      if (state) {
+        where.state = state;
+      }
     }
 
     const [employees, total] = await Promise.all([
       db.employee.findMany({
         where,
-        include: { salaryStructure: true },
+        include: { salaryStructure: session.role !== "manager" },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * limit,
         take: limit,

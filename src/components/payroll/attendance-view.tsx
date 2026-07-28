@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import {
   Fingerprint,
   LogOut,
-  Camera,
   Clock,
   UserCheck,
   UserX,
@@ -74,6 +73,7 @@ interface AttendanceRecord {
   punchOutMethod: string | null;
   faceVerified: boolean;
   faceConfidence: number | null;
+  distanceFromOfficeMeters: number | null;
   status: string;
   totalHours: number | null;
   notes: string | null;
@@ -91,6 +91,7 @@ interface TodayPunch {
   status: string;
   totalHours: number | null;
   punchInMethod: string | null;
+  distanceFromOfficeMeters: number | null;
 }
 
 type PunchAction = 'in' | 'out';
@@ -113,6 +114,15 @@ const METHOD_BADGE: Record<string, string> = {
   face: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800',
   manual: 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700',
   login: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400 border-sky-200 dark:border-sky-800',
+};
+
+// Display-only labels — the stored punchInMethod/punchOutMethod DB values ("face", "manual",
+// "login") are unchanged; only what's shown to the user avoids implying real biometric
+// verification for the "face" method (see gap 5 in the training guide).
+const METHOD_LABEL: Record<string, string> = {
+  face: 'Quick Confirm',
+  manual: 'Manual',
+  login: 'Login',
 };
 
 // ---------------------------------------------------------------------------
@@ -145,8 +155,27 @@ export default function AttendanceView() {
   const { refreshKey, triggerRefresh } = usePayrollStore();
   const { user } = useSessionContext();
   const isStaff = user?.role === 'admin' || user?.role === 'hr';
+  const isEmployeeRole = user?.role === 'employee';
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+
+  // ---- Office location config (drives whether geolocation is captured at all, and whether
+  // the login-attendance info card reflects an active or inactive feature) ----
+  const [officeConfigured, setOfficeConfigured] = useState(false);
+  const [loginAttendanceEnabled, setLoginAttendanceEnabled] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/settings');
+        const json = await res.json();
+        setOfficeConfigured(json.data?.officeLatitude != null && json.data?.officeLongitude != null);
+        setLoginAttendanceEnabled(!!json.data?.enableLoginAttendance);
+      } catch {
+        /* non-critical, defaults are safe (no geo prompt, "not enabled" copy) */
+      }
+    })();
+  }, []);
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -194,7 +223,15 @@ export default function AttendanceView() {
   const [punchEmployeeId, setPunchEmployeeId] = useState<string>('');
   const [todayPunch, setTodayPunch] = useState<TodayPunch | null>(null);
 
-  // ---- State: Face Verification Dialog ----
+  // Employee role: locked to their own record — GET /api/attendance/punch is scoped so an
+  // employee session can only punch for themselves anyway; this keeps the UI honest about that.
+  useEffect(() => {
+    if (isEmployeeRole && user?.employeeId) {
+      setPunchEmployeeId(user.employeeId);
+    }
+  }, [isEmployeeRole, user?.employeeId]);
+
+  // ---- State: Confirm Punch Dialog ----
   const [verificationOpen, setVerificationOpen] = useState(false);
   const [punchAction, setPunchAction] = useState<PunchAction>('in');
   const [verificationStep, setVerificationStep] = useState<VerificationStep>('idle');
@@ -276,7 +313,7 @@ export default function AttendanceView() {
       const records: AttendanceRecord[] = json.data ?? [];
       if (records.length > 0) {
         const r = records[0];
-        setTodayPunch({ id: r.id, punchIn: r.punchIn, punchOut: r.punchOut, status: r.status, totalHours: r.totalHours, punchInMethod: r.punchInMethod });
+        setTodayPunch({ id: r.id, punchIn: r.punchIn, punchOut: r.punchOut, status: r.status, totalHours: r.totalHours, punchInMethod: r.punchInMethod, distanceFromOfficeMeters: r.distanceFromOfficeMeters });
       } else {
         setTodayPunch(null);
       }
@@ -302,6 +339,23 @@ export default function AttendanceView() {
     return { present, absent, halfDay, totalHours: Math.round(totalHours * 100) / 100 };
   }, [attendanceRecords, filterEmployeeId]);
 
+  // ---- Best-effort geolocation capture ----
+  // Only ever attempted once an admin has configured an office location — otherwise no
+  // location permission prompt appears at all. Never blocks or delays a punch: resolves null
+  // on denial, timeout, or an unsupported browser rather than rejecting.
+  const captureGeoLocation = useCallback((): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
+    if (!officeConfigured || typeof navigator === 'undefined' || !navigator.geolocation) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+        () => resolve(null),
+        { timeout: 5000 }
+      );
+    });
+  }, [officeConfigured]);
+
   // ---- Punch Handler ----
   const handlePunchClick = (action: PunchAction) => {
     if (!punchEmployeeId) {
@@ -325,7 +379,7 @@ export default function AttendanceView() {
     setVerificationOpen(true);
   };
 
-  // ---- Face Verification Animation ----
+  // ---- Confirm Punch Animation ----
   const runFaceVerification = useCallback(async () => {
     setVerificationPunching(true);
     const steps: VerificationStep[] = ['initializing', 'detecting', 'verifying', 'verified'];
@@ -335,6 +389,7 @@ export default function AttendanceView() {
     }
     // Submit punch
     try {
+      const geo = await captureGeoLocation();
       const res = await fetch('/api/attendance/punch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -343,13 +398,14 @@ export default function AttendanceView() {
           action: punchAction,
           method: 'face',
           faceData: { verified: true, confidence: 98.5 },
+          ...(geo && { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy }),
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Punch failed' }));
         throw new Error(err.error || 'Punch failed');
       }
-      toast.success(`Punch ${punchAction === 'in' ? 'IN' : 'OUT'} recorded successfully via face verification!`);
+      toast.success(`Punch ${punchAction === 'in' ? 'IN' : 'OUT'} recorded successfully!`);
       setVerificationOpen(false);
       fetchAttendance();
       fetchTodayPunch(punchEmployeeId);
@@ -359,7 +415,7 @@ export default function AttendanceView() {
     } finally {
       setVerificationPunching(false);
     }
-  }, [punchEmployeeId, punchAction, fetchAttendance, fetchTodayPunch]);
+  }, [punchEmployeeId, punchAction, fetchAttendance, fetchTodayPunch, captureGeoLocation]);
 
   // ---- Manual Punch Submit ----
   const handleManualPunch = useCallback(async () => {
@@ -372,6 +428,7 @@ export default function AttendanceView() {
       const [hours, minutes] = manualTime.split(':').map(Number);
       const now = new Date();
       now.setHours(hours, minutes, 0, 0);
+      const geo = await captureGeoLocation();
       const res = await fetch('/api/attendance/punch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -379,6 +436,7 @@ export default function AttendanceView() {
           employeeId: punchEmployeeId,
           action: punchAction,
           method: 'manual',
+          ...(geo && { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy }),
         }),
       });
       if (!res.ok) {
@@ -394,7 +452,7 @@ export default function AttendanceView() {
     } finally {
       setManualPunching(false);
     }
-  }, [manualTime, punchEmployeeId, punchAction, fetchAttendance, fetchTodayPunch]);
+  }, [manualTime, punchEmployeeId, punchAction, fetchAttendance, fetchTodayPunch, captureGeoLocation]);
 
   // ---- Mark Attendance Submit ----
   const handleMarkAttendance = useCallback(async () => {
@@ -442,10 +500,13 @@ export default function AttendanceView() {
     }
   }, [markEmployeeId, markDate, markPunchIn, markPunchOut, markStatus, markMethod, markNotes, fetchAttendance]);
 
-  // ---- Verification Step UI ----
+  // ---- Confirmation Step UI ----
+  // Deliberately not a real biometric check: this is a short confirmation animation that adds
+  // a moment of friction against accidental taps, nothing more. Labels avoid any wording that
+  // would imply identity/face verification actually happened (see gap 5 in the training guide).
   const renderVerificationContent = () => (
     <div className="flex flex-col items-center gap-5 py-2">
-      {/* Camera placeholder */}
+      {/* Confirmation placeholder */}
       <div className="relative w-48 h-48 rounded-2xl bg-muted/60 border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-3 overflow-hidden">
         <AnimatePresence mode="wait">
           {verificationStep === 'idle' && (
@@ -456,8 +517,8 @@ export default function AttendanceView() {
               exit={{ opacity: 0, scale: 0.9 }}
               className="flex flex-col items-center gap-3"
             >
-              <Camera className="size-12 text-muted-foreground/50" />
-              <span className="text-sm text-muted-foreground">Camera preview</span>
+              <Fingerprint className="size-12 text-muted-foreground/50" />
+              <span className="text-sm text-muted-foreground">Ready to confirm</span>
             </motion.div>
           )}
           {(verificationStep === 'initializing' || verificationStep === 'detecting' || verificationStep === 'verifying') && (
@@ -472,7 +533,7 @@ export default function AttendanceView() {
                 animate={{ scale: [1, 1.1, 1], opacity: [0.6, 1, 0.6] }}
                 transition={{ repeat: Infinity, duration: 1.5 }}
               >
-                <Camera className="size-12 text-emerald-500" />
+                <Fingerprint className="size-12 text-emerald-500" />
               </motion.div>
               {/* Scanning line */}
               <motion.div
@@ -495,7 +556,7 @@ export default function AttendanceView() {
               <div className="size-16 rounded-full bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center">
                 <CheckCircle2 className="size-10 text-emerald-600 dark:text-emerald-400" />
               </div>
-              <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Verified</span>
+              <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Confirmed</span>
             </motion.div>
           )}
           {verificationStep === 'error' && (
@@ -508,7 +569,7 @@ export default function AttendanceView() {
               <div className="size-16 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
                 <AlertCircle className="size-10 text-red-600 dark:text-red-400" />
               </div>
-              <span className="text-sm font-medium text-red-600 dark:text-red-400">Verification Failed</span>
+              <span className="text-sm font-medium text-red-600 dark:text-red-400">Confirmation Failed</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -517,10 +578,10 @@ export default function AttendanceView() {
       {/* Progress Steps */}
       <div className="w-full space-y-3">
         {[
-          { step: 'initializing' as const, label: 'Initializing camera...' },
-          { step: 'detecting' as const, label: 'Detecting face...' },
-          { step: 'verifying' as const, label: 'Verifying identity...' },
-          { step: 'verified' as const, label: 'Verified \u2713' },
+          { step: 'initializing' as const, label: 'Preparing...' },
+          { step: 'detecting' as const, label: 'Confirming...' },
+          { step: 'verifying' as const, label: 'Finalizing...' },
+          { step: 'verified' as const, label: 'Confirmed \u2713' },
         ].map((item, idx) => {
           const stepOrder = ['initializing', 'detecting', 'verifying', 'verified'];
           const currentIdx = stepOrder.indexOf(verificationStep);
@@ -572,7 +633,7 @@ export default function AttendanceView() {
           disabled={verificationPunching}
         >
           {verificationPunching ? <Loader2 className="size-4 animate-spin" /> : <Fingerprint className="size-4" />}
-          Start Face Verification
+          Start Confirmation
         </Button>
       )}
       {verificationStep === 'error' && (
@@ -583,7 +644,7 @@ export default function AttendanceView() {
           disabled={verificationPunching}
         >
           <Loader2 className={`size-4 ${verificationPunching ? 'animate-spin' : 'hidden'}`} />
-          Retry Verification
+          Retry
         </Button>
       )}
     </div>
@@ -596,7 +657,7 @@ export default function AttendanceView() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Attendance Management</h1>
-          <p className="text-sm text-muted-foreground mt-1">Track and manage employee attendance with face verification</p>
+          <p className="text-sm text-muted-foreground mt-1">Track and manage employee attendance, with quick punch confirmation</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Month Select */}
@@ -621,25 +682,31 @@ export default function AttendanceView() {
               ))}
             </SelectContent>
           </Select>
-          {/* Employee Filter */}
-          <Select value={filterEmployeeId} onValueChange={setFilterEmployeeId}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="All Employees" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map((emp) => (
-                <SelectItem key={emp.id} value={emp.id}>
-                  {emp.firstName} {emp.lastName} ({emp.employeeCode})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {/* Mark Attendance Button */}
-          <Button variant="outline" onClick={() => { setMarkDate(new Date().toISOString().split('T')[0]); setMarkDialogOpen(true); }}>
-            <Pencil className="size-4" />
-            Mark Attendance
-          </Button>
+          {/* Employee Filter — hidden for employee role: the backend now scopes their view to
+              themselves regardless, so a picker offering "everyone" would just be misleading. */}
+          {!isEmployeeRole && (
+            <Select value={filterEmployeeId} onValueChange={setFilterEmployeeId}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="All Employees" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {employees.map((emp) => (
+                  <SelectItem key={emp.id} value={emp.id}>
+                    {emp.firstName} {emp.lastName} ({emp.employeeCode})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {/* Mark Attendance Button — hidden for employee role: POST /api/attendance already
+              requires admin/hr/manager server-side, so this always 403'd for employee anyway. */}
+          {!isEmployeeRole && (
+            <Button variant="outline" onClick={() => { setMarkDate(new Date().toISOString().split('T')[0]); setMarkDialogOpen(true); }}>
+              <Pencil className="size-4" />
+              Mark Attendance
+            </Button>
+          )}
           {isStaff && (
             <>
               <input ref={importInputRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
@@ -660,25 +727,32 @@ export default function AttendanceView() {
             <Fingerprint className="size-5 text-emerald-600 dark:text-emerald-400" />
             Punch In / Punch Out
           </CardTitle>
-          <CardDescription>Select an employee and use face verification or manual punch to record attendance.</CardDescription>
+          <CardDescription>Select an employee and confirm or manually record a punch.</CardDescription>
         </CardHeader>
         <CardContent className="relative space-y-5">
-          {/* Employee Select for Punch */}
+          {/* Employee Select for Punch — locked to self for employee role (the backend only
+              ever accepts your own employeeId here anyway; the picker would just be misleading). */}
           <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
             <div className="flex-1 w-full sm:max-w-xs space-y-2">
               <Label htmlFor="punch-employee">Employee <span className="text-red-500">*</span></Label>
-              <Select value={punchEmployeeId} onValueChange={setPunchEmployeeId}>
-                <SelectTrigger id="punch-employee" className="w-full">
-                  <SelectValue placeholder="Select employee..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {employees.map((emp) => (
-                    <SelectItem key={emp.id} value={emp.id}>
-                      {emp.firstName} {emp.lastName} ({emp.employeeCode})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {isEmployeeRole ? (
+                <div id="punch-employee" className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm text-foreground">
+                  {user?.name ?? 'You'}
+                </div>
+              ) : (
+                <Select value={punchEmployeeId} onValueChange={setPunchEmployeeId}>
+                  <SelectTrigger id="punch-employee" className="w-full">
+                    <SelectValue placeholder="Select employee..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {employees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.firstName} {emp.lastName} ({emp.employeeCode})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             {/* Live Clock */}
             <div className="flex flex-col items-center px-6 py-3 rounded-xl bg-muted/50 border border-border/50">
@@ -735,9 +809,15 @@ export default function AttendanceView() {
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">Method:</span>
                 <Badge variant="outline" className={METHOD_BADGE[todayPunch.punchInMethod ?? 'manual']}>
-                  {todayPunch.punchInMethod ?? 'N/A'}
+                  {todayPunch.punchInMethod ? (METHOD_LABEL[todayPunch.punchInMethod] ?? todayPunch.punchInMethod) : 'N/A'}
                 </Badge>
               </div>
+              {todayPunch.distanceFromOfficeMeters != null && (
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Distance from office:</span>
+                  <span className="font-medium">{Math.round(todayPunch.distanceFromOfficeMeters)}m</span>
+                </div>
+              )}
             </motion.div>
           )}
         </CardContent>
@@ -862,7 +942,7 @@ export default function AttendanceView() {
                         <TableCell className="font-mono text-sm">{record.totalHours != null ? `${record.totalHours}h` : '--'}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={METHOD_BADGE[method] || ''}>
-                            {method}
+                            {METHOD_LABEL[method] ?? method}
                           </Badge>
                         </TableCell>
                         <TableCell>
@@ -929,7 +1009,7 @@ export default function AttendanceView() {
                         <span>In: <span className="font-mono">{formatTime(record.punchIn)}</span></span>
                         <span>Out: <span className="font-mono">{formatTime(record.punchOut)}</span></span>
                         <span>{record.totalHours != null ? `${record.totalHours}h` : '--'}</span>
-                        <Badge variant="outline" className={`${METHOD_BADGE[method] || ''} text-[10px]`}>{method}</Badge>
+                        <Badge variant="outline" className={`${METHOD_BADGE[method] || ''} text-[10px]`}>{METHOD_LABEL[method] ?? method}</Badge>
                       </div>
                     </div>
                   );
@@ -946,41 +1026,50 @@ export default function AttendanceView() {
           <CardTitle className="text-base flex items-center gap-2">
             <MonitorSmartphone className="size-5 text-sky-500" />
             Login-based Attendance
+            <Badge
+              variant="outline"
+              className={loginAttendanceEnabled
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700'}
+            >
+              {loginAttendanceEnabled ? 'Enabled' : 'Disabled'}
+            </Badge>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="rounded-lg border bg-sky-50/50 dark:bg-sky-950/20 border-sky-200/60 dark:border-sky-800/40 p-4 text-sm text-muted-foreground space-y-2">
-            <p>
-              Employees can be automatically marked as <span className="font-semibold text-sky-700 dark:text-sky-400">present</span> when they log into the payroll system.
-              This uses the <Badge variant="outline" className={METHOD_BADGE.login}>login</Badge> method and is recorded alongside face verification and manual punches.
-            </p>
-            <p>
-              To enable login-based attendance, configure the authentication hook to call{' '}
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">POST /api/attendance/punch</code>{' '}
-              with <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">{"{ method: 'login' }"}</code> upon successful sign-in.
-            </p>
+            {loginAttendanceEnabled ? (
+              <p>
+                Employees are automatically marked as <span className="font-semibold text-sky-700 dark:text-sky-400">present</span> when they log into the payroll system.
+                This uses the <Badge variant="outline" className={METHOD_BADGE.login}>login</Badge> method and is recorded alongside quick-confirm and manual punches.
+              </p>
+            ) : (
+              <p>
+                Not currently active. An admin can turn this on under Settings → Office Location &amp; Attendance to automatically mark an employee present when they log in.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      {/* ============ FACE VERIFICATION DIALOG ============ */}
+      {/* ============ CONFIRM PUNCH DIALOG ============ */}
       <Dialog open={verificationOpen} onOpenChange={(open) => { if (!open && !verificationPunching) setVerificationOpen(false); }}>
         <DialogContent className="sm:max-w-md" showCloseButton={!verificationPunching}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Camera className="size-5 text-emerald-500" />
-              Face Verification — Punch {punchAction === 'in' ? 'IN' : 'OUT'}
+              <Fingerprint className="size-5 text-emerald-500" />
+              Confirm Punch — {punchAction === 'in' ? 'IN' : 'OUT'}
             </DialogTitle>
             <DialogDescription>
-              Verify your identity to record your {punchAction === 'in' ? 'punch in' : 'punch out'} time.
+              Confirm your {punchAction === 'in' ? 'punch in' : 'punch out'} below.
             </DialogDescription>
           </DialogHeader>
 
           <Tabs defaultValue="face" className="mt-2">
             <TabsList className="w-full">
               <TabsTrigger value="face" className="flex-1">
-                <Camera className="size-4" />
-                Face Verify
+                <Fingerprint className="size-4" />
+                Quick Confirm
               </TabsTrigger>
               <TabsTrigger value="manual" className="flex-1">
                 <Clock className="size-4" />

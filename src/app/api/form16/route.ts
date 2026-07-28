@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getForm16Data, Form16Error } from "@/lib/payroll/form16";
+import { requireSelfOrRole } from "@/lib/auth";
+import { handleApiError } from "@/lib/api-utils";
 
 // GET /api/form16?employeeId=xxx&fyStartYear=2025
 export async function GET(request: NextRequest) {
@@ -15,6 +17,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Carries one named person's PAN + full annual pay/tax detail — self or admin/hr only.
+    await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+
     const fyStartYear = parseInt(fyStartYearParam, 10);
     if (isNaN(fyStartYear) || fyStartYear < 2000 || fyStartYear > 2100) {
       return NextResponse.json({ error: "fyStartYear must be a valid year" }, { status: 400 });
@@ -26,7 +31,6 @@ export async function GET(request: NextRequest) {
     if (error instanceof Form16Error) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error("[FORM16_GET]", error);
-    return NextResponse.json({ error: "Failed to generate Form 16" }, { status: 500 });
+    return handleApiError(error, "generate Form 16");
   }
 }

@@ -7,13 +7,14 @@ import {
   type EmployeePayrollInput,
 } from "@/lib/payroll/engine";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
 // GET /api/payroll - List payroll runs with optional filters
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
+    // Payroll run data (gross/net totals, per-run detail counts) — admin/hr only, not manager.
+    await requireRole(request, ["admin", "hr"]);
     const { searchParams } = new URL(request.url);
     const month = searchParams.get("month");
     const year = searchParams.get("year");

@@ -92,3 +92,39 @@ export async function requireOwnEmployeeId(request: NextRequest): Promise<{ sess
   }
   return { session, employeeId: session.employeeId };
 }
+
+/**
+ * For list/collection endpoints (e.g. GET /api/leaves, GET /api/attendance) that today accept
+ * an optional client-supplied employeeId filter with no ownership check. Returns the employeeId
+ * an "employee" role caller's query must be silently forced to (ignoring any client-supplied
+ * value) — null for admin/hr/manager, meaning "no forced scope, use whatever the caller asked
+ * for." Mirrors the ESS routes' existing pattern instead of erroring, so an employee's own
+ * requests to these shared routes keep working exactly as before, just narrowed to themselves.
+ */
+export async function scopeToOwnEmployeeIfSelf(request: NextRequest): Promise<{ session: SessionPayload; forcedEmployeeId: string | null }> {
+  const session = await requireAuth(request);
+  if (session.role === "employee") {
+    if (!session.employeeId) {
+      throw new AuthError("Your login isn't linked to an employee record.", 403);
+    }
+    return { session, forcedEmployeeId: session.employeeId };
+  }
+  return { session, forcedEmployeeId: null };
+}
+
+/**
+ * For single-target action endpoints (e.g. DELETE /api/leaves/[id], POST /api/attendance/punch)
+ * that name one specific employeeId. Passes for any role in elevatedRoles unconditionally, or
+ * when the caller's own employeeId matches the named target exactly; otherwise 403 — no silent
+ * redirect, since (unlike scopeToOwnEmployeeIfSelf) the caller named an explicit target.
+ */
+export async function requireSelfOrRole(request: NextRequest, targetEmployeeId: string, elevatedRoles: Role[]): Promise<SessionPayload> {
+  const session = await requireAuth(request);
+  if (elevatedRoles.includes(session.role)) {
+    return session;
+  }
+  if (session.employeeId && session.employeeId === targetEmployeeId) {
+    return session;
+  }
+  throw new AuthError("Forbidden — you may only access or act on your own record.", 403);
+}

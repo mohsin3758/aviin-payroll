@@ -77,6 +77,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePayrollStore } from '@/store/payroll-store'
+import { useSessionContext } from '@/hooks/session-context'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -271,6 +272,10 @@ function computeSalary(form: FormData) {
 
 export default function EmployeesView() {
   const { refreshKey } = usePayrollStore()
+  const { user } = useSessionContext()
+  // Manager now has read-only nav access to this directory (no salary data — backend strips
+  // it). Add/Edit/Delete stay admin/hr-only, matching PUT/DELETE /api/employees/[id] server-side.
+  const canManage = user?.role === 'admin' || user?.role === 'hr'
 
   // Table state
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -617,10 +622,12 @@ export default function EmployeesView() {
             {employees.length} active {employees.length === 1 ? 'employee' : 'employees'}
           </p>
         </div>
-        <Button onClick={openAddDialog} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-          <UserPlus className="size-4" />
-          Add Employee
-        </Button>
+        {canManage && (
+          <Button onClick={openAddDialog} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            <UserPlus className="size-4" />
+            Add Employee
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
@@ -749,24 +756,28 @@ export default function EmployeesView() {
                         >
                           <Eye className="size-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          onClick={() => openEditDialog(emp)}
-                          title="Edit"
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                          onClick={() => openDeleteDialog(emp.id)}
-                          title="Delete"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
+                        {canManage && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8"
+                              onClick={() => openEditDialog(emp)}
+                              title="Edit"
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                              onClick={() => openDeleteDialog(emp.id)}
+                              title="Delete"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -803,18 +814,22 @@ export default function EmployeesView() {
                     <Button variant="ghost" size="icon" className="size-8" onClick={() => openViewDialog(emp)} title="View">
                       <Eye className="size-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="size-8" onClick={() => openEditDialog(emp)} title="Edit">
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                      onClick={() => openDeleteDialog(emp.id)}
-                      title="Delete"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
+                    {canManage && (
+                      <>
+                        <Button variant="ghost" size="icon" className="size-8" onClick={() => openEditDialog(emp)} title="Edit">
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                          onClick={() => openDeleteDialog(emp.id)}
+                          title="Delete"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-1.5">

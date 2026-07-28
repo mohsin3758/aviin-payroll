@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { z } from "zod";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { scopeToOwnEmployeeIfSelf } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
 const createLeaveSchema = z.object({
@@ -16,10 +16,13 @@ const createLeaveSchema = z.object({
 // GET /api/leaves?types or /api/leaves?employeeId=...&status=...&year=...
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
+    // employee role: silently restricted to their own applications (matches ess/leaves)
+    // rather than 403ing, since the shared Leave Mgmt page and My Portal both hit this route.
+    const { forcedEmployeeId } = await scopeToOwnEmployeeIfSelf(request);
     const { searchParams } = request.nextUrl;
 
-    // If "types" query param is present, return all leave types
+    // If "types" query param is present, return all leave types (reference data, not
+    // employee-specific — fine for every authenticated role, including employee).
     if (searchParams.has("types")) {
       const leaveTypes = await db.leaveType.findMany({
         orderBy: { name: "asc" },
@@ -36,7 +39,9 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = {};
 
-    if (employeeId) {
+    if (forcedEmployeeId) {
+      where.employeeId = forcedEmployeeId;
+    } else if (employeeId) {
       where.employeeId = employeeId;
     }
 
@@ -87,9 +92,15 @@ export async function GET(request: NextRequest) {
 // POST /api/leaves - Create a leave application
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAuth(request);
+    const { session, forcedEmployeeId } = await scopeToOwnEmployeeIfSelf(request);
     const body = await request.json();
-    const { employeeId, leaveTypeId, startDate, endDate, reason } = createLeaveSchema.parse(body);
+    const parsed = createLeaveSchema.parse(body);
+    // employee role: whatever employeeId they submit is ignored in favor of their own —
+    // mirrors ess/leaves' POST behavior exactly. The Leave Mgmt UI that normally calls this
+    // route is now admin/hr/manager-only, but this route itself must still refuse to let an
+    // employee session log a leave against someone else's record via a direct API call.
+    const employeeId = forcedEmployeeId ?? parsed.employeeId;
+    const { leaveTypeId, startDate, endDate, reason } = parsed;
 
     if (endDate.getTime() < startDate.getTime()) {
       return apiError("endDate must be on or after startDate.", 400);

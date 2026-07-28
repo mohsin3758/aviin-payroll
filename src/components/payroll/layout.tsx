@@ -40,17 +40,24 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'my-portal', label: 'My Portal', icon: UserCircle, requiresEmployeeId: true },
-  { id: 'employees', label: 'Employees', icon: Users },
+  // Manager gets read-only access (backend strips salary figures); employee is directed to
+  // My Portal instead of a company-wide directory.
+  { id: 'employees', label: 'Employees', icon: Users, roles: ['admin', 'hr', 'manager'] },
   { id: 'onboarding', label: 'Onboarding', icon: UserPlus, roles: ['admin', 'hr'] },
-  { id: 'exit-management', label: 'Exit Management', icon: UserMinus, roles: ['admin', 'hr'] },
+  // Backend manager-approve route already accepts the manager role for stage-1 approval —
+  // this was the one nav item actively blocking a capability the backend already supports.
+  { id: 'exit-management', label: 'Exit Management', icon: UserMinus, roles: ['admin', 'hr', 'manager'] },
+  // Stays visible to every role: employee's own My Portal Attendance tab is read-only, so this
+  // shared page is the only place to actually punch in/out. Backend + UI scope it to self.
   { id: 'attendance', label: 'Attendance', icon: Fingerprint },
-  { id: 'leaves', label: 'Leave Mgmt', icon: CalendarOff },
-  { id: 'payroll', label: 'Payroll', icon: Calculator },
-  { id: 'salary-slip', label: 'Salary Slips', icon: FileText },
-  { id: 'form16', label: 'Form 16', icon: Award },
-  { id: 'reports', label: 'Reports', icon: BarChart3 },
+  // Employee applies/tracks leave via My Portal instead; this page is the approval surface.
+  { id: 'leaves', label: 'Leave Mgmt', icon: CalendarOff, roles: ['admin', 'hr', 'manager'] },
+  { id: 'payroll', label: 'Payroll', icon: Calculator, roles: ['admin', 'hr'] },
+  { id: 'salary-slip', label: 'Salary Slips', icon: FileText, roles: ['admin', 'hr'] },
+  { id: 'form16', label: 'Form 16', icon: Award, roles: ['admin', 'hr'] },
+  { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'hr', 'manager'] },
   { id: 'helpdesk', label: 'Help Desk', icon: LifeBuoy },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'settings', label: 'Settings', icon: Settings, roles: ['admin', 'hr', 'manager'] },
 ];
 
 export function PayrollLayout({ children }: { children: React.ReactNode }) {

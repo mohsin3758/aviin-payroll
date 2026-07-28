@@ -18,6 +18,11 @@ const DEFAULT_COMPANY = {
   payrollMonth: 4,
   payrollYear: 2025,
   weeklyOffDays: [0],
+  officeLatitude: null,
+  officeLongitude: null,
+  geofenceRadiusMeters: null,
+  enforceGeofence: false,
+  enableLoginAttendance: false,
 };
 
 function parseWeeklyOffDays(value: string): number[] {
@@ -88,6 +93,11 @@ export async function PUT(request: NextRequest) {
           ...(body.smtpUser !== undefined && { smtpUser: body.smtpUser }),
           ...(body.smtpPassword && { smtpPassword: body.smtpPassword }),
           ...(body.smtpFrom !== undefined && { smtpFrom: body.smtpFrom }),
+          ...(body.officeLatitude !== undefined && { officeLatitude: body.officeLatitude }),
+          ...(body.officeLongitude !== undefined && { officeLongitude: body.officeLongitude }),
+          ...(body.geofenceRadiusMeters !== undefined && { geofenceRadiusMeters: body.geofenceRadiusMeters }),
+          ...(body.enforceGeofence !== undefined && { enforceGeofence: body.enforceGeofence }),
+          ...(body.enableLoginAttendance !== undefined && { enableLoginAttendance: body.enableLoginAttendance }),
         },
       });
     } else {
@@ -112,6 +122,11 @@ export async function PUT(request: NextRequest) {
           smtpUser: body.smtpUser ?? null,
           smtpPassword: body.smtpPassword || null,
           smtpFrom: body.smtpFrom ?? null,
+          officeLatitude: body.officeLatitude ?? null,
+          officeLongitude: body.officeLongitude ?? null,
+          geofenceRadiusMeters: body.geofenceRadiusMeters ?? null,
+          enforceGeofence: body.enforceGeofence ?? false,
+          enableLoginAttendance: body.enableLoginAttendance ?? false,
         },
       });
     }

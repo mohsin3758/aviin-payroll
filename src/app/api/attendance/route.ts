@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -45,7 +45,9 @@ async function applyHalfDayLeaveDelta(
 // GET /api/attendance?employeeId=...&month=...&year=...&date=...
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
+    // employee role: silently restricted to their own records rather than 403ing, since this
+    // same shared page is also where an employee comes to view/punch their own attendance.
+    const { forcedEmployeeId } = await scopeToOwnEmployeeIfSelf(request);
     const { searchParams } = new URL(request.url);
     const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get("limit") ?? "1000", 10) || 1000));
     const employeeId = searchParams.get("employeeId");
@@ -55,7 +57,9 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = {};
 
-    if (employeeId) {
+    if (forcedEmployeeId) {
+      where.employeeId = forcedEmployeeId;
+    } else if (employeeId) {
       where.employeeId = employeeId;
     }
 

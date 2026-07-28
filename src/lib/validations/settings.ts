@@ -37,4 +37,9 @@ export const updateSettingsSchema = z.object({
   // the Settings UI can show the SMTP form as "configured" without ever re-displaying it.
   smtpPassword: z.string().trim().max(500).optional(),
   smtpFrom: z.string().trim().max(200).nullable().optional(),
+  officeLatitude: z.coerce.number().min(-90).max(90).nullable().optional(),
+  officeLongitude: z.coerce.number().min(-180).max(180).nullable().optional(),
+  geofenceRadiusMeters: z.coerce.number().int().min(1).max(50000).nullable().optional(),
+  enforceGeofence: z.boolean().optional(),
+  enableLoginAttendance: z.boolean().optional(),
 });

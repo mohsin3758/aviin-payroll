@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
 // GET /api/leaves/[id]
@@ -10,7 +10,6 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth(request);
     const { id } = await params;
 
     const leaveApplication = await db.leaveApplication.findUnique({
@@ -30,6 +29,8 @@ export async function GET(
     if (!leaveApplication) {
       return apiError("Leave application not found", 404);
     }
+
+    await requireSelfOrRole(request, leaveApplication.employeeId, ["admin", "hr", "manager"]);
 
     return NextResponse.json(leaveApplication);
   } catch (error) {
@@ -144,7 +145,6 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireAuth(request);
     const { id } = await params;
 
     const existing = await db.leaveApplication.findUnique({ where: { id } });
@@ -152,6 +152,8 @@ export async function DELETE(
     if (!existing) {
       return apiError("Leave application not found", 404);
     }
+
+    const session = await requireSelfOrRole(request, existing.employeeId, ["admin", "hr", "manager"]);
 
     if (existing.status === "cancelled") {
       return apiError("This leave application is already cancelled.", 409);

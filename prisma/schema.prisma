@@ -63,6 +63,17 @@ model Company {
   smtpUser            String?
   smtpPassword        String?
   smtpFrom            String?
+  // Office geofencing for attendance punches, all optional/opt-in: with no office coordinates
+  // set, punches never capture/require location. enforceGeofence defaults false — coordinates
+  // and radius can be configured (and location silently logged) without ever blocking a punch
+  // until an admin explicitly turns enforcement on.
+  officeLatitude        Float?
+  officeLongitude       Float?
+  geofenceRadiusMeters  Int?
+  enforceGeofence       Boolean  @default(false)
+  // Auto-marks an employee "present" (punchInMethod: "login") on successful sign-in when true.
+  // Defaults false so existing deployments see no behavior change until explicitly enabled.
+  enableLoginAttendance Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -262,6 +273,14 @@ model Attendance {
   notes               String?
   ipAddress           String?
   deviceInfo          String?
+  // Real browser/device geolocation captured at punch time (best-effort — never blocks a punch
+  // on its own). distanceFromOfficeMeters is computed once, at punch time, against whatever
+  // Company.officeLatitude/officeLongitude were set then — it is not recomputed retroactively
+  // if the office location changes later.
+  latitude                 Float?
+  longitude                Float?
+  locationAccuracy         Float?
+  distanceFromOfficeMeters Float?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
