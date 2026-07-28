@@ -105,7 +105,7 @@ export function TopBar() {
   }, []);
 
   const handleSeed = async () => {
-    if (!confirm('This will reset all demo data (employees, attendance, leaves, payroll runs). Continue?')) {
+    if (!confirm('This permanently deletes the current company record and everything under it — employees, salary structures, attendance, leaves, and payroll runs — then replaces it with fresh demo data. There is no undo. Continue?')) {
       return;
     }
     setSeeding(true);
@@ -149,7 +149,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-2 md:gap-3">
-        {user?.role === 'admin' && (
+        {user?.role === 'admin' && process.env.NODE_ENV !== 'production' && (
           <Button
             variant="outline"
             size="sm"

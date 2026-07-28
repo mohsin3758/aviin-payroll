@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { getSession, hashPassword, AuthError } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
+import { evaluateSeedGuard } from "@/lib/seed-guard";
 
 const DEFAULT_USERS = [
   { email: "admin@payrollpro.local", password: "Admin@12345", name: "System Admin", role: "admin" as const },
@@ -293,6 +294,15 @@ export async function POST(request: NextRequest) {
     if (userCount > 0) {
       if (!session || session.role !== "admin") {
         throw new AuthError("Forbidden — only an admin may reset demo data once users exist.", 403);
+      }
+
+      const guard = evaluateSeedGuard({
+        nodeEnv: process.env.NODE_ENV,
+        allowDemoReseedEnv: process.env.ALLOW_DEMO_RESEED,
+        usersAlreadyExist: true,
+      });
+      if (!guard.allowed) {
+        throw new AuthError(guard.reason ?? "Refusing to reset demo data.", 403);
       }
     }
 

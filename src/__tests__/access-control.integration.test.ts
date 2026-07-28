@@ -398,6 +398,102 @@ describe("Access control fixes (requires live dev server)", () => {
       const asManager = await fetch(`${BASE}/api/onboarding/tasks?employeeId=${otherId}`, { headers: { Cookie: managerCookie } });
       expect(asManager.status).toBe(403);
     });
+
+    it("dashboard: employee gets only generic counts; admin/hr/manager get full financial aggregates", async () => {
+      const asEmployee = await fetch(`${BASE}/api/dashboard`, { headers: { Cookie: employeeCookie } });
+      expect(asEmployee.status).toBe(200);
+      const employeeData = await asEmployee.json();
+      expect(typeof employeeData.totalEmployees).toBe("number");
+      expect(employeeData.payrollSummary).toBeNull();
+      expect(employeeData.salaryStats).toBeNull();
+      expect(employeeData.recentPayrollRuns).toEqual([]);
+      expect(employeeData.departmentCounts).toEqual([]);
+      expect(employeeData.exitAnalytics).toEqual({ pendingExitApprovals: 0, employeesInNotice: 0, exitsThisMonth: 0, exitsThisQuarter: 0 });
+
+      const asManager = await fetch(`${BASE}/api/dashboard`, { headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(200);
+      const managerData = await asManager.json();
+      expect(Array.isArray(managerData.departmentCounts)).toBe(true);
+      expect(managerData.departmentCounts.length).toBeGreaterThan(0);
+
+      const asAdmin = await fetch(`${BASE}/api/dashboard`, { headers: { Cookie: adminCookie } });
+      expect(asAdmin.status).toBe(200);
+    });
+  });
+
+  // ---- Link-existing-login-to-employee feature ----
+  describe("link employee to an existing login", () => {
+    async function ensureUnlinkedUser(email: string): Promise<string> {
+      const createRes = await fetch(`${BASE}/api/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ email, password: "TestEmp@12345", name: "QA Unlinked", role: "employee" }),
+      });
+      if (createRes.status === 201) return createRes.json().then((r) => r.data.id);
+      const listRes = await fetch(`${BASE}/api/users`, { headers: { Cookie: adminCookie } });
+      const { data } = await listRes.json();
+      const existing = data.find((u: { email: string }) => u.email === email);
+      if (!existing) throw new Error(`Expected an existing user for ${email} after a 409, found none`);
+      return existing.id;
+    }
+
+    it("admin can link an existing unlinked login to a free employee, and unlink it again", async () => {
+      const targetEmployeeId = await resolveEmployeeId(adminCookie, "EMP005");
+      const userId = await ensureUnlinkedUser("qa.linktest@test.local");
+
+      // Make sure this employee starts unlinked (undo any leftover link from a prior run).
+      await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ employeeId: null }),
+      });
+
+      const linkRes = await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ employeeId: targetEmployeeId }),
+      });
+      expect(linkRes.status).toBe(200);
+      const linked = await linkRes.json();
+      expect(linked.data.employeeId).toBe(targetEmployeeId);
+      expect(linked.data.employee?.employeeCode).toBe("EMP005");
+
+      const unlinkRes = await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ employeeId: null }),
+      });
+      expect(unlinkRes.status).toBe(200);
+      const unlinked = await unlinkRes.json();
+      expect(unlinked.data.employeeId).toBeNull();
+    });
+
+    it("blocks linking to an employee that's already linked to a different login", async () => {
+      const targetEmployeeId = await resolveEmployeeId(adminCookie, "EMP005");
+      const holderId = await ensureUnlinkedUser("qa.linkholder@test.local");
+      const challengerId = await ensureUnlinkedUser("qa.linkchallenger@test.local");
+
+      await fetch(`${BASE}/api/users/${holderId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ employeeId: targetEmployeeId }),
+      });
+
+      const conflictRes = await fetch(`${BASE}/api/users/${challengerId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ employeeId: targetEmployeeId }),
+      });
+      expect(conflictRes.status).toBe(409);
+
+      // Cleanup: release EMP005 so other runs/tests aren't affected.
+      await fetch(`${BASE}/api/users/${holderId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ employeeId: null }),
+      });
+    });
+
+    it("rejects linking to a nonexistent employee, and blocks non-admin roles entirely", async () => {
+      const userId = await ensureUnlinkedUser("qa.linktest2@test.local");
+      const notFoundRes = await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ employeeId: "not-a-real-employee-id" }),
+      });
+      expect(notFoundRes.status).toBe(404);
+
+      const asManager = await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: managerCookie }, body: JSON.stringify({ employeeId: null }),
+      });
+      expect(asManager.status).toBe(403);
+    });
   });
 
   // ---- Geofence (gap 4) ----

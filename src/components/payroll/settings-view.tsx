@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card,
   CardContent,
@@ -58,6 +58,7 @@ import {
   FileCheck,
   Users,
   KeyRound,
+  Link2,
   UserPlus,
   Ban,
   Mail,
@@ -132,7 +133,16 @@ interface ManagedUser {
   name: string;
   role: UserRole;
   active: boolean;
+  employeeId: string | null;
+  employee: { firstName: string; lastName: string | null; employeeCode: string } | null;
   createdAt: string;
+}
+
+interface LinkableEmployee {
+  id: string;
+  firstName: string;
+  lastName: string | null;
+  employeeCode: string;
 }
 
 const ROLE_BADGE: Record<UserRole, string> = {
@@ -523,6 +533,81 @@ export default function SettingsView() {
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers, refreshKey]);
+
+  // ─── Users: link an existing login to an Employee record ────────────────────
+  // For a user created via Add User (no linking step), rather than Activate ESS Portal.
+  const [allEmployees, setAllEmployees] = useState<LinkableEmployee[]>([]);
+  const [linkTarget, setLinkTarget] = useState<ManagedUser | null>(null);
+  const [linkEmployeeId, setLinkEmployeeId] = useState('');
+  const [linkingUser, setLinkingUser] = useState(false);
+
+  const fetchAllEmployees = useCallback(async () => {
+    if (user?.role !== 'admin') return;
+    try {
+      const res = await fetch('/api/employees?limit=200');
+      if (!res.ok) return;
+      const json = await res.json();
+      setAllEmployees(json.data ?? []);
+    } catch {
+      // non-critical — the link dialog just shows an empty list if this fails
+    }
+  }, [user?.role]);
+
+  useEffect(() => {
+    fetchAllEmployees();
+  }, [fetchAllEmployees, refreshKey]);
+
+  const linkedEmployeeIds = useMemo(() => new Set(users.filter((u) => u.employeeId).map((u) => u.employeeId)), [users]);
+  const unlinkedEmployees = useMemo(() => allEmployees.filter((e) => !linkedEmployeeIds.has(e.id)), [allEmployees, linkedEmployeeIds]);
+
+  const openLinkDialog = (target: ManagedUser) => {
+    setLinkTarget(target);
+    setLinkEmployeeId('');
+  };
+
+  const handleLinkEmployee = async () => {
+    if (!linkTarget || !linkEmployeeId) {
+      toast.error('Select an employee to link.');
+      return;
+    }
+    setLinkingUser(true);
+    try {
+      const res = await fetch(`/api/users/${linkTarget.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeId: linkEmployeeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to link employee');
+      toast.success(`${linkTarget.name} is now linked to that employee record.`);
+      setLinkTarget(null);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to link employee');
+    } finally {
+      setLinkingUser(false);
+    }
+  };
+
+  const handleUnlinkEmployee = async (target: ManagedUser) => {
+    setLinkingUser(true);
+    try {
+      const res = await fetch(`/api/users/${target.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeId: null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to unlink employee');
+      toast.success(`${target.name} is no longer linked to an employee record.`);
+      setLinkTarget(null);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to unlink employee');
+    } finally {
+      setLinkingUser(false);
+    }
+  };
 
   const handleToggleActive = async (target: ManagedUser) => {
     setTogglingUserId(target.id);
@@ -1644,6 +1729,7 @@ export default function SettingsView() {
                         <TableHead>Name</TableHead>
                         <TableHead>Email</TableHead>
                         <TableHead>Role</TableHead>
+                        <TableHead>Linked Employee</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
@@ -1651,13 +1737,13 @@ export default function SettingsView() {
                     <TableBody>
                       {usersLoading ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">
+                          <TableCell colSpan={6} className="h-20 text-center text-muted-foreground">
                             Loading...
                           </TableCell>
                         </TableRow>
                       ) : users.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">
+                          <TableCell colSpan={6} className="h-20 text-center text-muted-foreground">
                             No users found.
                           </TableCell>
                         </TableRow>
@@ -1672,6 +1758,15 @@ export default function SettingsView() {
                             <TableCell>
                               <Badge variant="outline" className={`${ROLE_BADGE[u.role]} capitalize`}>{u.role}</Badge>
                             </TableCell>
+                            <TableCell className="text-xs">
+                              {u.role !== 'employee' ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : u.employee ? (
+                                <span>{u.employee.firstName} {u.employee.lastName ?? ''} <span className="text-muted-foreground">({u.employee.employeeCode})</span></span>
+                              ) : (
+                                <span className="text-amber-600 dark:text-amber-400">Not linked</span>
+                              )}
+                            </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={u.active ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}>
                                 {u.active ? 'Active' : 'Deactivated'}
@@ -1679,6 +1774,18 @@ export default function SettingsView() {
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-1.5">
+                                {u.role === 'employee' && !u.employee && (
+                                  <Button variant="ghost" size="sm" onClick={() => openLinkDialog(u)}>
+                                    <Link2 className="size-3.5 mr-1" />
+                                    Link Employee
+                                  </Button>
+                                )}
+                                {u.role === 'employee' && u.employee && (
+                                  <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={linkingUser} onClick={() => handleUnlinkEmployee(u)}>
+                                    <Link2 className="size-3.5 mr-1" />
+                                    Unlink
+                                  </Button>
+                                )}
                                 <Button variant="ghost" size="sm" onClick={() => { setResetTarget(u); setResetPasswordValue(''); }}>
                                   <KeyRound className="size-3.5 mr-1" />
                                   Reset Password
@@ -1710,6 +1817,45 @@ export default function SettingsView() {
               </CardContent>
             </Card>
           )}
+
+          {/* ─── Link Employee Dialog ─────────────────────────────────────────── */}
+          <Dialog open={!!linkTarget} onOpenChange={(open) => !open && setLinkTarget(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Link Employee</DialogTitle>
+                <DialogDescription>
+                  Connect {linkTarget?.name}&apos;s login to an employee record, so they can use My Portal and see their own data.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-1.5">
+                <Label htmlFor="link-employee-select">Employee</Label>
+                <Select value={linkEmployeeId} onValueChange={setLinkEmployeeId}>
+                  <SelectTrigger id="link-employee-select" className="w-full">
+                    <SelectValue placeholder={unlinkedEmployees.length === 0 ? 'No unlinked employees available' : 'Select an employee...'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {unlinkedEmployees.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.firstName} {e.lastName ?? ''} ({e.employeeCode})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {unlinkedEmployees.length === 0 && (
+                  <p className="text-xs text-muted-foreground">Every employee already has a login linked, or none exist yet.</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setLinkTarget(null)} disabled={linkingUser}>
+                  Cancel
+                </Button>
+                <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleLinkEmployee} disabled={linkingUser || !linkEmployeeId}>
+                  {linkingUser ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
+                  Link
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* ─── Reset Password Dialog ───────────────────────────────────────── */}
           <Dialog open={!!resetTarget} onOpenChange={(open) => !open && setResetTarget(null)}>

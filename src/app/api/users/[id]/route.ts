@@ -11,11 +11,14 @@ const userSelect = {
   name: true,
   role: true,
   active: true,
+  employeeId: true,
+  employee: { select: { firstName: true, lastName: true, employeeCode: true } },
   createdAt: true,
 } as const;
 
-// PUT /api/users/[id] — admin only, toggles active/role for ANOTHER user.
-// Self-modification is blocked so an admin can never lock themselves out.
+// PUT /api/users/[id] — admin only, toggles active/role, or links/unlinks the login to an
+// Employee record, for ANOTHER user. Self-modification is blocked so an admin can never lock
+// themselves out.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireRole(request, ["admin"]);
@@ -31,6 +34,19 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const existing = await db.user.findUnique({ where: { id } });
     if (!existing) {
       return apiError("User not found", 404);
+    }
+
+    // "employeeId" in parsed but falsy (null) means "unlink" — only run the exists/uniqueness
+    // checks when actually linking to a specific record.
+    if (parsed.employeeId) {
+      const employee = await db.employee.findUnique({ where: { id: parsed.employeeId } });
+      if (!employee) {
+        return apiError("Employee not found.", 404);
+      }
+      const alreadyLinked = await db.user.findUnique({ where: { employeeId: parsed.employeeId } });
+      if (alreadyLinked && alreadyLinked.id !== id) {
+        return apiError("This employee already has a portal login.", 409);
+      }
     }
 
     const user = await db.user.update({

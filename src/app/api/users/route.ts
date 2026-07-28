@@ -12,6 +12,7 @@ const userSelect = {
   role: true,
   active: true,
   employeeId: true,
+  employee: { select: { firstName: true, lastName: true, employeeCode: true } },
   createdAt: true,
 } as const;
 

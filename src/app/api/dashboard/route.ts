@@ -5,7 +5,13 @@ import { handleApiError } from "@/lib/api-utils";
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request);
+    const session = await requireAuth(request);
+    // Company-wide financial aggregates (salaryStats, payrollSummary, recentPayrollRuns) and
+    // exit/headcount analytics are admin/hr/manager only — same tier as Reports (aggregate
+    // figures, not one named person's data). Employee gets the generic company-pulse counts
+    // only. The Dashboard nav item itself stays visible to every role; this scopes the data.
+    const isElevated = session.role === "admin" || session.role === "hr" || session.role === "manager";
+
     // --- Date helpers for today ---
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -17,7 +23,9 @@ export async function GET(request: NextRequest) {
     const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
     const startOfQuarter = new Date(now.getFullYear(), quarterStartMonth, 1);
 
-    // Run all independent queries in parallel
+    // Run all independent queries in parallel. Financial/analytics queries are skipped
+    // entirely (not just redacted after the fact) for a non-elevated caller — no reason to
+    // even compute them.
     const [
       totalEmployees,
       presentToday,
@@ -55,20 +63,20 @@ export async function GET(request: NextRequest) {
 
       // 4. Latest REGULAR payroll run (for monthly summary) — off-cycle/alternate-pay runs
       // are a separate concept and must not be mistaken for the monthly summary here.
-      db.payrollRun.findFirst({
+      !isElevated ? Promise.resolve(null) : db.payrollRun.findFirst({
         where: { runType: "regular" },
         orderBy: [{ year: "desc" }, { month: "desc" }],
       }),
 
       // 5. Recent regular payroll runs (last 6)
-      db.payrollRun.findMany({
+      !isElevated ? Promise.resolve([]) : db.payrollRun.findMany({
         where: { runType: "regular" },
         orderBy: [{ year: "desc" }, { month: "desc" }],
         take: 6,
       }),
 
       // 6. Department-wise employee count
-      db.employee.groupBy({
+      !isElevated ? Promise.resolve([]) : db.employee.groupBy({
         by: ["department"],
         where: { dateOfExit: null },
         _count: { department: true },
@@ -76,7 +84,7 @@ export async function GET(request: NextRequest) {
       }),
 
       // 7. State-wise employee count
-      db.employee.groupBy({
+      !isElevated ? Promise.resolve([]) : db.employee.groupBy({
         by: ["state"],
         where: { dateOfExit: null },
         _count: { state: true },
@@ -84,11 +92,11 @@ export async function GET(request: NextRequest) {
       }),
 
       // 8. Exit requests still awaiting either approval stage
-      db.exitRequest.count({ where: { status: { in: ["pending_manager", "pending_hr"] } } }),
+      !isElevated ? Promise.resolve(0) : db.exitRequest.count({ where: { status: { in: ["pending_manager", "pending_hr"] } } }),
 
       // 9. Approved resignations whose last working day hasn't arrived yet (serving notice) —
       // excludes anyone already fully settled, since finalizing doesn't change ExitRequest.status.
-      db.exitRequest.count({
+      !isElevated ? Promise.resolve(0) : db.exitRequest.count({
         where: {
           status: "approved",
           lastWorkingDate: { gte: startOfDay },
@@ -97,10 +105,10 @@ export async function GET(request: NextRequest) {
       }),
 
       // 10. Attrition — actually exited this calendar month
-      db.employee.count({ where: { dateOfExit: { gte: startOfMonth, lt: startOfNextMonth } } }),
+      !isElevated ? Promise.resolve(0) : db.employee.count({ where: { dateOfExit: { gte: startOfMonth, lt: startOfNextMonth } } }),
 
       // 11. Attrition — actually exited this quarter
-      db.employee.count({ where: { dateOfExit: { gte: startOfQuarter, lt: startOfNextMonth } } }),
+      !isElevated ? Promise.resolve(0) : db.employee.count({ where: { dateOfExit: { gte: startOfQuarter, lt: startOfNextMonth } } }),
     ]);
 
     // Build monthly payroll summary from latest run

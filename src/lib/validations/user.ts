@@ -13,6 +13,9 @@ export const createUserSchema = z.object({
 export const updateUserSchema = z.object({
   active: z.boolean().optional(),
   role: z.enum(ROLES).optional(),
+  // Links (or, passed as null, unlinks) this login to an Employee record after the fact —
+  // for a user created via Add User (no linking step) rather than Activate ESS Portal.
+  employeeId: z.string().min(1).nullable().optional(),
 });
 
 export const resetPasswordSchema = z.object({
