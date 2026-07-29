@@ -1,22 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
+import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import Papa from "papaparse";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { getMonthName } from "@/lib/payroll/engine";
+import { buildBankFileRows, TEXT_FORMAT_FIELDS, type BankFileRow } from "@/lib/bank-format";
+import type { ColumnDef } from "@/lib/validations/bank-format";
 
 type Params = { params: Promise<{ runId: string }> };
 
-// GET /api/payroll/[runId]/bank-file?format=csv
-// Generic NEFT/RTGS-style salary disbursement file: one row per employee with a net
-// salary > 0. This is a widely-compatible generic format (Beneficiary Name / Account /
-// IFSC / Amount / Narration) — a specific bank's own upload template can differ and would
-// need to be adapted from this once a target bank is chosen.
+// GET /api/payroll/[runId]/bank-file?format=csv|xlsx|json&bankFormatId=...
+// format=csv/json: the original generic NEFT/RTGS-style layout (Beneficiary Name / Bank /
+// Account / IFSC / Amount / Narration), unchanged — always available even with no BankFormat
+// configured. format=xlsx: a real .xlsx built from an admin-configured BankFormat's exact
+// column layout (bankFormatId, or whichever format is marked default if omitted).
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     await requireRole(request, ["admin", "hr"]);
     const { runId } = await params;
     const format = request.nextUrl.searchParams.get("format") ?? "json";
+    const bankFormatId = request.nextUrl.searchParams.get("bankFormatId");
 
     const payrollRun = await db.payrollRun.findUnique({
       where: { id: runId },
@@ -91,6 +95,57 @@ export async function GET(request: NextRequest, { params }: Params) {
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="bank-file-${payrollRun.month}-${payrollRun.year}.csv"`,
+        },
+      });
+    }
+
+    if (format === "xlsx") {
+      const bankFormat = bankFormatId
+        ? await db.bankFormat.findUnique({ where: { id: bankFormatId } })
+        : await db.bankFormat.findFirst({ where: { companyId: payrollRun.companyId, isDefault: true } });
+
+      if (!bankFormat) {
+        return apiError(
+          bankFormatId
+            ? "That bank format was not found."
+            : "No bank format is configured yet (and none is set as default). Set one up under Settings → Bank Transfer Formats, or use format=csv for the generic layout.",
+          400
+        );
+      }
+
+      const columns: ColumnDef[] = JSON.parse(bankFormat.columns);
+      const bankFileRows: BankFileRow[] = rows.map((r) => ({
+        employeeCode: r.employeeCode,
+        beneficiaryName: r.beneficiaryName,
+        bankName: r.bankName,
+        accountNumber: r.accountNumber,
+        ifsc: r.ifsc,
+        amount: r.amount,
+        narration: r.narration,
+      }));
+      const { headers, rows: builtRows } = buildBankFileRows(columns, bankFileRows);
+      const sortedColumns = [...columns].sort((a, b) => a.order - b.order);
+
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Bank Transfer");
+      sheet.addRow(headers);
+      // Account numbers, IFSC, and employee codes must be written as text — Excel otherwise
+      // strips leading zeros or renders long digit strings in scientific notation, silently
+      // corrupting a real bank account number.
+      sortedColumns.forEach((col, idx) => {
+        if (TEXT_FORMAT_FIELDS.has(col.field)) {
+          sheet.getColumn(idx + 1).numFmt = "@";
+        }
+      });
+      builtRows.forEach((row) => sheet.addRow(row));
+      sheet.columns.forEach((col) => { col.width = 20; });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      return new NextResponse(Buffer.from(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="bank-file-${payrollRun.month}-${payrollRun.year}-${bankFormat.name}.xlsx"`,
         },
       });
     }

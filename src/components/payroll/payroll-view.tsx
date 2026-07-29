@@ -200,6 +200,26 @@ export default function PayrollView() {
   const [emailingSlips, setEmailingSlips] = useState(false);
   const [emailConfirmOpen, setEmailConfirmOpen] = useState(false);
 
+  // Bank file format selection
+  const [bankFormats, setBankFormats] = useState<{ id: string; name: string; isDefault: boolean }[]>([]);
+  const [selectedBankFormatId, setSelectedBankFormatId] = useState<string>('csv');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/bank-formats');
+        if (!res.ok) return; // manager/employee sessions 403 here — silently keep the CSV-only fallback
+        const json = await res.json();
+        const formats: { id: string; name: string; isDefault: boolean }[] = json.data ?? [];
+        setBankFormats(formats);
+        const defaultFormat = formats.find((f) => f.isDefault);
+        if (defaultFormat) setSelectedBankFormatId(defaultFormat.id);
+      } catch {
+        // non-critical — CSV fallback always works
+      }
+    })();
+  }, []);
+
   // Arrears dialog state
   const [arrearsOpen, setArrearsOpen] = useState(false);
   const [arrears, setArrears] = useState<ArrearRow[]>([]);
@@ -296,8 +316,13 @@ export default function PayrollView() {
 
   /* --- Bank file download --- */
   const handleDownloadBankFile = async (runId: string, monthNum: number, yearNum: number) => {
+    const useGenericCsv = selectedBankFormatId === 'csv';
+    const query = useGenericCsv
+      ? 'format=csv'
+      : `format=xlsx&bankFormatId=${selectedBankFormatId}`;
+    const extension = useGenericCsv ? 'csv' : 'xlsx';
     try {
-      const res = await fetch(`/api/payroll/${runId}/bank-file?format=csv`);
+      const res = await fetch(`/api/payroll/${runId}/bank-file?${query}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Failed to generate bank file' }));
         throw new Error(err.error || 'Failed to generate bank file');
@@ -306,7 +331,7 @@ export default function PayrollView() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `bank-file-${monthNum}-${yearNum}.csv`;
+      a.download = `bank-file-${monthNum}-${yearNum}.${extension}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -731,6 +756,17 @@ export default function PayrollView() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
+                  <Select value={selectedBankFormatId} onValueChange={setSelectedBankFormatId}>
+                    <SelectTrigger className="w-[180px]" size="sm">
+                      <SelectValue placeholder="Bank format" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="csv">Generic CSV</SelectItem>
+                      {bankFormats.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>{f.name}{f.isDefault ? ' (Default)' : ''}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     size="sm"
                     variant="outline"

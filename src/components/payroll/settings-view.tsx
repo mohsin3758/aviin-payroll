@@ -68,7 +68,7 @@ import {
 import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
-import { ScrollText, CalendarDays, Trash2, PlusCircle } from 'lucide-react';
+import { ScrollText, CalendarDays, Trash2, PlusCircle, Pencil, Upload, ArrowUp, ArrowDown, FileSpreadsheet } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 
@@ -356,6 +356,144 @@ export default function SettingsView() {
       toast.error(err instanceof Error ? err.message : 'Failed to save location settings');
     } finally {
       setSavingGeofence(false);
+    }
+  };
+
+  // ─── Bank Transfer Formats ───────────────────────────────────────────────────
+  interface BankFormatColumn {
+    order: number;
+    header: string;
+    source: 'field' | 'fixed';
+    field?: string;
+    fixedValue?: string;
+  }
+  interface BankFormat {
+    id: string;
+    name: string;
+    isDefault: boolean;
+    sampleFileName: string | null;
+    columns: BankFormatColumn[];
+  }
+  const BANK_FORMAT_FIELD_OPTIONS: { value: string; label: string }[] = [
+    { value: 'employeeCode', label: 'Employee Code' },
+    { value: 'beneficiaryName', label: 'Beneficiary Name' },
+    { value: 'bankName', label: 'Bank Name' },
+    { value: 'accountNumber', label: 'Account Number' },
+    { value: 'ifsc', label: 'IFSC Code' },
+    { value: 'amount', label: 'Net Amount' },
+    { value: 'narration', label: 'Narration' },
+  ];
+
+  const [bankFormats, setBankFormats] = useState<BankFormat[]>([]);
+  const [bankFormatsLoading, setBankFormatsLoading] = useState(false);
+  const [bfDialogOpen, setBfDialogOpen] = useState(false);
+  const [bfEditingId, setBfEditingId] = useState<string | null>(null);
+  const [bfName, setBfName] = useState('');
+  const [bfIsDefault, setBfIsDefault] = useState(false);
+  const [bfColumns, setBfColumns] = useState<BankFormatColumn[]>([]);
+  const [bfSampleFile, setBfSampleFile] = useState<File | null>(null);
+  const [savingBankFormat, setSavingBankFormat] = useState(false);
+  const [deletingBankFormatId, setDeletingBankFormatId] = useState<string | null>(null);
+
+  const fetchBankFormats = useCallback(async () => {
+    if (user?.role !== 'admin' && user?.role !== 'hr') return;
+    setBankFormatsLoading(true);
+    try {
+      const res = await fetch('/api/bank-formats');
+      if (!res.ok) throw new Error('Failed to load bank formats');
+      const json = await res.json();
+      setBankFormats(json.data ?? []);
+    } catch {
+      toast.error('Failed to load bank formats');
+    } finally {
+      setBankFormatsLoading(false);
+    }
+  }, [user?.role]);
+
+  useEffect(() => {
+    fetchBankFormats();
+  }, [fetchBankFormats, refreshKey]);
+
+  const openAddBankFormat = () => {
+    setBfEditingId(null);
+    setBfName('');
+    setBfIsDefault(bankFormats.length === 0);
+    setBfColumns([{ order: 0, header: '', source: 'field', field: 'accountNumber' }]);
+    setBfSampleFile(null);
+    setBfDialogOpen(true);
+  };
+
+  const openEditBankFormat = (format: BankFormat) => {
+    setBfEditingId(format.id);
+    setBfName(format.name);
+    setBfIsDefault(format.isDefault);
+    setBfColumns(format.columns.map((c, i) => ({ ...c, order: i })));
+    setBfSampleFile(null);
+    setBfDialogOpen(true);
+  };
+
+  const addBfColumn = () => {
+    setBfColumns((prev) => [...prev, { order: prev.length, header: '', source: 'field', field: 'accountNumber' }]);
+  };
+  const removeBfColumn = (idx: number) => {
+    setBfColumns((prev) => prev.filter((_, i) => i !== idx).map((c, i) => ({ ...c, order: i })));
+  };
+  const moveBfColumn = (idx: number, direction: -1 | 1) => {
+    setBfColumns((prev) => {
+      const next = [...prev];
+      const target = idx + direction;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next.map((c, i) => ({ ...c, order: i }));
+    });
+  };
+  const updateBfColumn = (idx: number, updates: Partial<BankFormatColumn>) => {
+    setBfColumns((prev) => prev.map((c, i) => (i === idx ? { ...c, ...updates } : c)));
+  };
+
+  const handleSaveBankFormat = async () => {
+    if (!bfName.trim()) {
+      toast.error('Give this bank format a name.');
+      return;
+    }
+    if (bfColumns.length === 0 || bfColumns.some((c) => !c.header.trim())) {
+      toast.error('Every column needs a header, and at least one column is required.');
+      return;
+    }
+    setSavingBankFormat(true);
+    try {
+      const form = new FormData();
+      form.set('name', bfName.trim());
+      form.set('isDefault', String(bfIsDefault));
+      form.set('columns', JSON.stringify(bfColumns));
+      if (bfSampleFile) form.set('sampleFile', bfSampleFile);
+
+      const url = bfEditingId ? `/api/bank-formats/${bfEditingId}` : '/api/bank-formats';
+      const res = await fetch(url, { method: bfEditingId ? 'PUT' : 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save bank format');
+      toast.success(`Bank format "${bfName.trim()}" saved.`);
+      setBfDialogOpen(false);
+      fetchBankFormats();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save bank format');
+    } finally {
+      setSavingBankFormat(false);
+    }
+  };
+
+  const handleDeleteBankFormat = async (id: string) => {
+    setDeletingBankFormatId(id);
+    try {
+      const res = await fetch(`/api/bank-formats/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete bank format');
+      toast.success('Bank format deleted.');
+      fetchBankFormats();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete bank format');
+    } finally {
+      setDeletingBankFormatId(null);
     }
   };
 
@@ -1541,6 +1679,169 @@ export default function SettingsView() {
           </CardContent>
         </Card>
       )}
+
+      {/* ─── Bank Transfer Formats (admin/hr) ──────────────────────────────────── */}
+      {(user?.role === 'admin' || user?.role === 'hr') && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                Bank Transfer Formats
+              </CardTitle>
+              <CardDescription>
+                Define the exact column layout your bank expects for salary transfer files (e.g. HDFC, PNB), then generate a real Excel file in that format from Payroll.
+              </CardDescription>
+            </div>
+            <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={openAddBankFormat}>
+              <PlusCircle className="h-4 w-4" />
+              Add Format
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {bankFormatsLoading ? (
+              <p className="text-sm text-muted-foreground py-4">Loading...</p>
+            ) : bankFormats.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">
+                No bank formats configured yet. Downloads will use the generic CSV layout until you add one.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {bankFormats.map((f) => (
+                  <div key={f.id} className="flex items-center justify-between rounded-lg border p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{f.name}</span>
+                      {f.isDefault && (
+                        <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Default</Badge>
+                      )}
+                      <span className="text-xs text-muted-foreground">{f.columns.length} column{f.columns.length === 1 ? '' : 's'}</span>
+                      {f.sampleFileName && (
+                        <a href={`/api/bank-formats/${f.id}/sample`} className="text-xs text-emerald-700 hover:underline" target="_blank" rel="noreferrer">
+                          {f.sampleFileName}
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <Button variant="ghost" size="sm" onClick={() => openEditBankFormat(f)}>
+                        <Pencil className="size-3.5 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700"
+                        disabled={deletingBankFormatId === f.id}
+                        onClick={() => handleDeleteBankFormat(f.id)}
+                      >
+                        {deletingBankFormatId === f.id ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <Trash2 className="size-3.5 mr-1" />}
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─── Add/Edit Bank Format Dialog ───────────────────────────────────── */}
+      <Dialog open={bfDialogOpen} onOpenChange={(open) => { if (!open && !savingBankFormat) setBfDialogOpen(false); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{bfEditingId ? 'Edit Bank Format' : 'Add Bank Format'}</DialogTitle>
+            <DialogDescription>
+              Upload your bank&apos;s sample file for your own reference, then build the exact column order below. Nothing is auto-detected — you decide what goes in each column.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="bf-name">Format Name</Label>
+                <Input id="bf-name" value={bfName} onChange={(e) => setBfName(e.target.value)} placeholder="e.g. HDFC" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="bf-sample">Sample File (optional, for reference)</Label>
+                <div className="flex items-center gap-2">
+                  <Input id="bf-sample" type="file" accept=".xlsx,.xls,.csv" onChange={(e) => setBfSampleFile(e.target.files?.[0] ?? null)} className="text-xs" />
+                  <Upload className="size-4 text-muted-foreground shrink-0" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox id="bf-default" checked={bfIsDefault} onCheckedChange={(v) => setBfIsDefault(!!v)} />
+              <Label htmlFor="bf-default" className="cursor-pointer">Use as default when generating a bank file</Label>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Columns, in order</Label>
+                <Button variant="outline" size="sm" onClick={addBfColumn}>
+                  <PlusCircle className="size-3.5 mr-1" />
+                  Add Column
+                </Button>
+              </div>
+              {bfColumns.map((col, idx) => (
+                <div key={idx} className="flex items-center gap-2 rounded-lg border p-2">
+                  <div className="flex flex-col">
+                    <Button variant="ghost" size="icon" className="size-6" disabled={idx === 0} onClick={() => moveBfColumn(idx, -1)}>
+                      <ArrowUp className="size-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-6" disabled={idx === bfColumns.length - 1} onClick={() => moveBfColumn(idx, 1)}>
+                      <ArrowDown className="size-3.5" />
+                    </Button>
+                  </div>
+                  <Input
+                    className="w-40"
+                    placeholder="Column header"
+                    value={col.header}
+                    onChange={(e) => updateBfColumn(idx, { header: e.target.value })}
+                  />
+                  <Select value={col.source} onValueChange={(v) => updateBfColumn(idx, { source: v as 'field' | 'fixed' })}>
+                    <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="field">Employee Field</SelectItem>
+                      <SelectItem value="fixed">Fixed Text</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {col.source === 'field' ? (
+                    <Select value={col.field} onValueChange={(v) => updateBfColumn(idx, { field: v })}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Choose a field..." /></SelectTrigger>
+                      <SelectContent>
+                        {BANK_FORMAT_FIELD_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      className="flex-1"
+                      placeholder="Fixed value, e.g. NEFT"
+                      value={col.fixedValue ?? ''}
+                      onChange={(e) => updateBfColumn(idx, { fixedValue: e.target.value })}
+                    />
+                  )}
+                  <Button variant="ghost" size="icon" className="size-8 text-red-500" onClick={() => removeBfColumn(idx)}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBfDialogOpen(false)} disabled={savingBankFormat}>
+              Cancel
+            </Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleSaveBankFormat} disabled={savingBankFormat}>
+              {savingBankFormat ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              Save Format
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Audit Log (admin only) */}
       {user?.role === 'admin' && (

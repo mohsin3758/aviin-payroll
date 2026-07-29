@@ -80,6 +80,30 @@ model Company {
   employees           Employee[]
   payrollRuns         PayrollRun[]
   holidays            Holiday[]
+  bankFormats         BankFormat[]
+}
+
+// Admin-configured column layout for generating a bank-specific salary-transfer Excel file.
+// Deliberately no auto-detection/pre-seeded bank templates: the admin builds the mapping by
+// hand from their own bank-provided sample, since this determines where real payments go.
+model BankFormat {
+  id             String   @id @default(cuid())
+  companyId      String
+  name           String   // admin-chosen label, e.g. "HDFC", "PNB"
+  isDefault      Boolean  @default(false)
+  sampleFileName String?  // original uploaded filename, display only
+  sampleFilePath String?  // stored filename — same convention as EmployeeDocument
+  sampleMimeType String?
+  // JSON-encoded ColumnDef[] (order, header, source: "field"|"fixed", field?, fixedValue?) —
+  // stored as a string, not Prisma's Json type, matching this schema's existing convention
+  // (e.g. Company.weeklyOffDays) of string-encoding structured data.
+  columns        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company        Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, name])
 }
 
 model Holiday {

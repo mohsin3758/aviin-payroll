@@ -563,4 +563,107 @@ describe("Access control fixes (requires live dev server)", () => {
       expect(data[0].punchInMethod).toBe("login");
     });
   });
+
+  // ---- Bank Transfer Formats ----
+  describe("bank formats", () => {
+    async function createBankFormat(cookie: string, name: string, isDefault: boolean) {
+      const form = new FormData();
+      form.set("name", name);
+      form.set("isDefault", String(isDefault));
+      form.set(
+        "columns",
+        JSON.stringify([
+          { order: 0, header: "Account Number", source: "field", field: "accountNumber" },
+          { order: 1, header: "IFSC", source: "field", field: "ifsc" },
+          { order: 2, header: "Name", source: "field", field: "beneficiaryName" },
+          { order: 3, header: "Amount", source: "field", field: "amount" },
+          { order: 4, header: "Mode", source: "fixed", fixedValue: "NEFT" },
+        ])
+      );
+      return fetch(`${BASE}/api/bank-formats`, { method: "POST", headers: { Cookie: cookie }, body: form });
+    }
+
+    afterAll(async () => {
+      // Clean up every format this describe block created, so repeated runs stay idempotent.
+      const list = await fetch(`${BASE}/api/bank-formats`, { headers: { Cookie: adminCookie } });
+      const { data } = await list.json();
+      for (const f of data as { id: string; name: string }[]) {
+        if (f.name.startsWith("QA Test Bank")) {
+          await fetch(`${BASE}/api/bank-formats/${f.id}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+        }
+      }
+    });
+
+    it("admin can create a bank format; manager and employee are blocked entirely", async () => {
+      const asManager = await createBankFormat(managerCookie, "QA Test Bank Manager Attempt", false);
+      expect(asManager.status).toBe(403);
+      const asEmployee = await createBankFormat(employeeCookie, "QA Test Bank Employee Attempt", false);
+      expect(asEmployee.status).toBe(403);
+
+      const asAdmin = await createBankFormat(adminCookie, `QA Test Bank ${Date.now()}`, false);
+      expect(asAdmin.status).toBe(201);
+      const created = await asAdmin.json();
+      expect(created.data.columns.length).toBe(5);
+    });
+
+    it("marking a new format as default un-defaults the previous default", async () => {
+      const first = await createBankFormat(adminCookie, `QA Test Bank First ${Date.now()}`, true);
+      const firstData = (await first.json()).data;
+      expect(firstData.isDefault).toBe(true);
+
+      const second = await createBankFormat(adminCookie, `QA Test Bank Second ${Date.now()}`, true);
+      const secondData = (await second.json()).data;
+      expect(secondData.isDefault).toBe(true);
+
+      const listRes = await fetch(`${BASE}/api/bank-formats`, { headers: { Cookie: adminCookie } });
+      const { data } = await listRes.json();
+      const refreshedFirst = data.find((f: { id: string }) => f.id === firstData.id);
+      expect(refreshedFirst.isDefault).toBe(false);
+    });
+
+    it("generates a real, non-empty .xlsx using a configured bank format, and leaves the generic CSV path unchanged", async () => {
+      const reportYear = 2100; // same fixture slot used by the reports test — guaranteed to have a run
+      const runList = await fetch(`${BASE}/api/payroll?month=11&year=${reportYear}`, { headers: { Cookie: adminCookie } });
+      const runs = await runList.json();
+      const runId = runs[0]?.id;
+      expect(runId).toBeTruthy();
+
+      // The bank-file route requires a non-draft run — move it forward if this is the first
+      // time anything has touched this fixture run; tolerate 400 if it's already past draft.
+      await fetch(`${BASE}/api/payroll/${runId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie }, body: JSON.stringify({ status: "processed" }),
+      });
+
+      const formatRes = await createBankFormat(adminCookie, `QA Test Bank XlsxGen ${Date.now()}`, false);
+      const format = (await formatRes.json()).data;
+
+      const xlsxRes = await fetch(`${BASE}/api/payroll/${runId}/bank-file?format=xlsx&bankFormatId=${format.id}`, {
+        headers: { Cookie: adminCookie },
+      });
+      expect(xlsxRes.status).toBe(200);
+      expect(xlsxRes.headers.get("content-type")).toContain("spreadsheetml");
+      const xlsxBuffer = await xlsxRes.arrayBuffer();
+      expect(xlsxBuffer.byteLength).toBeGreaterThan(1000); // a real workbook, not an empty stub
+
+      // Regression guard: the original generic CSV path (no bankFormatId) is untouched.
+      const csvRes = await fetch(`${BASE}/api/payroll/${runId}/bank-file?format=csv`, { headers: { Cookie: adminCookie } });
+      expect(csvRes.status).toBe(200);
+      expect(csvRes.headers.get("content-type")).toContain("text/csv");
+    });
+
+    it("rejects format=xlsx with an explicit bankFormatId that doesn't exist", async () => {
+      // Deterministic regardless of shared state from earlier tests in this file (unlike "is
+      // anything currently default", which earlier tests may have already made true) — an
+      // explicit, nonexistent id must always 400, full stop.
+      const reportYear = 2100;
+      const runList = await fetch(`${BASE}/api/payroll?month=11&year=${reportYear}`, { headers: { Cookie: adminCookie } });
+      const runs = await runList.json();
+      const runId = runs[0]?.id;
+
+      const res = await fetch(`${BASE}/api/payroll/${runId}/bank-file?format=xlsx&bankFormatId=not-a-real-id`, { headers: { Cookie: adminCookie } });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/not found/i);
+    });
+  });
 });

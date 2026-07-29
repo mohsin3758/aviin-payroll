@@ -22,6 +22,17 @@ export type DocType = (typeof ALLOWED_DOC_TYPES)[number];
 export const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 export const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "application/pdf"];
 
+// A BankFormat's sample reference file is a spreadsheet, not an identity document — kept as
+// its own constant pair rather than widening ALLOWED_MIME_TYPES above, which would loosen
+// what the Documents feature accepts too.
+export const MAX_BANK_SAMPLE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+export const ALLOWED_BANK_SAMPLE_MIME_TYPES = [
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+  "application/vnd.ms-excel", // .xls
+  "text/csv",
+  "application/csv",
+];
+
 export async function saveUploadedFile(
   buffer: Buffer,
   originalFileName: string
