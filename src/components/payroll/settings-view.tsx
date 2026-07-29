@@ -454,7 +454,16 @@ export default function SettingsView() {
       if (!res.ok) throw new Error(data.error || 'Failed to read that file');
       const rows: string[][] = data.data.rows;
       setSampleParsedRows(rows);
-      setSampleHeaderRowIdx(rows.length > 0 ? findLikelyHeaderRowIndex(rows) : null);
+      const guessedIdx = rows.length > 0 ? findLikelyHeaderRowIndex(rows) : null;
+      setSampleHeaderRowIdx(guessedIdx);
+      if (guessedIdx !== null) {
+        // Let the preview table render first, then scroll its guessed row into view —
+        // otherwise the panel defaults to showing the top of a long instructions banner
+        // and the highlighted row is invisible until the admin scrolls to find it.
+        setTimeout(() => {
+          document.getElementById(`bf-preview-row-${guessedIdx}`)?.scrollIntoView({ block: 'center' });
+        }, 50);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to read that file');
     } finally {
@@ -1834,23 +1843,32 @@ export default function SettingsView() {
               <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
                 <div className="text-sm font-medium">Which row has the column headers?</div>
                 <p className="text-xs text-muted-foreground">
-                  Bank templates often have instructions above the real header row. Click the correct row, then apply — you can still edit every column afterward.
+                  Bank templates often have instructions above the real header row. We&apos;ve highlighted our best guess
+                  {sampleHeaderRowIdx !== null && <> — <strong>row {sampleHeaderRowIdx + 1}</strong></>} below; scroll to check it, click a different row if it&apos;s wrong, then apply.
                 </p>
-                <div className="overflow-x-auto max-h-48 overflow-y-auto rounded border bg-background">
+                <div className="overflow-x-auto max-h-72 overflow-y-auto rounded border bg-background">
                   <Table>
                     <TableBody>
-                      {sampleParsedRows.map((row, idx) => (
-                        <TableRow
-                          key={idx}
-                          onClick={() => setSampleHeaderRowIdx(idx)}
-                          className={`cursor-pointer ${sampleHeaderRowIdx === idx ? 'bg-emerald-100 dark:bg-emerald-950' : ''}`}
-                        >
-                          <TableCell className="text-xs text-muted-foreground w-8">{idx + 1}</TableCell>
-                          {row.map((cell, cIdx) => (
-                            <TableCell key={cIdx} className="text-xs whitespace-nowrap">{cell}</TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
+                      {sampleParsedRows.map((row, idx) => {
+                        const isEmpty = row.every((cell) => cell.trim().length === 0);
+                        return (
+                          <TableRow
+                            key={idx}
+                            id={`bf-preview-row-${idx}`}
+                            onClick={() => !isEmpty && setSampleHeaderRowIdx(idx)}
+                            className={`${isEmpty ? 'opacity-40' : 'cursor-pointer'} ${sampleHeaderRowIdx === idx ? 'bg-emerald-100 dark:bg-emerald-950' : ''}`}
+                          >
+                            <TableCell className="text-xs text-muted-foreground w-8">{idx + 1}</TableCell>
+                            {isEmpty ? (
+                              <TableCell className="text-xs italic text-muted-foreground">(empty row)</TableCell>
+                            ) : (
+                              row.map((cell, cIdx) => (
+                                <TableCell key={cIdx} className="text-xs whitespace-nowrap">{cell}</TableCell>
+                              ))
+                            )}
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
