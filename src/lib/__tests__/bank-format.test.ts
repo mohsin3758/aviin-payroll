@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildBankFileRows, TEXT_FORMAT_FIELDS, type BankFileRow } from "../bank-format";
+import {
+  buildBankFileRows,
+  TEXT_FORMAT_FIELDS,
+  findLikelyHeaderRowIndex,
+  guessFieldForHeader,
+  type BankFileRow,
+} from "../bank-format";
 import type { ColumnDef } from "../validations/bank-format";
 
 const sampleRow: BankFileRow = {
@@ -79,5 +85,62 @@ describe("TEXT_FORMAT_FIELDS", () => {
 
   it("returns false for a fixed column's undefined field", () => {
     expect(TEXT_FORMAT_FIELDS.has(undefined)).toBe(false);
+  });
+});
+
+describe("findLikelyHeaderRowIndex", () => {
+  it("picks the row with the most short, non-sentence cells over an instructional banner", () => {
+    const rows = [
+      ["UPLOAD FILE GENERATION TOOL FOR NEFT/RTGS", "", "", ""],
+      ["Please fill every mandatory field marked with a star before generating the file.", "", "", ""],
+      ["Account Number*", "Amount*", "IFSC Code*", "Beneficiary Name"],
+      ["", "", "", ""],
+    ];
+    expect(findLikelyHeaderRowIndex(rows)).toBe(2);
+  });
+
+  it("defaults to row 0 when every row looks equally sparse", () => {
+    expect(findLikelyHeaderRowIndex([[], [], []])).toBe(0);
+  });
+
+  it("only scans the first 40 rows", () => {
+    const rows = Array.from({ length: 50 }, () => ["", "", ""]);
+    rows[45] = ["A", "B", "C"];
+    expect(findLikelyHeaderRowIndex(rows)).toBe(0);
+  });
+});
+
+describe("guessFieldForHeader", () => {
+  it("maps an unambiguous beneficiary account header", () => {
+    expect(guessFieldForHeader("Beneficiary Account")).toBe("accountNumber");
+  });
+
+  it("maps an unambiguous beneficiary name header", () => {
+    expect(guessFieldForHeader("BENEFICIARY NAME")).toBe("beneficiaryName");
+  });
+
+  it("maps a bare IFSC header", () => {
+    expect(guessFieldForHeader("IFSC Code*")).toBe("ifsc");
+  });
+
+  it("maps an amount header", () => {
+    expect(guessFieldForHeader("Amount*")).toBe("amount");
+  });
+
+  it("maps a narration-style header", () => {
+    expect(guessFieldForHeader("Tran Particulars")).toBe("narration");
+  });
+
+  it("does NOT map a bare account header with no beneficiary qualifier (could be the company's own account)", () => {
+    expect(guessFieldForHeader("Account Number*")).toBeUndefined();
+  });
+
+  it("does NOT map a charge/company-side account header", () => {
+    expect(guessFieldForHeader("Charge Account")).toBeUndefined();
+  });
+
+  it("returns undefined for a header with no reasonable match", () => {
+    expect(guessFieldForHeader("Cheque Alpha")).toBeUndefined();
+    expect(guessFieldForHeader("Address*")).toBeUndefined();
   });
 });

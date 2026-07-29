@@ -669,7 +669,7 @@ export default function PayrollView() {
 
       {/* ── Detail Dialog ──────────────────────────────────────────── */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-[95vw] lg:max-w-[90vw] xl:max-w-[1200px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[95vw] lg:max-w-[90vw] xl:max-w-[1200px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {selectedRun && (
@@ -923,7 +923,7 @@ export default function PayrollView() {
 
       {/* ── Arrears Dialog ─────────────────────────────────────────── */}
       <Dialog open={arrearsOpen} onOpenChange={setArrearsOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Manage Arrears</DialogTitle>
             <DialogDescription>

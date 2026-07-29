@@ -255,7 +255,7 @@ export default function ExitManagementView() {
       </Card>
 
       <Dialog open={!!selectedId} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
           {loadingDetail ? <Skeleton className="h-64 w-full" /> : detail && (
             <>
               <DialogHeader>

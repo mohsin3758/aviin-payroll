@@ -874,7 +874,7 @@ export default function EmployeesView() {
 
       {/* ─── Add / Edit Dialog ─────────────────────────────────────────────── */}
       <Dialog open={formOpen} onOpenChange={(open) => { if (!open && !submitting) setFormOpen(false) }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
             <DialogDescription>
@@ -1383,7 +1383,7 @@ export default function EmployeesView() {
 
       {/* ─── View Employee Dialog ──────────────────────────────────────────── */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           {viewEmployee && (
             <>
               <DialogHeader>

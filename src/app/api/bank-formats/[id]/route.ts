@@ -8,7 +8,7 @@ import {
   saveUploadedFile,
   deleteUploadedFile,
   MAX_BANK_SAMPLE_SIZE_BYTES,
-  ALLOWED_BANK_SAMPLE_MIME_TYPES,
+  isAllowedBankSampleFile,
 } from "@/lib/documents";
 
 function serialize(format: { columns: string; [key: string]: unknown }) {
@@ -66,8 +66,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
       if (sampleFile.size > MAX_BANK_SAMPLE_SIZE_BYTES) {
         return apiError("Sample file exceeds the 10MB upload limit.", 400);
       }
-      if (!ALLOWED_BANK_SAMPLE_MIME_TYPES.includes(sampleFile.type)) {
-        return apiError(`File type "${sampleFile.type}" is not allowed. Use XLSX, XLS, or CSV.`, 400);
+      if (!isAllowedBankSampleFile(sampleFile)) {
+        return apiError(`File type "${sampleFile.type}" is not allowed. Use XLSX, XLSM, XLS, or CSV.`, 400);
       }
       if (existing.sampleFilePath) {
         await deleteUploadedFile(existing.sampleFilePath);

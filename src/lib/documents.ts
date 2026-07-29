@@ -29,9 +29,20 @@ export const MAX_BANK_SAMPLE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 export const ALLOWED_BANK_SAMPLE_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
   "application/vnd.ms-excel", // .xls
+  "application/vnd.ms-excel.sheet.macroEnabled.12", // .xlsm
   "text/csv",
   "application/csv",
 ];
+const ALLOWED_BANK_SAMPLE_EXTENSIONS = [".xlsx", ".xls", ".xlsm", ".csv"];
+
+// Browsers report macro-enabled/legacy Excel MIME types inconsistently (some send
+// "application/octet-stream" for .xlsm) — fall back to the file extension rather than
+// rejecting a real bank template outright.
+export function isAllowedBankSampleFile(file: { name: string; type: string }): boolean {
+  if (ALLOWED_BANK_SAMPLE_MIME_TYPES.includes(file.type)) return true;
+  const ext = extname(file.name).toLowerCase();
+  return ALLOWED_BANK_SAMPLE_EXTENSIONS.includes(ext);
+}
 
 export async function saveUploadedFile(
   buffer: Buffer,

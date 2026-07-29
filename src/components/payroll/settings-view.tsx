@@ -68,6 +68,7 @@ import {
 import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
+import { findLikelyHeaderRowIndex, guessFieldForHeader } from '@/lib/bank-format';
 import { ScrollText, CalendarDays, Trash2, PlusCircle, Pencil, Upload, ArrowUp, ArrowDown, FileSpreadsheet } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
@@ -394,6 +395,9 @@ export default function SettingsView() {
   const [bfSampleFile, setBfSampleFile] = useState<File | null>(null);
   const [savingBankFormat, setSavingBankFormat] = useState(false);
   const [deletingBankFormatId, setDeletingBankFormatId] = useState<string | null>(null);
+  const [sampleParsedRows, setSampleParsedRows] = useState<string[][] | null>(null);
+  const [sampleHeaderRowIdx, setSampleHeaderRowIdx] = useState<number | null>(null);
+  const [parsingSample, setParsingSample] = useState(false);
 
   const fetchBankFormats = useCallback(async () => {
     if (user?.role !== 'admin' && user?.role !== 'hr') return;
@@ -420,6 +424,8 @@ export default function SettingsView() {
     setBfIsDefault(bankFormats.length === 0);
     setBfColumns([{ order: 0, header: '', source: 'field', field: 'accountNumber' }]);
     setBfSampleFile(null);
+    setSampleParsedRows(null);
+    setSampleHeaderRowIdx(null);
     setBfDialogOpen(true);
   };
 
@@ -429,7 +435,52 @@ export default function SettingsView() {
     setBfIsDefault(format.isDefault);
     setBfColumns(format.columns.map((c, i) => ({ ...c, order: i })));
     setBfSampleFile(null);
+    setSampleParsedRows(null);
+    setSampleHeaderRowIdx(null);
     setBfDialogOpen(true);
+  };
+
+  const handleSampleFileSelected = async (file: File | null) => {
+    setBfSampleFile(file);
+    setSampleParsedRows(null);
+    setSampleHeaderRowIdx(null);
+    if (!file) return;
+    setParsingSample(true);
+    try {
+      const form = new FormData();
+      form.set('sampleFile', file);
+      const res = await fetch('/api/bank-formats/parse-sample', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to read that file');
+      const rows: string[][] = data.data.rows;
+      setSampleParsedRows(rows);
+      setSampleHeaderRowIdx(rows.length > 0 ? findLikelyHeaderRowIndex(rows) : null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to read that file');
+    } finally {
+      setParsingSample(false);
+    }
+  };
+
+  const applyDetectedColumns = (rowIdx: number) => {
+    if (!sampleParsedRows || !sampleParsedRows[rowIdx]) return;
+    const headerRow = sampleParsedRows[rowIdx];
+    const detected: BankFormatColumn[] = headerRow
+      .map((cell) => cell.trim())
+      .filter((cell) => cell.length > 0)
+      .map((header, i) => {
+        const guessed = guessFieldForHeader(header);
+        return guessed
+          ? { order: i, header, source: 'field' as const, field: guessed }
+          : { order: i, header, source: 'fixed' as const, fixedValue: '' };
+      });
+    if (detected.length === 0) {
+      toast.error('That row looks empty — pick a different row.');
+      return;
+    }
+    setBfColumns(detected);
+    const matchedCount = detected.filter((c) => c.source === 'field').length;
+    toast.success(`Filled in ${detected.length} column(s) — ${matchedCount} auto-matched. Review them below before saving.`);
   };
 
   const addBfColumn = () => {
@@ -1747,7 +1798,7 @@ export default function SettingsView() {
 
       {/* ─── Add/Edit Bank Format Dialog ───────────────────────────────────── */}
       <Dialog open={bfDialogOpen} onOpenChange={(open) => { if (!open && !savingBankFormat) setBfDialogOpen(false); }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{bfEditingId ? 'Edit Bank Format' : 'Add Bank Format'}</DialogTitle>
             <DialogDescription>
@@ -1761,13 +1812,60 @@ export default function SettingsView() {
                 <Input id="bf-name" value={bfName} onChange={(e) => setBfName(e.target.value)} placeholder="e.g. HDFC" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="bf-sample">Sample File (optional, for reference)</Label>
+                <Label htmlFor="bf-sample">Sample File (optional — auto-fills columns below)</Label>
                 <div className="flex items-center gap-2">
-                  <Input id="bf-sample" type="file" accept=".xlsx,.xls,.csv" onChange={(e) => setBfSampleFile(e.target.files?.[0] ?? null)} className="text-xs" />
-                  <Upload className="size-4 text-muted-foreground shrink-0" />
+                  <Input
+                    id="bf-sample"
+                    type="file"
+                    accept=".xlsx,.xls,.xlsm,.csv"
+                    onChange={(e) => handleSampleFileSelected(e.target.files?.[0] ?? null)}
+                    className="text-xs"
+                  />
+                  {parsingSample ? (
+                    <Loader2 className="size-4 text-muted-foreground shrink-0 animate-spin" />
+                  ) : (
+                    <Upload className="size-4 text-muted-foreground shrink-0" />
+                  )}
                 </div>
               </div>
             </div>
+
+            {sampleParsedRows && sampleParsedRows.length > 0 && (
+              <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
+                <div className="text-sm font-medium">Which row has the column headers?</div>
+                <p className="text-xs text-muted-foreground">
+                  Bank templates often have instructions above the real header row. Click the correct row, then apply — you can still edit every column afterward.
+                </p>
+                <div className="overflow-x-auto max-h-48 overflow-y-auto rounded border bg-background">
+                  <Table>
+                    <TableBody>
+                      {sampleParsedRows.map((row, idx) => (
+                        <TableRow
+                          key={idx}
+                          onClick={() => setSampleHeaderRowIdx(idx)}
+                          className={`cursor-pointer ${sampleHeaderRowIdx === idx ? 'bg-emerald-100 dark:bg-emerald-950' : ''}`}
+                        >
+                          <TableCell className="text-xs text-muted-foreground w-8">{idx + 1}</TableCell>
+                          {row.map((cell, cIdx) => (
+                            <TableCell key={cIdx} className="text-xs whitespace-nowrap">{cell}</TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  disabled={sampleHeaderRowIdx === null}
+                  onClick={() => sampleHeaderRowIdx !== null && applyDetectedColumns(sampleHeaderRowIdx)}
+                >
+                  <FileSpreadsheet className="size-3.5 mr-1" />
+                  Apply Detected Columns
+                </Button>
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <Checkbox id="bf-default" checked={bfIsDefault} onCheckedChange={(v) => setBfIsDefault(!!v)} />
