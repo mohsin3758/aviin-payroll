@@ -103,6 +103,15 @@ describe("findLikelyHeaderRowIndex", () => {
     expect(findLikelyHeaderRowIndex([[], [], []])).toBe(0);
   });
 
+  it("doesn't throw when a row contains null cells (real templates with header columns starting past column A serialize leading blank cells as null over the wire)", () => {
+    const rows = [
+      [null, null, "AMOUNT*", "IFSC CODE*", "BENEFICIARY ACCOUNT*"],
+      [null, null, null, null, null],
+    ] as unknown as string[][];
+    expect(() => findLikelyHeaderRowIndex(rows)).not.toThrow();
+    expect(findLikelyHeaderRowIndex(rows)).toBe(0);
+  });
+
   it("only scans the first 40 rows", () => {
     const rows = Array.from({ length: 50 }, () => ["", "", ""]);
     rows[45] = ["A", "B", "C"];

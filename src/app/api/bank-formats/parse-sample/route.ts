@@ -50,8 +50,16 @@ export async function POST(request: NextRequest) {
       const rowCount = Math.min(sheet.rowCount, PREVIEW_ROW_LIMIT);
       for (let r = 1; r <= rowCount; r++) {
         const values = sheet.getRow(r).values as (string | number | null | undefined)[];
-        // ExcelJS's row.values is 1-indexed with index 0 unused
-        const cells = values.slice(1, PREVIEW_COL_LIMIT + 1).map((v) => (v === null || v === undefined ? "" : String(v)));
+        // ExcelJS's row.values is 1-indexed with index 0 unused, and is a SPARSE array — an
+        // unset cell (e.g. leading blank columns before a header that starts at column C, as
+        // real bank templates often do) is an actual array hole, not `undefined`. Array.prototype
+        // .slice().map() skips holes entirely (never invokes the callback for them), so a naive
+        // null/undefined check here silently leaves holes in place; JSON.stringify then turns
+        // those into literal `null` in the response, which crashed the client's preview render.
+        // Array.from's iterator visits every index (holes included, as undefined), so this
+        // actually densifies the array instead of leaving holes for JSON.stringify to corrupt.
+        const sliced = values.slice(1, PREVIEW_COL_LIMIT + 1);
+        const cells = Array.from(sliced, (v) => (v === null || v === undefined ? "" : String(v)));
         rows.push(cells);
       }
     }

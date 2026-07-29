@@ -75,7 +75,7 @@ export function findLikelyHeaderRowIndex(rows: string[][]): number {
   const scanLimit = Math.min(rows.length, 40);
   for (let i = 0; i < scanLimit; i++) {
     const score = rows[i].filter((cell) => {
-      const trimmed = cell.trim();
+      const trimmed = (cell ?? "").trim();
       return trimmed.length > 0 && trimmed.length <= HEADER_CELL_MAX_LEN && !trimmed.includes(".");
     }).length;
     if (score > bestScore) {

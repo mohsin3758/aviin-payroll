@@ -475,7 +475,7 @@ export default function SettingsView() {
     if (!sampleParsedRows || !sampleParsedRows[rowIdx]) return;
     const headerRow = sampleParsedRows[rowIdx];
     const detected: BankFormatColumn[] = headerRow
-      .map((cell) => cell.trim())
+      .map((cell) => (cell ?? '').trim())
       .filter((cell) => cell.length > 0)
       .map((header, i) => {
         const guessed = guessFieldForHeader(header);
@@ -1850,7 +1850,7 @@ export default function SettingsView() {
                   <Table>
                     <TableBody>
                       {sampleParsedRows.map((row, idx) => {
-                        const isEmpty = row.every((cell) => cell.trim().length === 0);
+                        const isEmpty = row.every((cell) => !cell || cell.trim().length === 0);
                         return (
                           <TableRow
                             key={idx}
