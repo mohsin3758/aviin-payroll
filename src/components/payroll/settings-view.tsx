@@ -1784,51 +1784,53 @@ export default function SettingsView() {
                   Add Column
                 </Button>
               </div>
-              {bfColumns.map((col, idx) => (
-                <div key={idx} className="flex items-center gap-2 rounded-lg border p-2">
-                  <div className="flex flex-col">
-                    <Button variant="ghost" size="icon" className="size-6" disabled={idx === 0} onClick={() => moveBfColumn(idx, -1)}>
-                      <ArrowUp className="size-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="size-6" disabled={idx === bfColumns.length - 1} onClick={() => moveBfColumn(idx, 1)}>
-                      <ArrowDown className="size-3.5" />
-                    </Button>
-                  </div>
-                  <Input
-                    className="w-40"
-                    placeholder="Column header"
-                    value={col.header}
-                    onChange={(e) => updateBfColumn(idx, { header: e.target.value })}
-                  />
-                  <Select value={col.source} onValueChange={(v) => updateBfColumn(idx, { source: v as 'field' | 'fixed' })}>
-                    <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="field">Employee Field</SelectItem>
-                      <SelectItem value="fixed">Fixed Text</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {col.source === 'field' ? (
-                    <Select value={col.field} onValueChange={(v) => updateBfColumn(idx, { field: v })}>
-                      <SelectTrigger className="flex-1"><SelectValue placeholder="Choose a field..." /></SelectTrigger>
+              <div className="space-y-2 overflow-x-auto">
+                {bfColumns.map((col, idx) => (
+                  <div key={idx} className="flex items-center gap-2 rounded-lg border p-2 min-w-[560px]">
+                    <div className="flex flex-col shrink-0">
+                      <Button variant="ghost" size="icon" className="size-6" disabled={idx === 0} onClick={() => moveBfColumn(idx, -1)}>
+                        <ArrowUp className="size-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="size-6" disabled={idx === bfColumns.length - 1} onClick={() => moveBfColumn(idx, 1)}>
+                        <ArrowDown className="size-3.5" />
+                      </Button>
+                    </div>
+                    <Input
+                      className="w-40 shrink-0"
+                      placeholder="Column header"
+                      value={col.header}
+                      onChange={(e) => updateBfColumn(idx, { header: e.target.value })}
+                    />
+                    <Select value={col.source} onValueChange={(v) => updateBfColumn(idx, { source: v as 'field' | 'fixed' })}>
+                      <SelectTrigger className="w-32 shrink-0"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {BANK_FORMAT_FIELD_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
+                        <SelectItem value="field">Employee Field</SelectItem>
+                        <SelectItem value="fixed">Fixed Text</SelectItem>
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <Input
-                      className="flex-1"
-                      placeholder="Fixed value, e.g. NEFT"
-                      value={col.fixedValue ?? ''}
-                      onChange={(e) => updateBfColumn(idx, { fixedValue: e.target.value })}
-                    />
-                  )}
-                  <Button variant="ghost" size="icon" className="size-8 text-red-500" onClick={() => removeBfColumn(idx)}>
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              ))}
+                    {col.source === 'field' ? (
+                      <Select value={col.field} onValueChange={(v) => updateBfColumn(idx, { field: v })}>
+                        <SelectTrigger className="flex-1 min-w-0"><SelectValue placeholder="Choose a field..." /></SelectTrigger>
+                        <SelectContent>
+                          {BANK_FORMAT_FIELD_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        className="flex-1 min-w-0"
+                        placeholder="Fixed value, e.g. NEFT"
+                        value={col.fixedValue ?? ''}
+                        onChange={(e) => updateBfColumn(idx, { fixedValue: e.target.value })}
+                      />
+                    )}
+                    <Button variant="ghost" size="icon" className="size-8 text-red-500 shrink-0" onClick={() => removeBfColumn(idx)}>
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>
