@@ -186,6 +186,7 @@ model Employee {
   expenseClaims       ExpenseClaim[]
   employeeShifts      EmployeeShift[]
   hiringIncentives    HiringIncentive[]
+  recruitedCandidates Candidate[]
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
@@ -233,24 +234,38 @@ model SalaryArrear {
 // staff (PF/ESI/bank/tax-regime fields don't apply here). Exists so Hiring Incentives can
 // reference who was placed without requiring a full employee-onboarding record.
 model Candidate {
-  id             String    @id @default(cuid())
-  companyId      String
-  firstName      String
-  lastName       String?
-  phone          String?
-  email          String?
-  client         String?
-  role           String
-  employmentType String    // "permanent" | "contractor" — same values as Employee.employmentType, for the same rate lookup
-  dateOfJoining  DateTime
-  dateOfExit     DateTime? // set when the placement/contract ends
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  companyId        String
+  firstName        String
+  lastName         String?
+  phone            String?
+  email            String?
+  client           String?
+  role             String
+  employmentType   String    // "permanent" | "contractor" — same values as Employee.employmentType, for the same rate lookup
+  recruiterId      String?   // Employee who recruited/closed this candidate (for recruiter-wise reporting)
+  closingDate      DateTime? // when the candidate was closed/selected — may differ from dateOfJoining
+  dateOfJoining    DateTime
+  probationEndDate DateTime? // relevant to when full client billing applies
+  dateOfExit       DateTime? // set when the placement/contract ends
+  monthlySalary    Float?
+  annualSalary     Float?
+  // One-time placement fee the client is charged. billingType="percentage" means billingValue is
+  // a percent of annualSalary (computed, not stored); "flat" means billingValue is the amount
+  // directly. paymentReceived is a single yes/no for the whole placement fee (not per-month).
+  billingType      String?
+  billingValue     Float?
+  paymentReceived  Boolean   @default(false)
+  comment          String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   company         Company          @relation(fields: [companyId], references: [id])
+  recruiter       Employee?        @relation(fields: [recruiterId], references: [id])
   hiringIncentive HiringIncentive?
 
   @@index([companyId])
+  @@index([recruiterId])
 }
 
 // A one-time cash payout to the recruiting employee for closing (placing) a candidate,

@@ -4,11 +4,14 @@ import { updateCandidateSchema } from "@/lib/validations/candidate";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { computeBillingAmount } from "@/lib/candidate-billing";
+
+const RECRUITER_SUMMARY = { select: { firstName: true, lastName: true, employeeCode: true } } as const;
 
 type Params = { params: Promise<{ id: string }> };
 
 // PUT /api/candidates/[id] — admin/hr only. Typically used to record an end date (contract
-// ended / placement over) or correct details.
+// ended / placement over), billing/payment details, or correct other details.
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const session = await requireRole(request, ["admin", "hr"]);
@@ -22,11 +25,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const body = await request.json();
     const parsed = updateCandidateSchema.parse(body);
 
-    const candidate = await db.candidate.update({ where: { id }, data: parsed });
+    const candidate = await db.candidate.update({
+      where: { id },
+      data: parsed,
+      include: { recruiter: RECRUITER_SUMMARY },
+    });
 
     await logAudit({ session, action: "update", entity: "Candidate", entityId: id });
 
-    return NextResponse.json(candidate);
+    return NextResponse.json({ ...candidate, billingAmount: computeBillingAmount(candidate) });
   } catch (error) {
     return handleApiError(error, "update candidate");
   }

@@ -16,8 +16,17 @@ export const createCandidateSchema = z.object({
   client: z.string().trim().max(100).nullable().optional(),
   role: z.string().trim().min(1).max(100),
   employmentType: z.enum(["permanent", "contractor"]),
+  recruiterId: z.string().trim().min(1).nullable().optional(),
+  closingDate: z.coerce.date().nullable().optional(),
   dateOfJoining: z.coerce.date(),
+  probationEndDate: z.coerce.date().nullable().optional(),
   dateOfExit: z.coerce.date().nullable().optional(),
+  monthlySalary: z.coerce.number().min(0).nullable().optional(),
+  annualSalary: z.coerce.number().min(0).nullable().optional(),
+  billingType: z.enum(["percentage", "flat"]).nullable().optional(),
+  billingValue: z.coerce.number().min(0).nullable().optional(),
+  paymentReceived: z.boolean().optional(),
+  comment: z.string().trim().max(1000).nullable().optional(),
 });
 
 export const updateCandidateSchema = createCandidateSchema.partial();

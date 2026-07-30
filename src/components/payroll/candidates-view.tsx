@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { UserPlus, Loader2, Plus, Pencil, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -23,15 +25,30 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
 
+const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 const EMPLOYMENT_TYPE_LABEL: Record<string, string> = {
   permanent: 'FTE',
   contractor: 'Contract',
 };
+
+interface EmployeeOption {
+  id: string;
+  employeeCode: string;
+  firstName: string;
+  lastName: string | null;
+}
 
 interface Candidate {
   id: string;
@@ -42,11 +59,21 @@ interface Candidate {
   client: string | null;
   role: string;
   employmentType: string;
+  recruiter: EmployeeOption | null;
+  closingDate: string | null;
   dateOfJoining: string;
+  probationEndDate: string | null;
   dateOfExit: string | null;
+  monthlySalary: number | null;
+  annualSalary: number | null;
+  billingType: string | null;
+  billingValue: number | null;
+  billingAmount: number | null;
+  paymentReceived: boolean;
+  comment: string | null;
 }
 
-function candName(c: Candidate) {
+function candName(c: { firstName: string; lastName: string | null }) {
   return `${c.firstName} ${c.lastName ?? ''}`.trim();
 }
 
@@ -58,13 +85,25 @@ const emptyForm = {
   client: '',
   role: '',
   employmentType: 'permanent',
+  recruiterId: '',
+  closingDate: '',
   dateOfJoining: '',
+  probationEndDate: '',
+  monthlySalary: '',
+  annualSalary: '',
+  billingType: 'none',
+  billingValue: '',
+  paymentReceived: false,
+  comment: '',
 };
 
 export default function CandidatesView() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('active');
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [tab, setTab] = useState<'list' | 'reports'>('list');
+  const [reportView, setReportView] = useState<'client' | 'month' | 'recruiter' | 'billing'>('client');
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -95,13 +134,35 @@ export default function CandidatesView() {
     fetchCandidates();
   }, [fetchCandidates]);
 
-  const openAdd = () => {
+  // Reports should always reflect every candidate, regardless of the list's active/ended filter.
+  useEffect(() => {
+    if (tab !== 'reports') return;
+    fetch('/api/candidates?status=all')
+      .then((r) => r.json())
+      .then((j) => setCandidates(j.data ?? []))
+      .catch(() => toast.error('Failed to load candidates'));
+  }, [tab]);
+
+  const ensureEmployeesLoaded = async () => {
+    if (employees.length === 0) {
+      try {
+        const res = await fetch('/api/employees?limit=200');
+        const json = await res.json();
+        setEmployees(json.data ?? []);
+      } catch {
+        toast.error('Failed to load employees');
+      }
+    }
+  };
+
+  const openAdd = async () => {
     setEditingId(null);
     setForm(emptyForm);
     setFormOpen(true);
+    await ensureEmployeesLoaded();
   };
 
-  const openEdit = (c: Candidate) => {
+  const openEdit = async (c: Candidate) => {
     setEditingId(c.id);
     setForm({
       firstName: c.firstName,
@@ -111,9 +172,19 @@ export default function CandidatesView() {
       client: c.client ?? '',
       role: c.role,
       employmentType: c.employmentType,
+      recruiterId: c.recruiter?.id ?? '',
+      closingDate: c.closingDate ? c.closingDate.split('T')[0] : '',
       dateOfJoining: c.dateOfJoining.split('T')[0],
+      probationEndDate: c.probationEndDate ? c.probationEndDate.split('T')[0] : '',
+      monthlySalary: c.monthlySalary != null ? String(c.monthlySalary) : '',
+      annualSalary: c.annualSalary != null ? String(c.annualSalary) : '',
+      billingType: c.billingType ?? 'none',
+      billingValue: c.billingValue != null ? String(c.billingValue) : '',
+      paymentReceived: c.paymentReceived,
+      comment: c.comment ?? '',
     });
     setFormOpen(true);
+    await ensureEmployeesLoaded();
   };
 
   const handleSave = async () => {
@@ -131,7 +202,16 @@ export default function CandidatesView() {
         client: form.client.trim() || null,
         role: form.role.trim(),
         employmentType: form.employmentType,
+        recruiterId: form.recruiterId || null,
+        closingDate: form.closingDate || null,
         dateOfJoining: form.dateOfJoining,
+        probationEndDate: form.probationEndDate || null,
+        monthlySalary: form.monthlySalary.trim() ? Number(form.monthlySalary) : null,
+        annualSalary: form.annualSalary.trim() ? Number(form.annualSalary) : null,
+        billingType: form.billingType === 'none' ? null : form.billingType,
+        billingValue: form.billingType !== 'none' && form.billingValue.trim() ? Number(form.billingValue) : null,
+        paymentReceived: form.paymentReceived,
+        comment: form.comment.trim() || null,
       };
       const url = editingId ? `/api/candidates/${editingId}` : '/api/candidates';
       const res = await fetch(url, {
@@ -178,6 +258,57 @@ export default function CandidatesView() {
     }
   };
 
+  // ─── Report aggregates ──────────────────────────────────────────────
+  const byClient = useMemo(() => {
+    const map = new Map<string, { count: number; billed: number; received: number }>();
+    for (const c of candidates) {
+      const key = c.client ?? 'No client on record';
+      const row = map.get(key) ?? { count: 0, billed: 0, received: 0 };
+      row.count += 1;
+      row.billed += c.billingAmount ?? 0;
+      if (c.paymentReceived) row.received += c.billingAmount ?? 0;
+      map.set(key, row);
+    }
+    return [...map.entries()].map(([client, row]) => ({ client, ...row })).sort((a, b) => b.billed - a.billed);
+  }, [candidates]);
+
+  const byMonth = useMemo(() => {
+    const map = new Map<string, { label: string; count: number; billed: number }>();
+    for (const c of candidates) {
+      const dateStr = c.closingDate ?? c.dateOfJoining;
+      const d = new Date(dateStr);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const label = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+      const row = map.get(key) ?? { label, count: 0, billed: 0 };
+      row.count += 1;
+      row.billed += c.billingAmount ?? 0;
+      map.set(key, row);
+    }
+    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([, row]) => row);
+  }, [candidates]);
+
+  const byRecruiter = useMemo(() => {
+    const map = new Map<string, { count: number; billed: number }>();
+    for (const c of candidates) {
+      const key = c.recruiter ? candName(c.recruiter) : 'Unassigned';
+      const row = map.get(key) ?? { count: 0, billed: 0 };
+      row.count += 1;
+      row.billed += c.billingAmount ?? 0;
+      map.set(key, row);
+    }
+    return [...map.entries()].map(([recruiter, row]) => ({ recruiter, ...row })).sort((a, b) => b.count - a.count);
+  }, [candidates]);
+
+  const billingRows = useMemo(
+    () => candidates.filter((c) => c.billingAmount != null).sort((a, b) => (b.billingAmount ?? 0) - (a.billingAmount ?? 0)),
+    [candidates]
+  );
+  const billingTotals = useMemo(() => {
+    const totalBilled = billingRows.reduce((s, c) => s + (c.billingAmount ?? 0), 0);
+    const totalReceived = billingRows.filter((c) => c.paymentReceived).reduce((s, c) => s + (c.billingAmount ?? 0), 0);
+    return { totalBilled, totalReceived, outstanding: totalBilled - totalReceived };
+  }, [billingRows]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -192,92 +323,271 @@ export default function CandidatesView() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="ended">Ended</SelectItem>
-              <SelectItem value="all">All</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={openAdd}>
-            <Plus className="size-4" />
-            Add Candidate
-          </Button>
-        </div>
+        {tab === 'list' && (
+          <div className="flex items-center gap-2">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="ended">Ended</SelectItem>
+                <SelectItem value="all">All</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={openAdd}>
+              <Plus className="size-4" />
+              Add Candidate
+            </Button>
+          </div>
+        )}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Candidates</CardTitle>
-          <CardDescription>Name, client, role, and placement dates — used when scheduling a Hiring Incentive</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-6"><Skeleton className="h-32 w-full" /></div>
-          ) : candidates.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-12 text-center">No candidates on record yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Phone</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Joined</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {candidates.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{candName(c)}</TableCell>
-                      <TableCell>{c.client ?? '—'}</TableCell>
-                      <TableCell>{c.role}</TableCell>
-                      <TableCell>{EMPLOYMENT_TYPE_LABEL[c.employmentType] ?? c.employmentType}</TableCell>
-                      <TableCell>{c.phone ?? '—'}</TableCell>
-                      <TableCell>{c.email ?? '—'}</TableCell>
-                      <TableCell>{new Date(c.dateOfJoining).toLocaleDateString('en-IN')}</TableCell>
-                      <TableCell>
-                        {c.dateOfExit ? (
-                          <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Ended</Badge>
-                        ) : (
-                          <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Active</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(c)}>
-                            <Pencil className="size-4" />
-                          </Button>
-                          {!c.dateOfExit && (
-                            <Button variant="ghost" size="icon" className="size-7 text-amber-600" onClick={() => openEndPlacement(c)}>
-                              <LogOut className="size-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+      <div className="flex gap-2 border-b">
+        {(['list', 'reports'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {t === 'list' ? 'Candidates' : 'Reports'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'list' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Candidates</CardTitle>
+            <CardDescription>Name, client, role, billing, and placement dates</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-6"><Skeleton className="h-32 w-full" /></div>
+            ) : candidates.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-12 text-center">No candidates on record yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Client</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Recruiter</TableHead>
+                      <TableHead>Closed</TableHead>
+                      <TableHead>Joined</TableHead>
+                      <TableHead className="text-right">Billing</TableHead>
+                      <TableHead>Payment</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {candidates.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell className="font-medium">{candName(c)}</TableCell>
+                        <TableCell>{c.client ?? '—'}</TableCell>
+                        <TableCell>{c.role}</TableCell>
+                        <TableCell>{EMPLOYMENT_TYPE_LABEL[c.employmentType] ?? c.employmentType}</TableCell>
+                        <TableCell>{c.recruiter ? candName(c.recruiter) : '—'}</TableCell>
+                        <TableCell>{c.closingDate ? new Date(c.closingDate).toLocaleDateString('en-IN') : '—'}</TableCell>
+                        <TableCell>{new Date(c.dateOfJoining).toLocaleDateString('en-IN')}</TableCell>
+                        <TableCell className="text-right">{c.billingAmount != null ? fmt(c.billingAmount) : '—'}</TableCell>
+                        <TableCell>
+                          {c.billingAmount == null ? (
+                            '—'
+                          ) : c.paymentReceived ? (
+                            <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Received</Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">Pending</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {c.dateOfExit ? (
+                            <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Ended</Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Active</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(c)}>
+                              <Pencil className="size-4" />
+                            </Button>
+                            {!c.dateOfExit && (
+                              <Button variant="ghost" size="icon" className="size-7 text-amber-600" onClick={() => openEndPlacement(c)}>
+                                <LogOut className="size-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 'reports' && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Select value={reportView} onValueChange={(v) => setReportView(v as typeof reportView)}>
+              <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="client">Client-wise</SelectItem>
+                <SelectItem value="month">Month-wise</SelectItem>
+                <SelectItem value="recruiter">Recruiter-wise</SelectItem>
+                <SelectItem value="billing">Billing-wise</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {reportView === 'client' && (
+            <Card>
+              <CardHeader><CardTitle className="text-base">Client-wise</CardTitle><CardDescription>Candidates and billing totals per client</CardDescription></CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow><TableHead>Client</TableHead><TableHead className="text-right">Candidates</TableHead><TableHead className="text-right">Total Billed</TableHead><TableHead className="text-right">Received</TableHead></TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {byClient.map((r) => (
+                        <TableRow key={r.client}>
+                          <TableCell>{r.client}</TableCell>
+                          <TableCell className="text-right">{r.count}</TableCell>
+                          <TableCell className="text-right">{fmt(r.billed)}</TableCell>
+                          <TableCell className="text-right text-emerald-700">{fmt(r.received)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {reportView === 'month' && (
+            <Card>
+              <CardHeader><CardTitle className="text-base">Month-wise</CardTitle><CardDescription>Grouped by closing month (falls back to joining month if no closing date is set)</CardDescription></CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow><TableHead>Month</TableHead><TableHead className="text-right">Candidates</TableHead><TableHead className="text-right">Total Billed</TableHead></TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {byMonth.map((r) => (
+                        <TableRow key={r.label}>
+                          <TableCell>{r.label}</TableCell>
+                          <TableCell className="text-right">{r.count}</TableCell>
+                          <TableCell className="text-right">{fmt(r.billed)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {reportView === 'recruiter' && (
+            <Card>
+              <CardHeader><CardTitle className="text-base">Recruiter-wise</CardTitle><CardDescription>Closures and billing generated per recruiter</CardDescription></CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow><TableHead>Recruiter</TableHead><TableHead className="text-right">Closures</TableHead><TableHead className="text-right">Total Billed</TableHead></TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {byRecruiter.map((r) => (
+                        <TableRow key={r.recruiter}>
+                          <TableCell>{r.recruiter}</TableCell>
+                          <TableCell className="text-right">{r.count}</TableCell>
+                          <TableCell className="text-right">{fmt(r.billed)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {reportView === 'billing' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border bg-slate-50 p-3">
+                  <p className="text-xs text-slate-600 font-medium">Total Billed</p>
+                  <p className="text-lg font-bold text-slate-800">{fmt(billingTotals.totalBilled)}</p>
+                </div>
+                <div className="rounded-lg border bg-emerald-50 p-3">
+                  <p className="text-xs text-emerald-600 font-medium">Received</p>
+                  <p className="text-lg font-bold text-emerald-800">{fmt(billingTotals.totalReceived)}</p>
+                </div>
+                <div className="rounded-lg border bg-amber-50 p-3">
+                  <p className="text-xs text-amber-600 font-medium">Outstanding</p>
+                  <p className="text-lg font-bold text-amber-800">{fmt(billingTotals.outstanding)}</p>
+                </div>
+              </div>
+              <Card>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Candidate</TableHead>
+                          <TableHead>Client</TableHead>
+                          <TableHead>Billing Type</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {billingRows.map((c) => (
+                          <TableRow key={c.id}>
+                            <TableCell>{candName(c)}</TableCell>
+                            <TableCell>{c.client ?? '—'}</TableCell>
+                            <TableCell>{c.billingType === 'percentage' ? `${c.billingValue}% of CTC` : 'Flat'}</TableCell>
+                            <TableCell className="text-right">{fmt(c.billingAmount ?? 0)}</TableCell>
+                            <TableCell>
+                              {c.paymentReceived ? (
+                                <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Received</Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">Pending</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                      <TableFooter>
+                        <TableRow className="font-semibold">
+                          <TableCell colSpan={3}>Total</TableCell>
+                          <TableCell className="text-right">{fmt(billingTotals.totalBilled)}</TableCell>
+                          <TableCell />
+                        </TableRow>
+                      </TableFooter>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
       {/* Add/Edit dialog */}
       <Dialog open={formOpen} onOpenChange={(open) => { if (!open && !submitting) setFormOpen(false); }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit Candidate' : 'Add Candidate'}</DialogTitle>
-            <DialogDescription>Basic placement details only — no payroll/PF/ESI/bank fields, since this candidate isn&apos;t an in-house payroll employee.</DialogDescription>
+            <DialogDescription>No payroll/PF/ESI/bank fields, since this candidate isn&apos;t an in-house payroll employee.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -322,9 +632,77 @@ export default function CandidatesView() {
                 </Select>
               </div>
               <div className="space-y-1.5">
+                <Label>Recruiter</Label>
+                <Select value={form.recruiterId || 'none'} onValueChange={(v) => setForm({ ...form, recruiterId: v === 'none' ? '' : v })}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select recruiter..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {employees.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>{candName(e)} ({e.employeeCode})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label>Closing Date</Label>
+                <Input type="date" value={form.closingDate} onChange={(e) => setForm({ ...form, closingDate: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
                 <Label>Date of Joining *</Label>
                 <Input type="date" value={form.dateOfJoining} onChange={(e) => setForm({ ...form, dateOfJoining: e.target.value })} />
               </div>
+              <div className="space-y-1.5">
+                <Label>Probation End Date</Label>
+                <Input type="date" value={form.probationEndDate} onChange={(e) => setForm({ ...form, probationEndDate: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Monthly Salary</Label>
+                <Input type="number" min="0" value={form.monthlySalary} onChange={(e) => setForm({ ...form, monthlySalary: e.target.value })} placeholder="e.g. 45000" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Annual Salary (CTC)</Label>
+                <Input type="number" min="0" value={form.annualSalary} onChange={(e) => setForm({ ...form, annualSalary: e.target.value })} placeholder="e.g. 540000" />
+              </div>
+            </div>
+            <div className="rounded-lg border p-3 space-y-3">
+              <Label className="text-sm font-medium">Client Billing (one-time placement fee)</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <Select value={form.billingType} onValueChange={(v) => setForm({ ...form, billingType: v })}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No billing charge</SelectItem>
+                    <SelectItem value="percentage">Percentage of CTC</SelectItem>
+                    <SelectItem value="flat">Flat amount</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.billingType !== 'none' && (
+                  <Input
+                    type="number"
+                    min="0"
+                    value={form.billingValue}
+                    onChange={(e) => setForm({ ...form, billingValue: e.target.value })}
+                    placeholder={form.billingType === 'percentage' ? 'e.g. 8.33 (%)' : 'e.g. 50000 (₹)'}
+                  />
+                )}
+              </div>
+              {form.billingType !== 'none' && (
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="paymentReceived"
+                    checked={form.paymentReceived}
+                    onCheckedChange={(v) => setForm({ ...form, paymentReceived: !!v })}
+                  />
+                  <Label htmlFor="paymentReceived" className="cursor-pointer font-normal">Payment received from client</Label>
+                </div>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Comment / Notes</Label>
+              <Textarea value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} rows={2} />
             </div>
           </div>
           <DialogFooter>
