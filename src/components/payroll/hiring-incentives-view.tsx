@@ -56,6 +56,10 @@ interface EmployeeOption {
   employeeCode: string;
   firstName: string;
   lastName: string | null;
+  designation?: string;
+  client?: string | null;
+  dateOfJoining?: string;
+  employmentType?: string;
 }
 
 interface Incentive {
@@ -68,6 +72,8 @@ interface Incentive {
   eligibleDate: string;
   payMonth: number;
   payYear: number;
+  monthlySalary: number | null;
+  annualSalary: number | null;
   reason: string | null;
   status: string;
 }
@@ -94,6 +100,8 @@ export default function HiringIncentivesView() {
   const [createOpen, setCreateOpen] = useState(false);
   const [recruiterId, setRecruiterId] = useState('');
   const [candidateId, setCandidateId] = useState('');
+  const [monthlySalary, setMonthlySalary] = useState('');
+  const [annualSalary, setAnnualSalary] = useState('');
   const [reason, setReason] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -144,7 +152,13 @@ export default function HiringIncentivesView() {
       const res = await fetch('/api/hiring-incentives', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recruiterId, candidateId, reason: reason.trim() || null }),
+        body: JSON.stringify({
+          recruiterId,
+          candidateId,
+          reason: reason.trim() || null,
+          monthlySalary: monthlySalary.trim() ? Number(monthlySalary) : null,
+          annualSalary: annualSalary.trim() ? Number(annualSalary) : null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create hiring incentive');
@@ -152,6 +166,8 @@ export default function HiringIncentivesView() {
       setCreateOpen(false);
       setRecruiterId('');
       setCandidateId('');
+      setMonthlySalary('');
+      setAnnualSalary('');
       setReason('');
       fetchIncentives();
     } catch (err) {
@@ -215,6 +231,11 @@ export default function HiringIncentivesView() {
       setSavingRates(false);
     }
   };
+
+  const selectedCandidate = useMemo(
+    () => employees.find((e) => e.id === candidateId) ?? null,
+    [employees, candidateId]
+  );
 
   const filteredAll = useMemo(
     () => (statusFilter === 'all' ? incentives : incentives.filter((i) => i.status === statusFilter)),
@@ -341,8 +362,12 @@ export default function HiringIncentivesView() {
                     <TableRow>
                       <TableHead>Recruiter</TableHead>
                       <TableHead>Candidate</TableHead>
+                      <TableHead>Client</TableHead>
+                      <TableHead>Role</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead className="text-right">Monthly Salary</TableHead>
+                      <TableHead className="text-right">Annual Salary</TableHead>
+                      <TableHead className="text-right">Incentive Amount</TableHead>
                       <TableHead>Join Date</TableHead>
                       <TableHead>Eligible Date</TableHead>
                       <TableHead>Pay Month</TableHead>
@@ -356,7 +381,11 @@ export default function HiringIncentivesView() {
                       <TableRow key={i.id}>
                         <TableCell className="font-medium">{empName(i.recruiter)}</TableCell>
                         <TableCell>{empName(i.candidate)}</TableCell>
+                        <TableCell>{i.candidate.client ?? '—'}</TableCell>
+                        <TableCell>{i.candidate.designation ?? '—'}</TableCell>
                         <TableCell>{EMPLOYMENT_TYPE_LABEL[i.employmentType] ?? i.employmentType}</TableCell>
+                        <TableCell className="text-right">{i.monthlySalary != null ? fmt(i.monthlySalary) : '—'}</TableCell>
+                        <TableCell className="text-right">{i.annualSalary != null ? fmt(i.annualSalary) : '—'}</TableCell>
                         <TableCell className="text-right">{fmt(i.amount)}</TableCell>
                         <TableCell>{new Date(i.joinDate).toLocaleDateString('en-IN')}</TableCell>
                         <TableCell>{new Date(i.eligibleDate).toLocaleDateString('en-IN')}</TableCell>
@@ -427,6 +456,8 @@ export default function HiringIncentivesView() {
                       <TableRow>
                         <TableHead>Recruiter</TableHead>
                         <TableHead>Candidate</TableHead>
+                        <TableHead>Client</TableHead>
+                        <TableHead>Role</TableHead>
                         <TableHead>Type</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
                         <TableHead>Status</TableHead>
@@ -437,6 +468,8 @@ export default function HiringIncentivesView() {
                         <TableRow key={i.id}>
                           <TableCell className="font-medium">{empName(i.recruiter)}</TableCell>
                           <TableCell>{empName(i.candidate)}</TableCell>
+                          <TableCell>{i.candidate.client ?? '—'}</TableCell>
+                          <TableCell>{i.candidate.designation ?? '—'}</TableCell>
                           <TableCell>{EMPLOYMENT_TYPE_LABEL[i.employmentType] ?? i.employmentType}</TableCell>
                           <TableCell className="text-right">{fmt(i.amount)}</TableCell>
                           <TableCell><Badge variant="outline" className={STATUS_BADGE[i.status]}>{i.status}</Badge></TableCell>
@@ -531,6 +564,26 @@ export default function HiringIncentivesView() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            {selectedCandidate && (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-1 text-sm">
+                <p className="font-medium">{empName(selectedCandidate)} ({selectedCandidate.employeeCode})</p>
+                <p className="text-muted-foreground text-xs">
+                  Role: {selectedCandidate.designation ?? '—'} · Client: {selectedCandidate.client ?? '—'} · Joined:{' '}
+                  {selectedCandidate.dateOfJoining ? new Date(selectedCandidate.dateOfJoining).toLocaleDateString('en-IN') : '—'} · Type:{' '}
+                  {EMPLOYMENT_TYPE_LABEL[selectedCandidate.employmentType ?? ''] ?? selectedCandidate.employmentType ?? '—'}
+                </p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Monthly Salary (record-keeping only)</Label>
+                <Input type="number" min="0" value={monthlySalary} onChange={(e) => setMonthlySalary(e.target.value)} placeholder="e.g. 45000" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Annual Salary (record-keeping only)</Label>
+                <Input type="number" min="0" value={annualSalary} onChange={(e) => setAnnualSalary(e.target.value)} placeholder="e.g. 540000" />
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label>Reason / Notes (optional)</Label>

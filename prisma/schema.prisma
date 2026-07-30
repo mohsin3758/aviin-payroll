@@ -137,6 +137,8 @@ model Employee {
   dateOfExit          DateTime?
   designation         String
   department          String
+  // Client company this employee is placed with, if any (staffing/consulting-style engagements).
+  client              String?
   state               String   @default("Maharashtra")
   employmentType      String   @default("permanent") // "permanent" | "contractor" | "daily_wage" | "hourly"
   panNumber           String?
@@ -243,6 +245,10 @@ model HiringIncentive {
   eligibleDate    DateTime // joinDate + 1 calendar month — the vesting cutoff
   payMonth        Int      // 1-12, the month this pays out in (join month + 1)
   payYear         Int
+  // Record-keeping only — entered manually at creation time (the candidate may not have a full
+  // Salary Structure configured in the system yet), never used in any calculation.
+  monthlySalary   Float?
+  annualSalary    Float?
   reason          String?
   status          String   @default("pending") // "pending" | "eligible" | "forfeited" | "paid" | "cancelled"
   forfeitedReason String?

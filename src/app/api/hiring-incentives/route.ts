@@ -6,7 +6,9 @@ import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { computeIncentiveSchedule, refreshPendingHiringIncentiveVesting, resolveIncentiveRate } from "@/lib/payroll/hiring-incentive";
 
-const EMPLOYEE_SUMMARY = { select: { firstName: true, lastName: true, employeeCode: true } } as const;
+const EMPLOYEE_SUMMARY = {
+  select: { firstName: true, lastName: true, employeeCode: true, designation: true, client: true, dateOfJoining: true },
+} as const;
 
 // GET /api/hiring-incentives?recruiterId=&candidateId=&status=&month=&year= — admin/hr only.
 // Refreshes pending records' vesting status against each candidate's current dateOfExit before
@@ -104,6 +106,8 @@ export async function POST(request: NextRequest) {
         payMonth,
         payYear,
         reason: parsed.reason ?? null,
+        monthlySalary: parsed.monthlySalary ?? null,
+        annualSalary: parsed.annualSalary ?? null,
       },
       include: { recruiter: EMPLOYEE_SUMMARY, candidate: EMPLOYEE_SUMMARY },
     });

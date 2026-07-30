@@ -138,6 +138,7 @@ interface Employee {
   dateOfExit: string | null
   designation: string
   department: string
+  client: string | null
   state: string
   employmentType: string
   panNumber: string | null
@@ -172,6 +173,7 @@ interface FormData {
   dateOfJoining: string
   designation: string
   department: string
+  client: string
   state: string
   employmentType: string
   panNumber: string
@@ -212,6 +214,7 @@ const emptyForm: FormData = {
   dateOfJoining: '',
   designation: '',
   department: '',
+  client: '',
   state: 'Maharashtra',
   employmentType: 'permanent',
   panNumber: '',
@@ -409,6 +412,7 @@ export default function EmployeesView() {
       dateOfJoining: emp.dateOfJoining?.split('T')[0] || '',
       designation: emp.designation,
       department: emp.department,
+      client: emp.client || '',
       state: emp.state,
       employmentType: emp.employmentType || 'permanent',
       panNumber: emp.panNumber || '',
@@ -491,6 +495,7 @@ export default function EmployeesView() {
         dateOfJoining: form.dateOfJoining,
         designation: form.designation.trim(),
         department: form.department,
+        client: form.client.trim() || null,
         state: form.state,
         employmentType: form.employmentType,
         panNumber: form.panNumber.trim() || null,
@@ -1021,6 +1026,15 @@ export default function EmployeesView() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
+                  <Label htmlFor="client">Client</Label>
+                  <Input
+                    id="client"
+                    value={form.client}
+                    onChange={(e) => updateField('client', e.target.value)}
+                    placeholder="e.g. Acme Corp (leave blank if not applicable)"
+                  />
+                </div>
+                <div className="space-y-1.5">
                   <Label htmlFor="doj">Date of Joining *</Label>
                   <Input
                     id="doj"
@@ -1463,6 +1477,7 @@ export default function EmployeesView() {
                       </Badge>
                     </InfoItem>
                     <InfoItem icon={<CalendarDays className="size-4 text-muted-foreground" />} label="Date of Joining" value={new Date(viewEmployee.dateOfJoining).toLocaleDateString('en-IN')} />
+                    <InfoItem icon={<Building2 className="size-4 text-muted-foreground" />} label="Client" value={viewEmployee.client || '—'} />
                     <InfoItem icon={<MapPin className="size-4 text-muted-foreground" />} label="State" value={viewEmployee.state} />
                     <InfoItem icon={<Shield className="size-4 text-muted-foreground" />} label="Tax Regime" value={viewEmployee.taxRegime === 'new' ? 'New' : 'Old'}>
                       <Badge

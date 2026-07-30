@@ -42,6 +42,7 @@ export const createEmployeeSchema = z.object({
   dateOfExit: dateInput.nullable().optional(),
   designation: z.string().trim().min(1).max(100),
   department: z.string().trim().min(1).max(100),
+  client: z.string().trim().max(100).nullable().optional(),
   state: z.string().trim().min(1).max(50).default("Maharashtra"),
   employmentType: z.enum(["permanent", "contractor", "daily_wage", "hourly"]).default("permanent"),
   panNumber: z
