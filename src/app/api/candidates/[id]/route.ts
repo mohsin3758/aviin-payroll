@@ -12,6 +12,10 @@ const HIRING_INCENTIVE_SUMMARY = {
   select: { id: true, status: true, amount: true, payMonth: true, payYear: true },
 } as const;
 const BILLING_FIELDS = ["billingType", "billingValue", "paymentReceived"] as const;
+// Fields worth a specific before/after audit entry — money-relevant, the kind of thing someone
+// would need to answer "who changed this and when" about later. Everything else on Candidate
+// just gets a generic "updated" log entry.
+const AUDITED_FIELDS = ["billingType", "billingValue", "paymentReceived", "monthlySalary", "annualSalary"] as const;
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -21,6 +25,19 @@ function stripBillingFields<T extends Record<string, unknown>>(data: T): T {
     delete stripped[field];
   }
   return stripped;
+}
+
+function diffAuditedFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>
+): Record<string, { from: unknown; to: unknown }> {
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  for (const field of AUDITED_FIELDS) {
+    if (field in after && after[field] !== before[field]) {
+      changes[field] = { from: before[field], to: after[field] };
+    }
+  }
+  return changes;
 }
 
 function redactBillingIfNotAdmin<T extends { billingType?: unknown; billingValue?: unknown; billingAmount?: unknown; paymentReceived?: unknown }>(
@@ -54,6 +71,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const parsed = updateCandidateSchema.parse(body);
     const data = isAdmin ? parsed : stripBillingFields(parsed);
 
+    const auditedChanges = diffAuditedFields(existing, data);
+
     await db.candidate.update({ where: { id }, data });
 
     // Recording an end date (or any other edit) can change whether this candidate's pending
@@ -67,7 +86,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
       include: { recruiter: RECRUITER_SUMMARY, hiringIncentive: HIRING_INCENTIVE_SUMMARY },
     });
 
-    await logAudit({ session, action: "update", entity: "Candidate", entityId: id });
+    await logAudit({
+      session,
+      action: "update",
+      entity: "Candidate",
+      entityId: id,
+      details: Object.keys(auditedChanges).length > 0 ? auditedChanges : undefined,
+    });
 
     const withBilling = { ...candidate, billingAmount: computeBillingAmount(candidate) };
     return NextResponse.json(redactBillingIfNotAdmin(withBilling, isAdmin));

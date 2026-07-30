@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { UserPlus, Loader2, Plus, Pencil, LogOut, Search, Eye, Trash2 } from 'lucide-react';
+import { UserPlus, Loader2, Plus, Pencil, LogOut, Search, Eye, Trash2, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -31,8 +31,27 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useSessionContext } from '@/hooks/session-context';
+import { usePayrollStore } from '@/store/payroll-store';
 
 const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
+const PAGE_SIZE = 20;
+
+function downloadCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers.map(escape).join(','), ...rows.map((r) => r.map(escape).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -118,13 +137,17 @@ const emptyForm = {
 export default function CandidatesView() {
   const { user } = useSessionContext();
   const isAdmin = user?.role === 'admin';
+  const { selectedCandidateId, setSelectedCandidateId } = usePayrollStore();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('active');
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [tab, setTab] = useState<'list' | 'reports'>('list');
   const [reportView, setReportView] = useState<'client' | 'month' | 'recruiter' | 'billing'>('client');
+  const [reportFromDate, setReportFromDate] = useState('');
+  const [reportToDate, setReportToDate] = useState('');
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -167,6 +190,32 @@ export default function CandidatesView() {
       .then((j) => setCandidates(j.data ?? []))
       .catch(() => toast.error('Failed to load candidates'));
   }, [tab]);
+
+  // Reset to page 1 whenever the visible set of candidates could change shape.
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter]);
+
+  // Cross-link from the Hiring Incentives screen: if a candidate was chosen there, jump
+  // straight to its View dialog here, regardless of the active/ended filter, then clear the
+  // pointer so navigating back to this screen later doesn't re-trigger it.
+  useEffect(() => {
+    if (!selectedCandidateId) return;
+    fetch('/api/candidates?status=all')
+      .then((r) => r.json())
+      .then((j) => {
+        const all: Candidate[] = j.data ?? [];
+        const found = all.find((c) => c.id === selectedCandidateId);
+        if (found) {
+          setViewingCandidate(found);
+          setViewOpen(true);
+        } else {
+          toast.error('Candidate not found');
+        }
+      })
+      .catch(() => toast.error('Failed to load candidate'))
+      .finally(() => setSelectedCandidateId(null));
+  }, [selectedCandidateId, setSelectedCandidateId]);
 
   const ensureEmployeesLoaded = async () => {
     if (employees.length === 0) {
@@ -312,10 +361,29 @@ export default function CandidatesView() {
     );
   }, [candidates, searchQuery]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredCandidates.length / PAGE_SIZE));
+  const paginatedCandidates = useMemo(
+    () => filteredCandidates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredCandidates, page]
+  );
+
   // ─── Report aggregates ──────────────────────────────────────────────
+  // "Effective date" for report grouping/filtering: closing date if set, else join date —
+  // matches Month-wise's existing convention so a date-range filter behaves consistently
+  // across all four views, not just the one that already groups by month.
+  const reportCandidates = useMemo(() => {
+    if (!reportFromDate && !reportToDate) return candidates;
+    const from = reportFromDate ? new Date(reportFromDate).getTime() : -Infinity;
+    const to = reportToDate ? new Date(reportToDate).getTime() + 24 * 60 * 60 * 1000 - 1 : Infinity;
+    return candidates.filter((c) => {
+      const effective = new Date(c.closingDate ?? c.dateOfJoining).getTime();
+      return effective >= from && effective <= to;
+    });
+  }, [candidates, reportFromDate, reportToDate]);
+
   const byClient = useMemo(() => {
     const map = new Map<string, { count: number; billed: number; received: number }>();
-    for (const c of candidates) {
+    for (const c of reportCandidates) {
       const key = c.client ?? 'No client on record';
       const row = map.get(key) ?? { count: 0, billed: 0, received: 0 };
       row.count += 1;
@@ -324,11 +392,11 @@ export default function CandidatesView() {
       map.set(key, row);
     }
     return [...map.entries()].map(([client, row]) => ({ client, ...row })).sort((a, b) => b.billed - a.billed);
-  }, [candidates]);
+  }, [reportCandidates]);
 
   const byMonth = useMemo(() => {
     const map = new Map<string, { label: string; count: number; billed: number }>();
-    for (const c of candidates) {
+    for (const c of reportCandidates) {
       const dateStr = c.closingDate ?? c.dateOfJoining;
       const d = new Date(dateStr);
       const key = `${d.getFullYear()}-${d.getMonth()}`;
@@ -339,11 +407,11 @@ export default function CandidatesView() {
       map.set(key, row);
     }
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([, row]) => row);
-  }, [candidates]);
+  }, [reportCandidates]);
 
   const byRecruiter = useMemo(() => {
     const map = new Map<string, { count: number; billed: number }>();
-    for (const c of candidates) {
+    for (const c of reportCandidates) {
       const key = c.recruiter ? candName(c.recruiter) : 'Unassigned';
       const row = map.get(key) ?? { count: 0, billed: 0 };
       row.count += 1;
@@ -351,17 +419,53 @@ export default function CandidatesView() {
       map.set(key, row);
     }
     return [...map.entries()].map(([recruiter, row]) => ({ recruiter, ...row })).sort((a, b) => b.count - a.count);
-  }, [candidates]);
+  }, [reportCandidates]);
 
   const billingRows = useMemo(
-    () => candidates.filter((c) => c.billingAmount != null).sort((a, b) => (b.billingAmount ?? 0) - (a.billingAmount ?? 0)),
-    [candidates]
+    () => reportCandidates.filter((c) => c.billingAmount != null).sort((a, b) => (b.billingAmount ?? 0) - (a.billingAmount ?? 0)),
+    [reportCandidates]
   );
   const billingTotals = useMemo(() => {
     const totalBilled = billingRows.reduce((s, c) => s + (c.billingAmount ?? 0), 0);
     const totalReceived = billingRows.filter((c) => c.paymentReceived).reduce((s, c) => s + (c.billingAmount ?? 0), 0);
     return { totalBilled, totalReceived, outstanding: totalBilled - totalReceived };
   }, [billingRows]);
+
+  const handleExportCsv = () => {
+    const suffix = reportFromDate || reportToDate ? `_${reportFromDate || 'start'}_to_${reportToDate || 'end'}` : '';
+    if (reportView === 'client') {
+      downloadCsv(
+        `candidates-by-client${suffix}.csv`,
+        ['Client', 'Candidates', 'Total Billed', 'Received'],
+        byClient.map((r) => [r.client, r.count, r.billed, r.received])
+      );
+    } else if (reportView === 'month') {
+      downloadCsv(
+        `candidates-by-month${suffix}.csv`,
+        ['Month', 'Candidates', 'Total Billed'],
+        byMonth.map((r) => [r.label, r.count, r.billed])
+      );
+    } else if (reportView === 'recruiter') {
+      downloadCsv(
+        `candidates-by-recruiter${suffix}.csv`,
+        ['Recruiter', 'Closures', 'Total Billed'],
+        byRecruiter.map((r) => [r.recruiter, r.count, r.billed])
+      );
+    } else {
+      downloadCsv(
+        `candidates-billing${suffix}.csv`,
+        ['Candidate', 'Client', 'Billing Type', 'Amount', 'Payment Status'],
+        billingRows.map((c) => [
+          candName(c),
+          c.client ?? '',
+          c.billingType === 'percentage' ? `${c.billingValue}% of CTC` : 'Flat',
+          c.billingAmount ?? 0,
+          c.paymentReceived ? 'Received' : 'Pending',
+        ])
+      );
+    }
+    toast.success('CSV downloaded');
+  };
 
   return (
     <div className="space-y-6">
@@ -453,7 +557,7 @@ export default function CandidatesView() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredCandidates.map((c) => (
+                    {paginatedCandidates.map((c) => (
                       <TableRow key={c.id}>
                         <TableCell className="font-medium">{candName(c)}</TableCell>
                         <TableCell>{c.client ?? '—'}</TableCell>
@@ -523,12 +627,30 @@ export default function CandidatesView() {
               </div>
             )}
           </CardContent>
+          {filteredCandidates.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <p className="text-xs text-muted-foreground">
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCandidates.length)} of {filteredCandidates.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  <ChevronLeft className="size-4" />
+                  Previous
+                </Button>
+                <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                  Next
+                  <ChevronRight className="size-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
       {isAdmin && tab === 'reports' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Select value={reportView} onValueChange={(v) => setReportView(v as typeof reportView)}>
               <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -538,6 +660,19 @@ export default function CandidatesView() {
                 <SelectItem value="billing">Billing-wise</SelectItem>
               </SelectContent>
             </Select>
+            <div className="flex items-center gap-1.5 text-sm">
+              <Label className="text-xs text-muted-foreground">From</Label>
+              <Input type="date" value={reportFromDate} onChange={(e) => setReportFromDate(e.target.value)} className="w-[150px]" />
+              <Label className="text-xs text-muted-foreground">To</Label>
+              <Input type="date" value={reportToDate} onChange={(e) => setReportToDate(e.target.value)} className="w-[150px]" />
+              {(reportFromDate || reportToDate) && (
+                <Button variant="ghost" size="sm" onClick={() => { setReportFromDate(''); setReportToDate(''); }}>Clear</Button>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={handleExportCsv} className="ml-auto">
+              <Download className="size-4" />
+              Export CSV
+            </Button>
           </div>
 
           {reportView === 'client' && (

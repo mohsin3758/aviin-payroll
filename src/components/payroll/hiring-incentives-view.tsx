@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { HandCoins, Loader2, Plus, Settings2, X } from 'lucide-react';
+import { HandCoins, Loader2, Plus, Settings2, X, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useSessionContext } from '@/hooks/session-context';
+import { usePayrollStore } from '@/store/payroll-store';
 
 const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
 
@@ -91,6 +92,7 @@ function empName(e: EmployeeOption | CandidateOption) {
 export default function HiringIncentivesView() {
   const { user } = useSessionContext();
   const isAdmin = user?.role === 'admin';
+  const { setSelectedCandidateId, setActiveView } = usePayrollStore();
   const now = new Date();
 
   const [incentives, setIncentives] = useState<Incentive[]>([]);
@@ -411,11 +413,22 @@ export default function HiringIncentivesView() {
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground max-w-[160px] truncate">{i.reason ?? '—'}</TableCell>
                         <TableCell>
-                          {(i.status === 'pending' || i.status === 'eligible') && (
-                            <Button variant="ghost" size="icon" className="size-7 text-red-500" onClick={() => handleCancel(i.id)}>
-                              <X className="size-4" />
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7"
+                              title="View candidate"
+                              onClick={() => { setSelectedCandidateId(i.candidate.id); setActiveView('candidates'); }}
+                            >
+                              <Eye className="size-4" />
                             </Button>
-                          )}
+                            {(i.status === 'pending' || i.status === 'eligible') && (
+                              <Button variant="ghost" size="icon" className="size-7 text-red-500" onClick={() => handleCancel(i.id)}>
+                                <X className="size-4" />
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}

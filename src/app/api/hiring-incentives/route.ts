@@ -11,7 +11,7 @@ const RECRUITER_SUMMARY = {
 } as const;
 
 const CANDIDATE_SUMMARY = {
-  select: { firstName: true, lastName: true, client: true, role: true, dateOfJoining: true, employmentType: true },
+  select: { id: true, firstName: true, lastName: true, client: true, role: true, dateOfJoining: true, employmentType: true },
 } as const;
 
 // GET /api/hiring-incentives?recruiterId=&candidateId=&status=&month=&year= — admin/hr only.
