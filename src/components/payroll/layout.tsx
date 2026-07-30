@@ -21,6 +21,7 @@ import {
   UserPlus,
   UserMinus,
   LifeBuoy,
+  HandCoins,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -56,6 +57,7 @@ const navItems: NavItem[] = [
   { id: 'salary-slip', label: 'Salary Slips', icon: FileText, roles: ['admin', 'hr'] },
   { id: 'form16', label: 'Form 16', icon: Award, roles: ['admin', 'hr'] },
   { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'hr', 'manager'] },
+  { id: 'hiring-incentives', label: 'Hiring Incentives', icon: HandCoins, roles: ['admin', 'hr'] },
   { id: 'helpdesk', label: 'Help Desk', icon: LifeBuoy },
   { id: 'settings', label: 'Settings', icon: Settings, roles: ['admin', 'hr', 'manager'] },
 ];

@@ -41,6 +41,7 @@ export function buildSalarySlipEmailHtml(slip: SalarySlipData): string {
           ${row('Overtime', fmt(slip.earnings.overtimeAllowance))}
           ${row('Bonus', fmt(slip.earnings.bonus))}
           ${row('Other Earnings', fmt(slip.earnings.otherEarnings))}
+          ${slip.earnings.hiringIncentive > 0 ? row('Hiring Incentive', fmt(slip.earnings.hiringIncentive)) : ''}
           ${row('Total Earnings', fmt(slip.earnings.totalEarnings), true)}
         </table>
       </td>

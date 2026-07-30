@@ -186,6 +186,19 @@ describe("processEmployeePayroll", () => {
     expect(result.deductionsCapped).toBe(false);
   });
 
+  it("nets the full employer PF contribution against take-home Net Pay, matching this company's payroll convention (Net Pay = Gross - Employee PF - ESI - Employer PF Deduction - TDS - PT - LWF)", () => {
+    const emp = buildEmployee();
+    const result = processEmployeePayroll(emp, 7, 2026, 31, 31);
+    const employerPFContribution = result.employerPF + result.employerEPS + result.employerEDLI;
+    expect(employerPFContribution).toBe(result.employeePF); // same 12% rate on the same wage base, by construction
+    const expectedTotalDeductions =
+      result.employeePF + employerPFContribution + result.employeeESI + result.tdsMonthly + result.ptAmount + result.lwfEmployee;
+    expect(result.totalDeductions).toBe(expectedTotalDeductions);
+    expect(result.netSalary).toBe(result.totalEarnings - result.totalDeductions);
+    // Gross Salary and CTC are unaffected — only take-home Net Pay nets against employer PF.
+    expect(result.grossSalary).toBe(result.totalEarnings);
+  });
+
   it("adds computed overtime pay on top of the standing overtimeAllowance", () => {
     const emp = buildEmployee();
     const noOvertime = processEmployeePayroll(emp, 7, 2026, 31, 31, 0);

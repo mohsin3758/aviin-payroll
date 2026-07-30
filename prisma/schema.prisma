@@ -51,6 +51,11 @@ model Company {
   payrollMonth        Int      @default(4)
   payrollYear         Int      @default(2025)
   defaultNoticePeriodDays Int  @default(30)
+  // Fixed one-time recruiter payout rates for the Hiring Incentive feature, keyed by the new
+  // hire's employmentType at close time ("permanent" -> Fte rate, "contractor" -> Contract
+  // rate). Configured from the dedicated Hiring Incentives screen, not the general Settings page.
+  hiringIncentiveFteRate      Float @default(0)
+  hiringIncentiveContractRate Float @default(0)
   // Comma-separated day-of-week numbers that are paid non-working days every week: 0=Sunday..6=Saturday.
   weeklyOffDays       String   @default("0")
   // Admin-configured SMTP, set via Settings so a real deployment doesn't require VPS/env-var
@@ -177,6 +182,8 @@ model Employee {
   salaryRevisions     SalaryRevision[]
   expenseClaims       ExpenseClaim[]
   employeeShifts      EmployeeShift[]
+  hiringIncentivesAsRecruiter HiringIncentive[] @relation("HiringIncentiveRecruiter")
+  hiringIncentivesAsCandidate HiringIncentive[] @relation("HiringIncentiveCandidate")
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
@@ -217,6 +224,40 @@ model SalaryArrear {
 
   @@index([employeeId])
   @@index([payMonth, payYear])
+}
+
+// A one-time cash payout to the recruiting employee for closing (onboarding) a new hire,
+// contingent on the candidate completing 1 month of continuous active employment. Scheduled to
+// pay in the calendar month immediately following the candidate's join month (join month + 1).
+// Mirrors SalaryArrear's "fold a one-off amount into a specific month's payroll run" mechanism,
+// but additionally: (a) folded into grossSalary/ctc, not just totalEarnings/netSalary, since
+// it's a real compensation line item the recruiter sees on their slip; (b) forfeited outright,
+// not merely delayed, if the candidate exits before the 1-month vesting point.
+model HiringIncentive {
+  id              String   @id @default(cuid())
+  recruiterId     String   // Employee who receives the payout
+  candidateId     String   @unique // Employee who was hired; one incentive per hire event
+  employmentType  String   // snapshot of candidate.employmentType at creation (rate lookup key)
+  amount          Float    // snapshot of the configured rate at creation — later rate changes never alter existing records
+  joinDate        DateTime // snapshot of candidate.dateOfJoining at creation, for display/audit
+  eligibleDate    DateTime // joinDate + 1 calendar month — the vesting cutoff
+  payMonth        Int      // 1-12, the month this pays out in (join month + 1)
+  payYear         Int
+  reason          String?
+  status          String   @default("pending") // "pending" | "eligible" | "forfeited" | "paid" | "cancelled"
+  forfeitedReason String?
+  paidInRunId     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  recruiter       Employee    @relation("HiringIncentiveRecruiter", fields: [recruiterId], references: [id])
+  candidate       Employee    @relation("HiringIncentiveCandidate", fields: [candidateId], references: [id])
+  paidInRun       PayrollRun? @relation(fields: [paidInRunId], references: [id])
+
+  @@index([recruiterId])
+  @@index([candidateId])
+  @@index([payMonth, payYear])
+  @@index([status])
 }
 
 model EmployeeLoan {
@@ -391,6 +432,7 @@ model PayrollRun {
   details             PayrollDetail[]
   loanPayments        LoanPayment[]
   arrearsPaid         SalaryArrear[]
+  hiringIncentivesPaid HiringIncentive[]
 
   @@unique([companyId, month, year, runType])
 }
@@ -413,6 +455,7 @@ model PayrollDetail {
   bonus               Float
   otherEarnings       Float
   arrears             Float    @default(0)
+  hiringIncentive     Float    @default(0)
   totalEarnings       Float
   // Deductions
   employeePF          Float

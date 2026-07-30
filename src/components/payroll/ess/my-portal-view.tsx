@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   UserCircle, Loader2, Plus, Trash2, Upload, Download, Printer,
-  FileText, Award, Wallet, PiggyBank, Receipt, Save,
+  FileText, Award, Wallet, PiggyBank, Receipt, Save, HandCoins,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -110,6 +110,7 @@ export default function MyPortalView() {
             <TabsTrigger value="payslip">Payslips</TabsTrigger>
             <TabsTrigger value="form16">Form 16</TabsTrigger>
             <TabsTrigger value="loans">Loans</TabsTrigger>
+            <TabsTrigger value="hiring-incentives">Hiring Incentives</TabsTrigger>
             <TabsTrigger value="investment">Investment Declaration</TabsTrigger>
             <TabsTrigger value="expenses">Expense Claims</TabsTrigger>
           </TabsList>
@@ -121,6 +122,7 @@ export default function MyPortalView() {
           <TabsContent value="payslip" className="space-y-6"><PayslipTab /></TabsContent>
           <TabsContent value="form16" className="space-y-6"><Form16Tab /></TabsContent>
           <TabsContent value="loans" className="space-y-6"><LoansTab /></TabsContent>
+          <TabsContent value="hiring-incentives" className="space-y-6"><HiringIncentivesTab /></TabsContent>
           <TabsContent value="investment" className="space-y-6"><InvestmentTab /></TabsContent>
           <TabsContent value="expenses" className="space-y-6"><ExpensesTab /></TabsContent>
         </Tabs>
@@ -856,6 +858,83 @@ function LoansTab() {
                   <TableCell className="text-right">{fmt(l.emiAmount)}</TableCell>
                   <TableCell className="text-right">{l.remainingMonths} / {l.totalMonths} mo</TableCell>
                   <TableCell><Badge variant="outline" className="capitalize">{l.status}</Badge></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Hiring Incentives Tab (read-only — recruiter's own records)        */
+/* ------------------------------------------------------------------ */
+
+const INCENTIVE_STATUS_BADGE: Record<string, string> = {
+  pending: 'bg-slate-100 text-slate-700 border-slate-200',
+  eligible: 'bg-blue-100 text-blue-800 border-blue-200',
+  paid: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  forfeited: 'bg-red-100 text-red-800 border-red-200',
+  cancelled: 'bg-gray-100 text-gray-600 border-gray-200',
+};
+
+function HiringIncentivesTab() {
+  const [incentives, setIncentives] = useState<{
+    id: string;
+    candidate: { firstName: string; lastName: string | null; employeeCode: string };
+    employmentType: string;
+    amount: number;
+    payMonth: number;
+    payYear: number;
+    status: string;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/ess/hiring-incentives')
+      .then((r) => r.json())
+      .then((d) => setIncentives(d.data ?? []))
+      .catch(() => toast.error('Failed to load hiring incentives'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <Skeleton className="h-40 w-full" />;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <HandCoins className="size-4 text-emerald-600" />
+          My Hiring Incentives
+        </CardTitle>
+        <CardDescription>Payouts for candidates you closed — paid out once they complete 1 month</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {incentives.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No hiring incentives on record.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Candidate</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Pay Month</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {incentives.map((i) => (
+                <TableRow key={i.id}>
+                  <TableCell>{i.candidate.firstName} {i.candidate.lastName ?? ''} ({i.candidate.employeeCode})</TableCell>
+                  <TableCell>{i.employmentType === 'permanent' ? 'FTE' : i.employmentType === 'contractor' ? 'Contract' : i.employmentType}</TableCell>
+                  <TableCell className="text-right">{fmt(i.amount)}</TableCell>
+                  <TableCell>{MONTHS[i.payMonth - 1]} {i.payYear}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={INCENTIVE_STATUS_BADGE[i.status] ?? badge(i.status)}>{i.status}</Badge>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

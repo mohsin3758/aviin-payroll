@@ -131,6 +131,7 @@ export async function getSalarySlipData(employeeId: string, month: number, year:
         overtimeAllowance: payrollDetail.overtimeAllowance,
         bonus: payrollDetail.bonus,
         otherEarnings: payrollDetail.otherEarnings,
+        hiringIncentive: payrollDetail.hiringIncentive,
         totalEarnings: payrollDetail.totalEarnings,
       },
       deductions: {
@@ -189,6 +190,7 @@ export async function getSalarySlipData(employeeId: string, month: number, year:
       overtimeAllowance: result.overtimeAllowance,
       bonus: result.bonus,
       otherEarnings: result.otherEarnings,
+      hiringIncentive: 0, // no processed run yet for this month, so nothing has been paid out
       totalEarnings: result.totalEarnings,
     },
     deductions: {

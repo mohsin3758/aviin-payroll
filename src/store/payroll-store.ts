@@ -13,7 +13,8 @@ export type ViewType =
   | 'my-portal'
   | 'onboarding'
   | 'exit-management'
-  | 'helpdesk';
+  | 'helpdesk'
+  | 'hiring-incentives';
 
 interface PayrollStore {
   activeView: ViewType;

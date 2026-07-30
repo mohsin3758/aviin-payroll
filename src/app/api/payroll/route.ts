@@ -9,6 +9,7 @@ import {
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
 
 // GET /api/payroll - List payroll runs with optional filters
 export async function GET(request: NextRequest) {
@@ -94,7 +95,18 @@ export async function POST(request: NextRequest) {
         where: { paidInRunId: existingRun.id },
         data: { status: "pending", paidInRunId: null },
       });
+      // Reset to "eligible" not "pending" — the vesting decision itself doesn't need
+      // re-litigating on a reprocess, only which run it's attached to.
+      await db.hiringIncentive.updateMany({
+        where: { paidInRunId: existingRun.id },
+        data: { status: "eligible", paidInRunId: null },
+      });
     }
+
+    // Re-evaluate every pending incentive's vesting/forfeiture against each candidate's current
+    // dateOfExit before this run consumes any of them — there is no background job in this app,
+    // so this synchronous refresh is what keeps "eligible" always current.
+    await refreshPendingHiringIncentiveVesting();
 
     const daysInMonth = getDaysInMonth(month, year);
 
@@ -151,6 +163,7 @@ export async function POST(request: NextRequest) {
       bonus: number;
       otherEarnings: number;
       arrears: number;
+      hiringIncentive: number;
       totalEarnings: number;
       employeePF: number;
       employerPF: number;
@@ -167,6 +180,7 @@ export async function POST(request: NextRequest) {
     }> = [];
     const allLoanPayments: { loanId: string; amount: number }[] = [];
     const allArrearIdsPaid: string[] = [];
+    const allHiringIncentiveIdsPaid: string[] = [];
 
     let totalEmployees = 0;
     let totalGrossSalary = 0;
@@ -291,9 +305,21 @@ export async function POST(request: NextRequest) {
         allArrearIdsPaid.push(arrear.id);
       }
 
-      const adjustedTotalEarnings = result.totalEarnings + arrearsAmount;
+      // Hiring incentives this employee has earned as a recruiter, vested and scheduled for
+      // this exact month. Unlike arrears, this is folded into grossSalary/ctc too (below) —
+      // it's a real compensation line item on the recruiter's slip, matching how the company's
+      // own payroll spreadsheet reports it, not a retroactive correction to keep out of Gross.
+      const eligibleIncentives = await db.hiringIncentive.findMany({
+        where: { recruiterId: emp.id, payMonth: month, payYear: year, status: "eligible" },
+      });
+      const hiringIncentiveAmount = eligibleIncentives.reduce((s, i) => s + i.amount, 0);
+      for (const incentive of eligibleIncentives) {
+        allHiringIncentiveIdsPaid.push(incentive.id);
+      }
+
+      const adjustedTotalEarnings = result.totalEarnings + arrearsAmount + hiringIncentiveAmount;
       const adjustedTotalDeductions = result.totalDeductions + loanDeduction;
-      const adjustedNetSalary = result.netSalary - loanDeduction + arrearsAmount;
+      const adjustedNetSalary = result.netSalary - loanDeduction + arrearsAmount + hiringIncentiveAmount;
 
       // Build detail record data
       const detailData = {
@@ -311,6 +337,7 @@ export async function POST(request: NextRequest) {
         bonus: result.bonus,
         otherEarnings: result.otherEarnings,
         arrears: arrearsAmount,
+        hiringIncentive: hiringIncentiveAmount,
         totalEarnings: adjustedTotalEarnings,
         employeePF: result.employeePF,
         employerPF: result.employerPF,
@@ -322,8 +349,9 @@ export async function POST(request: NextRequest) {
         otherDeductions: loanDeduction,
         totalDeductions: adjustedTotalDeductions,
         netSalary: adjustedNetSalary,
-        grossSalary: result.grossSalary,
-        ctc: result.ctc,
+        // Unlike arrears, hiring incentives ARE folded into gross/CTC — see comment above.
+        grossSalary: result.grossSalary + hiringIncentiveAmount,
+        ctc: result.ctc + hiringIncentiveAmount,
       };
 
       details.push(detailData);
@@ -334,7 +362,7 @@ export async function POST(request: NextRequest) {
 
       // Accumulate totals (post-loan-deduction, post-arrears figures)
       totalEmployees += 1;
-      totalGrossSalary += result.grossSalary;
+      totalGrossSalary += result.grossSalary + hiringIncentiveAmount;
       totalDeductions += adjustedTotalDeductions;
       totalNetSalary += adjustedNetSalary;
       totalEmployerPF += result.employerPF;
@@ -437,6 +465,13 @@ export async function POST(request: NextRequest) {
     if (allArrearIdsPaid.length > 0) {
       await db.salaryArrear.updateMany({
         where: { id: { in: allArrearIdsPaid } },
+        data: { status: "paid", paidInRunId: payrollRun.id },
+      });
+    }
+
+    if (allHiringIncentiveIdsPaid.length > 0) {
+      await db.hiringIncentive.updateMany({
+        where: { id: { in: allHiringIncentiveIdsPaid } },
         data: { status: "paid", paidInRunId: payrollRun.id },
       });
     }

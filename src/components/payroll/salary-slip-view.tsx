@@ -86,6 +86,7 @@ interface SalarySlipData {
     overtimeAllowance: number;
     bonus: number;
     otherEarnings: number;
+    hiringIncentive: number;
     totalEarnings: number;
   };
   deductions: {
@@ -458,6 +459,9 @@ export default function SalarySlipView() {
                       <SlipRow label="Overtime" value={slip.earnings.overtimeAllowance} />
                       <SlipRow label="Bonus" value={slip.earnings.bonus} />
                       <SlipRow label="Other Earnings" value={slip.earnings.otherEarnings} />
+                      {slip.earnings.hiringIncentive > 0 && (
+                        <SlipRow label="Hiring Incentive" value={slip.earnings.hiringIncentive} />
+                      )}
                     </TableBody>
                     <TableFooter>
                       <TableRow className="bg-emerald-50">

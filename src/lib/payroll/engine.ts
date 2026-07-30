@@ -535,7 +535,15 @@ export function processEmployeePayroll(
   // reasonable approximation in a normal month, but if attendance-based proration has already
   // reduced totalEarnings to less than the standing deductions (e.g. presentDays=0, unpaid leave,
   // new joiner mid-month), deductions must never exceed what was actually earned that month.
-  const rawTotalDeductions = pfResult.employeePF + esiResult.employeeESI + tdsMonthly + ptAmount + lwfResult.employee;
+  //
+  // Employer PF (employerPF+employerEPS+employerEDLI, always equal to employeePF since both use
+  // the same 12% rate on the same pfWages) is netted against take-home Net Pay here too, matching
+  // this company's own payroll convention (Net Pay = Gross - Employee PF - ESI - Employer PF
+  // Deduction - TDS - PT - LWF) — Gross Salary and CTC still separately report the full employer
+  // cost, this only changes what actually reaches the employee's bank account.
+  const employerPFMonthly = pfResult.employeePF; // Employer matches
+  const rawTotalDeductions =
+    pfResult.employeePF + employerPFMonthly + esiResult.employeeESI + tdsMonthly + ptAmount + lwfResult.employee;
   const totalDeductions = Math.min(rawTotalDeductions, totalEarnings);
   const deductionsCapped = rawTotalDeductions > totalEarnings;
 
@@ -543,7 +551,6 @@ export function processEmployeePayroll(
   const netSalary = totalEarnings - totalDeductions;
 
   // Employer contributions for CTC
-  const employerPFMonthly = pfResult.employeePF; // Employer matches
   const employerESIMonthly = esiResult.employerESI;
 
   const ctcMonthly = totalEarnings + employerPFMonthly + employerESIMonthly + ss.gratuity;
