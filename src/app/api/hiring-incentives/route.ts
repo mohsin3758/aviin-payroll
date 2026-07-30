@@ -6,8 +6,12 @@ import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { computeIncentiveSchedule, refreshPendingHiringIncentiveVesting, resolveIncentiveRate } from "@/lib/payroll/hiring-incentive";
 
-const EMPLOYEE_SUMMARY = {
-  select: { firstName: true, lastName: true, employeeCode: true, designation: true, client: true, dateOfJoining: true },
+const RECRUITER_SUMMARY = {
+  select: { firstName: true, lastName: true, employeeCode: true },
+} as const;
+
+const CANDIDATE_SUMMARY = {
+  select: { firstName: true, lastName: true, client: true, role: true, dateOfJoining: true, employmentType: true },
 } as const;
 
 // GET /api/hiring-incentives?recruiterId=&candidateId=&status=&month=&year= — admin/hr only.
@@ -35,8 +39,8 @@ export async function GET(request: NextRequest) {
     const incentives = await db.hiringIncentive.findMany({
       where,
       include: {
-        recruiter: EMPLOYEE_SUMMARY,
-        candidate: EMPLOYEE_SUMMARY,
+        recruiter: RECRUITER_SUMMARY,
+        candidate: CANDIDATE_SUMMARY,
         paidInRun: { select: { month: true, year: true, status: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -49,27 +53,25 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/hiring-incentives — admin/hr only. Schedules a one-time recruiter payout for
-// successfully closing (onboarding) a candidate. Amount/employmentType/dates are always
-// server-computed from the configured rates and the candidate's real Employee record — never
-// trusted from the client, since this determines a real cash payout.
+// successfully closing (placing) a candidate. The recruiter is a real in-house Employee (the
+// payout runs through their actual payroll); the candidate is a lightweight Candidate record
+// (an externally-placed contract/full-time hire, not an Employee). Amount/dates are always
+// server-computed from the configured rates and the candidate's record — never trusted from
+// the client, since this determines a real cash payout.
 export async function POST(request: NextRequest) {
   try {
     const session = await requireRole(request, ["admin", "hr"]);
     const body = await request.json();
     const parsed = createHiringIncentiveSchema.parse(body);
 
-    if (parsed.recruiterId === parsed.candidateId) {
-      return apiError("The recruiter and the candidate cannot be the same employee.", 400);
-    }
-
     const [recruiter, candidate] = await Promise.all([
       db.employee.findUnique({ where: { id: parsed.recruiterId } }),
-      db.employee.findUnique({ where: { id: parsed.candidateId } }),
+      db.candidate.findUnique({ where: { id: parsed.candidateId } }),
     ]);
     if (!recruiter) return apiError("Recruiter not found.", 404);
     if (!candidate) return apiError("Candidate not found.", 404);
     if (candidate.dateOfExit) {
-      return apiError("Cannot schedule a hiring incentive for a candidate who has already exited.", 400);
+      return apiError("Cannot schedule a hiring incentive for a candidate whose placement has already ended.", 400);
     }
 
     const existingActive = await db.hiringIncentive.findFirst({
@@ -109,7 +111,7 @@ export async function POST(request: NextRequest) {
         monthlySalary: parsed.monthlySalary ?? null,
         annualSalary: parsed.annualSalary ?? null,
       },
-      include: { recruiter: EMPLOYEE_SUMMARY, candidate: EMPLOYEE_SUMMARY },
+      include: { recruiter: RECRUITER_SUMMARY, candidate: CANDIDATE_SUMMARY },
     });
 
     await logAudit({

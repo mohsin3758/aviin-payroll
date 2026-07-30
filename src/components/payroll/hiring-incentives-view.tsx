@@ -56,8 +56,14 @@ interface EmployeeOption {
   employeeCode: string;
   firstName: string;
   lastName: string | null;
-  designation?: string;
+}
+
+interface CandidateOption {
+  id: string;
+  firstName: string;
+  lastName: string | null;
   client?: string | null;
+  role?: string;
   dateOfJoining?: string;
   employmentType?: string;
 }
@@ -65,7 +71,7 @@ interface EmployeeOption {
 interface Incentive {
   id: string;
   recruiter: EmployeeOption;
-  candidate: EmployeeOption;
+  candidate: CandidateOption;
   employmentType: string;
   amount: number;
   joinDate: string;
@@ -78,7 +84,7 @@ interface Incentive {
   status: string;
 }
 
-function empName(e: EmployeeOption) {
+function empName(e: EmployeeOption | CandidateOption) {
   return `${e.firstName} ${e.lastName ?? ''}`.trim();
 }
 
@@ -90,6 +96,7 @@ export default function HiringIncentivesView() {
   const [incentives, setIncentives] = useState<Incentive[]>([]);
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [candidates, setCandidates] = useState<CandidateOption[]>([]);
   const [tab, setTab] = useState<'all' | 'monthly' | 'yearly'>('all');
 
   const [statusFilter, setStatusFilter] = useState('all');
@@ -138,6 +145,15 @@ export default function HiringIncentivesView() {
         setEmployees(json.data ?? []);
       } catch {
         toast.error('Failed to load employees');
+      }
+    }
+    if (candidates.length === 0) {
+      try {
+        const res = await fetch('/api/candidates?status=active');
+        const json = await res.json();
+        setCandidates(json.data ?? []);
+      } catch {
+        toast.error('Failed to load candidates');
       }
     }
   };
@@ -233,8 +249,8 @@ export default function HiringIncentivesView() {
   };
 
   const selectedCandidate = useMemo(
-    () => employees.find((e) => e.id === candidateId) ?? null,
-    [employees, candidateId]
+    () => candidates.find((c) => c.id === candidateId) ?? null,
+    [candidates, candidateId]
   );
 
   const filteredAll = useMemo(
@@ -382,7 +398,7 @@ export default function HiringIncentivesView() {
                         <TableCell className="font-medium">{empName(i.recruiter)}</TableCell>
                         <TableCell>{empName(i.candidate)}</TableCell>
                         <TableCell>{i.candidate.client ?? '—'}</TableCell>
-                        <TableCell>{i.candidate.designation ?? '—'}</TableCell>
+                        <TableCell>{i.candidate.role ?? '—'}</TableCell>
                         <TableCell>{EMPLOYMENT_TYPE_LABEL[i.employmentType] ?? i.employmentType}</TableCell>
                         <TableCell className="text-right">{i.monthlySalary != null ? fmt(i.monthlySalary) : '—'}</TableCell>
                         <TableCell className="text-right">{i.annualSalary != null ? fmt(i.annualSalary) : '—'}</TableCell>
@@ -469,7 +485,7 @@ export default function HiringIncentivesView() {
                           <TableCell className="font-medium">{empName(i.recruiter)}</TableCell>
                           <TableCell>{empName(i.candidate)}</TableCell>
                           <TableCell>{i.candidate.client ?? '—'}</TableCell>
-                          <TableCell>{i.candidate.designation ?? '—'}</TableCell>
+                          <TableCell>{i.candidate.role ?? '—'}</TableCell>
                           <TableCell>{EMPLOYMENT_TYPE_LABEL[i.employmentType] ?? i.employmentType}</TableCell>
                           <TableCell className="text-right">{fmt(i.amount)}</TableCell>
                           <TableCell><Badge variant="outline" className={STATUS_BADGE[i.status]}>{i.status}</Badge></TableCell>
@@ -559,17 +575,22 @@ export default function HiringIncentivesView() {
               <Select value={candidateId} onValueChange={setCandidateId}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Select candidate..." /></SelectTrigger>
                 <SelectContent>
-                  {employees.map((e) => (
-                    <SelectItem key={e.id} value={e.id}>{empName(e)} ({e.employeeCode})</SelectItem>
+                  {candidates.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{empName(c)}{c.client ? ` — ${c.client}` : ''}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {candidates.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No active candidates yet — add one first on the Candidates screen.
+                </p>
+              )}
             </div>
             {selectedCandidate && (
               <div className="rounded-lg border bg-muted/30 p-3 space-y-1 text-sm">
-                <p className="font-medium">{empName(selectedCandidate)} ({selectedCandidate.employeeCode})</p>
+                <p className="font-medium">{empName(selectedCandidate)}</p>
                 <p className="text-muted-foreground text-xs">
-                  Role: {selectedCandidate.designation ?? '—'} · Client: {selectedCandidate.client ?? '—'} · Joined:{' '}
+                  Role: {selectedCandidate.role ?? '—'} · Client: {selectedCandidate.client ?? '—'} · Joined:{' '}
                   {selectedCandidate.dateOfJoining ? new Date(selectedCandidate.dateOfJoining).toLocaleDateString('en-IN') : '—'} · Type:{' '}
                   {EMPLOYMENT_TYPE_LABEL[selectedCandidate.employmentType ?? ''] ?? selectedCandidate.employmentType ?? '—'}
                 </p>

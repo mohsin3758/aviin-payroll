@@ -883,7 +883,7 @@ const INCENTIVE_STATUS_BADGE: Record<string, string> = {
 function HiringIncentivesTab() {
   const [incentives, setIncentives] = useState<{
     id: string;
-    candidate: { firstName: string; lastName: string | null; employeeCode: string; designation?: string; client?: string | null };
+    candidate: { firstName: string; lastName: string | null; role?: string; client?: string | null };
     employmentType: string;
     amount: number;
     payMonth: number;
@@ -930,9 +930,9 @@ function HiringIncentivesTab() {
             <TableBody>
               {incentives.map((i) => (
                 <TableRow key={i.id}>
-                  <TableCell>{i.candidate.firstName} {i.candidate.lastName ?? ''} ({i.candidate.employeeCode})</TableCell>
+                  <TableCell>{i.candidate.firstName} {i.candidate.lastName ?? ''}</TableCell>
                   <TableCell>{i.candidate.client ?? '—'}</TableCell>
-                  <TableCell>{i.candidate.designation ?? '—'}</TableCell>
+                  <TableCell>{i.candidate.role ?? '—'}</TableCell>
                   <TableCell>{i.employmentType === 'permanent' ? 'FTE' : i.employmentType === 'contractor' ? 'Contract' : i.employmentType}</TableCell>
                   <TableCell className="text-right">{fmt(i.amount)}</TableCell>
                   <TableCell>{MONTHS[i.payMonth - 1]} {i.payYear}</TableCell>

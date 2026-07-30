@@ -22,6 +22,7 @@ const OnboardingView = lazy(() => import('@/components/payroll/onboarding-view')
 const ExitManagementView = lazy(() => import('@/components/payroll/exit-management-view'));
 const HelpDeskView = lazy(() => import('@/components/payroll/helpdesk-view'));
 const HiringIncentivesView = lazy(() => import('@/components/payroll/hiring-incentives-view'));
+const CandidatesView = lazy(() => import('@/components/payroll/candidates-view'));
 
 function LoadingFallback() {
   return (
@@ -56,6 +57,7 @@ function ViewRenderer() {
       {activeView === 'exit-management' && <ExitManagementView key={key} />}
       {activeView === 'helpdesk' && <HelpDeskView key={key} />}
       {activeView === 'hiring-incentives' && <HiringIncentivesView key={key} />}
+      {activeView === 'candidates' && <CandidatesView key={key} />}
     </Suspense>
   );
 }

@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     const incentives = await db.hiringIncentive.findMany({
       where: { recruiterId: employeeId },
       include: {
-        candidate: { select: { firstName: true, lastName: true, employeeCode: true, designation: true, client: true } },
+        candidate: { select: { firstName: true, lastName: true, client: true, role: true } },
       },
       orderBy: { createdAt: "desc" },
     });
