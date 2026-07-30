@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { UserPlus, Loader2, Plus, Pencil, LogOut } from 'lucide-react';
+import { UserPlus, Loader2, Plus, Pencil, LogOut, Search, Eye, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -44,11 +44,27 @@ const EMPLOYMENT_TYPE_LABEL: Record<string, string> = {
   contractor: 'Contract',
 };
 
+const INCENTIVE_STATUS_BADGE: Record<string, string> = {
+  pending: 'bg-slate-100 text-slate-700 border-slate-200',
+  eligible: 'bg-blue-100 text-blue-800 border-blue-200',
+  paid: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  forfeited: 'bg-red-100 text-red-800 border-red-200',
+  cancelled: 'bg-gray-100 text-gray-600 border-gray-200',
+};
+
 interface EmployeeOption {
   id: string;
   employeeCode: string;
   firstName: string;
   lastName: string | null;
+}
+
+interface HiringIncentiveSummary {
+  id: string;
+  status: string;
+  amount: number;
+  payMonth: number;
+  payYear: number;
 }
 
 interface Candidate {
@@ -72,6 +88,7 @@ interface Candidate {
   billingAmount: number | null;
   paymentReceived: boolean;
   comment: string | null;
+  hiringIncentive: HiringIncentiveSummary | null;
 }
 
 function candName(c: { firstName: string; lastName: string | null }) {
@@ -104,6 +121,7 @@ export default function CandidatesView() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('active');
+  const [searchQuery, setSearchQuery] = useState('');
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [tab, setTab] = useState<'list' | 'reports'>('list');
   const [reportView, setReportView] = useState<'client' | 'month' | 'recruiter' | 'billing'>('client');
@@ -117,6 +135,10 @@ export default function CandidatesView() {
   const [endingCandidate, setEndingCandidate] = useState<Candidate | null>(null);
   const [endDate, setEndDate] = useState('');
   const [ending, setEnding] = useState(false);
+
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewingCandidate, setViewingCandidate] = useState<Candidate | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchCandidates = useCallback(async () => {
     setLoading(true);
@@ -261,6 +283,35 @@ export default function CandidatesView() {
     }
   };
 
+  const openView = (c: Candidate) => {
+    setViewingCandidate(c);
+    setViewOpen(true);
+  };
+
+  const handleDelete = async (c: Candidate) => {
+    if (!confirm(`Delete ${candName(c)}? This cannot be undone.`)) return;
+    setDeletingId(c.id);
+    try {
+      const res = await fetch(`/api/candidates/${c.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete candidate');
+      toast.success('Candidate deleted');
+      fetchCandidates();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete candidate');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const filteredCandidates = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return candidates;
+    return candidates.filter(
+      (c) => candName(c).toLowerCase().includes(q) || (c.client ?? '').toLowerCase().includes(q)
+    );
+  }, [candidates, searchQuery]);
+
   // ─── Report aggregates ──────────────────────────────────────────────
   const byClient = useMemo(() => {
     const map = new Map<string, { count: number; billed: number; received: number }>();
@@ -328,6 +379,15 @@ export default function CandidatesView() {
         </div>
         {tab === 'list' && (
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name or client..."
+                className="pl-8 w-[220px]"
+              />
+            </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -371,6 +431,8 @@ export default function CandidatesView() {
               <div className="p-6"><Skeleton className="h-32 w-full" /></div>
             ) : candidates.length === 0 ? (
               <p className="text-sm text-muted-foreground py-12 text-center">No candidates on record yet.</p>
+            ) : filteredCandidates.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-12 text-center">No candidates match &quot;{searchQuery}&quot;.</p>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -386,11 +448,12 @@ export default function CandidatesView() {
                       {isAdmin && <TableHead className="text-right">Billing</TableHead>}
                       {isAdmin && <TableHead>Payment</TableHead>}
                       <TableHead>Status</TableHead>
+                      <TableHead>Incentive</TableHead>
                       <TableHead />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {candidates.map((c) => (
+                    {filteredCandidates.map((c) => (
                       <TableRow key={c.id}>
                         <TableCell className="font-medium">{candName(c)}</TableCell>
                         <TableCell>{c.client ?? '—'}</TableCell>
@@ -421,7 +484,19 @@ export default function CandidatesView() {
                           )}
                         </TableCell>
                         <TableCell>
+                          {c.hiringIncentive ? (
+                            <Badge variant="outline" className={INCENTIVE_STATUS_BADGE[c.hiringIncentive.status] ?? ''}>
+                              {c.hiringIncentive.status}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">None</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" className="size-7" onClick={() => openView(c)}>
+                              <Eye className="size-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(c)}>
                               <Pencil className="size-4" />
                             </Button>
@@ -430,6 +505,15 @@ export default function CandidatesView() {
                                 <LogOut className="size-4" />
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-red-500"
+                              disabled={deletingId === c.id}
+                              onClick={() => handleDelete(c)}
+                            >
+                              {deletingId === c.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -748,6 +832,89 @@ export default function CandidatesView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* View (read-only) dialog */}
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+          {viewingCandidate && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{candName(viewingCandidate)}</DialogTitle>
+                <DialogDescription>{viewingCandidate.role} · {viewingCandidate.client ?? 'No client on record'}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <DetailRow label="Phone" value={viewingCandidate.phone ?? '—'} />
+                  <DetailRow label="Email" value={viewingCandidate.email ?? '—'} />
+                  <DetailRow label="Employment Type" value={EMPLOYMENT_TYPE_LABEL[viewingCandidate.employmentType] ?? viewingCandidate.employmentType} />
+                  <DetailRow label="Recruiter" value={viewingCandidate.recruiter ? candName(viewingCandidate.recruiter) : '—'} />
+                  <DetailRow label="Closing Date" value={viewingCandidate.closingDate ? new Date(viewingCandidate.closingDate).toLocaleDateString('en-IN') : '—'} />
+                  <DetailRow label="Date of Joining" value={new Date(viewingCandidate.dateOfJoining).toLocaleDateString('en-IN')} />
+                  <DetailRow label="Probation End Date" value={viewingCandidate.probationEndDate ? new Date(viewingCandidate.probationEndDate).toLocaleDateString('en-IN') : '—'} />
+                  <DetailRow label="Placement End Date" value={viewingCandidate.dateOfExit ? new Date(viewingCandidate.dateOfExit).toLocaleDateString('en-IN') : '—'} />
+                  <DetailRow label="Monthly Salary" value={viewingCandidate.monthlySalary != null ? fmt(viewingCandidate.monthlySalary) : '—'} />
+                  <DetailRow label="Annual Salary (CTC)" value={viewingCandidate.annualSalary != null ? fmt(viewingCandidate.annualSalary) : '—'} />
+                </div>
+
+                {isAdmin && (
+                  <div className="rounded-lg border p-3 space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Client Billing</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <DetailRow
+                        label="Type"
+                        value={viewingCandidate.billingType === 'percentage' ? `${viewingCandidate.billingValue}% of CTC` : viewingCandidate.billingType === 'flat' ? 'Flat amount' : 'None'}
+                      />
+                      <DetailRow label="Amount" value={viewingCandidate.billingAmount != null ? fmt(viewingCandidate.billingAmount) : '—'} />
+                    </div>
+                    {viewingCandidate.billingAmount != null && (
+                      <Badge variant="outline" className={viewingCandidate.paymentReceived ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'}>
+                        {viewingCandidate.paymentReceived ? 'Payment Received' : 'Payment Pending'}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+
+                <div className="rounded-lg border p-3 space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Hiring Incentive</p>
+                  {viewingCandidate.hiringIncentive ? (
+                    <div className="flex items-center justify-between">
+                      <span>{fmt(viewingCandidate.hiringIncentive.amount)} — {MONTHS[viewingCandidate.hiringIncentive.payMonth - 1]} {viewingCandidate.hiringIncentive.payYear}</span>
+                      <Badge variant="outline" className={INCENTIVE_STATUS_BADGE[viewingCandidate.hiringIncentive.status] ?? ''}>
+                        {viewingCandidate.hiringIncentive.status}
+                      </Badge>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground">No hiring incentive scheduled for this candidate.</p>
+                  )}
+                </div>
+
+                {viewingCandidate.comment && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Comment</p>
+                    <p className="text-sm">{viewingCandidate.comment}</p>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
+                <Button onClick={() => { setViewOpen(false); openEdit(viewingCandidate); }} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  <Pencil className="size-4" />
+                  Edit
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-medium">{value}</p>
     </div>
   );
 }

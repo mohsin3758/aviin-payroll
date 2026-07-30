@@ -5,8 +5,12 @@ import { getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { computeBillingAmount } from "@/lib/candidate-billing";
+import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
 
 const RECRUITER_SUMMARY = { select: { firstName: true, lastName: true, employeeCode: true } } as const;
+const HIRING_INCENTIVE_SUMMARY = {
+  select: { id: true, status: true, amount: true, payMonth: true, payYear: true },
+} as const;
 const BILLING_FIELDS = ["billingType", "billingValue", "paymentReceived"] as const;
 
 function withBillingAmount<T extends { billingType: string | null; billingValue: number | null; annualSalary: number | null }>(
@@ -45,6 +49,10 @@ export async function GET(request: NextRequest) {
   try {
     const session = await requireRole(request, ["admin", "hr"]);
     const isAdmin = session.role === "admin";
+    // The Candidates screen shows each candidate's linked incentive status directly — refresh
+    // it here too, not just on the Hiring Incentives screen, so it's never stale regardless of
+    // which screen an admin/hr checks first.
+    await refreshPendingHiringIncentiveVesting();
     const { searchParams } = request.nextUrl;
     const status = searchParams.get("status");
 
@@ -54,7 +62,7 @@ export async function GET(request: NextRequest) {
 
     const candidates = await db.candidate.findMany({
       where,
-      include: { recruiter: RECRUITER_SUMMARY },
+      include: { recruiter: RECRUITER_SUMMARY, hiringIncentive: HIRING_INCENTIVE_SUMMARY },
       orderBy: { createdAt: "desc" },
     });
 
@@ -78,7 +86,7 @@ export async function POST(request: NextRequest) {
     const companyId = await getDefaultCompanyId();
     const candidate = await db.candidate.create({
       data: { ...data, companyId },
-      include: { recruiter: RECRUITER_SUMMARY },
+      include: { recruiter: RECRUITER_SUMMARY, hiringIncentive: HIRING_INCENTIVE_SUMMARY },
     });
 
     await logAudit({

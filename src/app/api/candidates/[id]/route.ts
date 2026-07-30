@@ -5,8 +5,12 @@ import { apiError, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { computeBillingAmount } from "@/lib/candidate-billing";
+import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
 
 const RECRUITER_SUMMARY = { select: { firstName: true, lastName: true, employeeCode: true } } as const;
+const HIRING_INCENTIVE_SUMMARY = {
+  select: { id: true, status: true, amount: true, payMonth: true, payYear: true },
+} as const;
 const BILLING_FIELDS = ["billingType", "billingValue", "paymentReceived"] as const;
 
 type Params = { params: Promise<{ id: string }> };
@@ -50,10 +54,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const parsed = updateCandidateSchema.parse(body);
     const data = isAdmin ? parsed : stripBillingFields(parsed);
 
-    const candidate = await db.candidate.update({
+    await db.candidate.update({ where: { id }, data });
+
+    // Recording an end date (or any other edit) can change whether this candidate's pending
+    // incentive should now be forfeited — re-evaluate before building the response, so a
+    // placement-end action is reflected immediately rather than waiting for some other screen
+    // to happen to refresh it first.
+    await refreshPendingHiringIncentiveVesting();
+
+    const candidate = await db.candidate.findUniqueOrThrow({
       where: { id },
-      data,
-      include: { recruiter: RECRUITER_SUMMARY },
+      include: { recruiter: RECRUITER_SUMMARY, hiringIncentive: HIRING_INCENTIVE_SUMMARY },
     });
 
     await logAudit({ session, action: "update", entity: "Candidate", entityId: id });
