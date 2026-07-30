@@ -30,6 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useSessionContext } from '@/hooks/session-context';
 
 const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
 
@@ -98,6 +99,8 @@ const emptyForm = {
 };
 
 export default function CandidatesView() {
+  const { user } = useSessionContext();
+  const isAdmin = user?.role === 'admin';
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('active');
@@ -341,19 +344,21 @@ export default function CandidatesView() {
         )}
       </div>
 
-      <div className="flex gap-2 border-b">
-        {(['list', 'reports'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {t === 'list' ? 'Candidates' : 'Reports'}
-          </button>
-        ))}
-      </div>
+      {isAdmin && (
+        <div className="flex gap-2 border-b">
+          {(['list', 'reports'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === t ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t === 'list' ? 'Candidates' : 'Reports'}
+            </button>
+          ))}
+        </div>
+      )}
 
       {tab === 'list' && (
         <Card>
@@ -378,8 +383,8 @@ export default function CandidatesView() {
                       <TableHead>Recruiter</TableHead>
                       <TableHead>Closed</TableHead>
                       <TableHead>Joined</TableHead>
-                      <TableHead className="text-right">Billing</TableHead>
-                      <TableHead>Payment</TableHead>
+                      {isAdmin && <TableHead className="text-right">Billing</TableHead>}
+                      {isAdmin && <TableHead>Payment</TableHead>}
                       <TableHead>Status</TableHead>
                       <TableHead />
                     </TableRow>
@@ -394,16 +399,20 @@ export default function CandidatesView() {
                         <TableCell>{c.recruiter ? candName(c.recruiter) : '—'}</TableCell>
                         <TableCell>{c.closingDate ? new Date(c.closingDate).toLocaleDateString('en-IN') : '—'}</TableCell>
                         <TableCell>{new Date(c.dateOfJoining).toLocaleDateString('en-IN')}</TableCell>
-                        <TableCell className="text-right">{c.billingAmount != null ? fmt(c.billingAmount) : '—'}</TableCell>
-                        <TableCell>
-                          {c.billingAmount == null ? (
-                            '—'
-                          ) : c.paymentReceived ? (
-                            <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Received</Badge>
-                          ) : (
-                            <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">Pending</Badge>
-                          )}
-                        </TableCell>
+                        {isAdmin && (
+                          <TableCell className="text-right">{c.billingAmount != null ? fmt(c.billingAmount) : '—'}</TableCell>
+                        )}
+                        {isAdmin && (
+                          <TableCell>
+                            {c.billingAmount == null ? (
+                              '—'
+                            ) : c.paymentReceived ? (
+                              <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Received</Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">Pending</Badge>
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell>
                           {c.dateOfExit ? (
                             <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Ended</Badge>
@@ -433,7 +442,7 @@ export default function CandidatesView() {
         </Card>
       )}
 
-      {tab === 'reports' && (
+      {isAdmin && tab === 'reports' && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Select value={reportView} onValueChange={(v) => setReportView(v as typeof reportView)}>
@@ -668,38 +677,40 @@ export default function CandidatesView() {
                 <Input type="number" min="0" value={form.annualSalary} onChange={(e) => setForm({ ...form, annualSalary: e.target.value })} placeholder="e.g. 540000" />
               </div>
             </div>
-            <div className="rounded-lg border p-3 space-y-3">
-              <Label className="text-sm font-medium">Client Billing (one-time placement fee)</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <Select value={form.billingType} onValueChange={(v) => setForm({ ...form, billingType: v })}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No billing charge</SelectItem>
-                    <SelectItem value="percentage">Percentage of CTC</SelectItem>
-                    <SelectItem value="flat">Flat amount</SelectItem>
-                  </SelectContent>
-                </Select>
+            {isAdmin && (
+              <div className="rounded-lg border p-3 space-y-3">
+                <Label className="text-sm font-medium">Client Billing (one-time placement fee)</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <Select value={form.billingType} onValueChange={(v) => setForm({ ...form, billingType: v })}>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No billing charge</SelectItem>
+                      <SelectItem value="percentage">Percentage of CTC</SelectItem>
+                      <SelectItem value="flat">Flat amount</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {form.billingType !== 'none' && (
+                    <Input
+                      type="number"
+                      min="0"
+                      value={form.billingValue}
+                      onChange={(e) => setForm({ ...form, billingValue: e.target.value })}
+                      placeholder={form.billingType === 'percentage' ? 'e.g. 8.33 (%)' : 'e.g. 50000 (₹)'}
+                    />
+                  )}
+                </div>
                 {form.billingType !== 'none' && (
-                  <Input
-                    type="number"
-                    min="0"
-                    value={form.billingValue}
-                    onChange={(e) => setForm({ ...form, billingValue: e.target.value })}
-                    placeholder={form.billingType === 'percentage' ? 'e.g. 8.33 (%)' : 'e.g. 50000 (₹)'}
-                  />
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="paymentReceived"
+                      checked={form.paymentReceived}
+                      onCheckedChange={(v) => setForm({ ...form, paymentReceived: !!v })}
+                    />
+                    <Label htmlFor="paymentReceived" className="cursor-pointer font-normal">Payment received from client</Label>
+                  </div>
                 )}
               </div>
-              {form.billingType !== 'none' && (
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="paymentReceived"
-                    checked={form.paymentReceived}
-                    onCheckedChange={(v) => setForm({ ...form, paymentReceived: !!v })}
-                  />
-                  <Label htmlFor="paymentReceived" className="cursor-pointer font-normal">Payment received from client</Label>
-                </div>
-              )}
-            </div>
+            )}
             <div className="space-y-1.5">
               <Label>Comment / Notes</Label>
               <Textarea value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} rows={2} />

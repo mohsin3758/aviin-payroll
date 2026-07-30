@@ -7,14 +7,38 @@ import { logAudit } from "@/lib/audit";
 import { computeBillingAmount } from "@/lib/candidate-billing";
 
 const RECRUITER_SUMMARY = { select: { firstName: true, lastName: true, employeeCode: true } } as const;
+const BILLING_FIELDS = ["billingType", "billingValue", "paymentReceived"] as const;
 
 type Params = { params: Promise<{ id: string }> };
 
+function stripBillingFields<T extends Record<string, unknown>>(data: T): T {
+  const stripped = { ...data };
+  for (const field of BILLING_FIELDS) {
+    delete stripped[field];
+  }
+  return stripped;
+}
+
+function redactBillingIfNotAdmin<T extends { billingType?: unknown; billingValue?: unknown; billingAmount?: unknown; paymentReceived?: unknown }>(
+  candidate: T,
+  isAdmin: boolean
+): T {
+  if (isAdmin) return candidate;
+  const redacted = { ...candidate };
+  delete redacted.billingType;
+  delete redacted.billingValue;
+  delete redacted.billingAmount;
+  delete redacted.paymentReceived;
+  return redacted;
+}
+
 // PUT /api/candidates/[id] — admin/hr only. Typically used to record an end date (contract
-// ended / placement over), billing/payment details, or correct other details.
+// ended / placement over) or correct details. Client billing is admin-only (both writing and
+// reading it) — an hr session's request silently has billing fields dropped, never applied.
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const session = await requireRole(request, ["admin", "hr"]);
+    const isAdmin = session.role === "admin";
     const { id } = await params;
 
     const existing = await db.candidate.findUnique({ where: { id } });
@@ -24,16 +48,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
     const body = await request.json();
     const parsed = updateCandidateSchema.parse(body);
+    const data = isAdmin ? parsed : stripBillingFields(parsed);
 
     const candidate = await db.candidate.update({
       where: { id },
-      data: parsed,
+      data,
       include: { recruiter: RECRUITER_SUMMARY },
     });
 
     await logAudit({ session, action: "update", entity: "Candidate", entityId: id });
 
-    return NextResponse.json({ ...candidate, billingAmount: computeBillingAmount(candidate) });
+    const withBilling = { ...candidate, billingAmount: computeBillingAmount(candidate) };
+    return NextResponse.json(redactBillingIfNotAdmin(withBilling, isAdmin));
   } catch (error) {
     return handleApiError(error, "update candidate");
   }
