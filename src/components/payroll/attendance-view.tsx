@@ -20,6 +20,7 @@ import {
 
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
+import { istDateOnly } from '@/lib/date-ist';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -147,12 +148,6 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function nowInIST(): Date {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const utcOffset = now.getTimezoneOffset() * 60 * 1000;
-  return new Date(now.getTime() + istOffset + utcOffset);
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -315,7 +310,7 @@ export default function AttendanceView() {
   const fetchTodayPunch = useCallback(async (empId: string) => {
     if (!empId) { setTodayPunch(null); return; }
     try {
-      const today = nowInIST().toISOString().split('T')[0];
+      const today = istDateOnly().toISOString().split('T')[0];
       const res = await fetch(`/api/attendance?employeeId=${empId}&date=${today}`);
       if (!res.ok) return;
       const json = await res.json();
@@ -337,7 +332,7 @@ export default function AttendanceView() {
 
   // ---- KPI Summary ----
   const summary = useMemo(() => {
-    const today = nowInIST().toISOString().split('T')[0];
+    const today = istDateOnly().toISOString().split('T')[0];
     const todayRecords = filterEmployeeId === 'all'
       ? attendanceRecords.filter((r) => r.date.startsWith(today))
       : attendanceRecords.filter((r) => r.date.startsWith(today) && r.employeeId === filterEmployeeId);
@@ -711,7 +706,7 @@ export default function AttendanceView() {
           {/* Mark Attendance Button — hidden for employee role: POST /api/attendance already
               requires admin/hr/manager server-side, so this always 403'd for employee anyway. */}
           {!isEmployeeRole && (
-            <Button variant="outline" onClick={() => { setMarkDate(nowInIST().toISOString().split('T')[0]); setMarkDialogOpen(true); }}>
+            <Button variant="outline" onClick={() => { setMarkDate(istDateOnly().toISOString().split('T')[0]); setMarkDialogOpen(true); }}>
               <Pencil className="size-4" />
               Mark Attendance
             </Button>
