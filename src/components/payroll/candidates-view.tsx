@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { UserPlus, Loader2, Plus, Pencil, LogOut, Search, Eye, Trash2, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { UserPlus, Loader2, Plus, Pencil, LogOut, Search, Eye, Trash2, Download, ChevronLeft, ChevronRight, AlertTriangle, History, IndianRupee } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -110,6 +110,37 @@ interface Candidate {
   hiringIncentive: HiringIncentiveSummary | null;
 }
 
+interface HistoryEntry {
+  id: string;
+  action: string;
+  userEmail: string;
+  details: Record<string, { from: unknown; to: unknown }> | null;
+  createdAt: string;
+}
+
+const FIELD_LABEL: Record<string, string> = {
+  billingType: 'Billing Type',
+  billingValue: 'Billing Value',
+  paymentReceived: 'Payment Received',
+  monthlySalary: 'Monthly Salary',
+  annualSalary: 'Annual Salary',
+};
+
+function formatHistoryValue(field: string, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (field === 'paymentReceived') return value ? 'Received' : 'Pending';
+  if (field === 'monthlySalary' || field === 'annualSalary') return fmt(Number(value));
+  return String(value);
+}
+
+function isProbationEndingSoon(c: { dateOfExit: string | null; probationEndDate: string | null }): boolean {
+  if (c.dateOfExit || !c.probationEndDate) return false;
+  const end = new Date(c.probationEndDate).getTime();
+  const now = Date.now();
+  const in30 = now + 30 * 24 * 60 * 60 * 1000;
+  return end >= now && end <= in30;
+}
+
 function candName(c: { firstName: string; lastName: string | null }) {
   return `${c.firstName} ${c.lastName ?? ''}`.trim();
 }
@@ -163,6 +194,13 @@ export default function CandidatesView() {
   const [viewingCandidate, setViewingCandidate] = useState<Candidate | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const [historyItems, setHistoryItems] = useState<HistoryEntry[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [probationOnly, setProbationOnly] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [markingPaid, setMarkingPaid] = useState(false);
+
   const fetchCandidates = useCallback(async () => {
     setLoading(true);
     try {
@@ -194,7 +232,22 @@ export default function CandidatesView() {
   // Reset to page 1 whenever the visible set of candidates could change shape.
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, statusFilter]);
+    setSelectedIds(new Set());
+  }, [searchQuery, statusFilter, probationOnly]);
+
+  // Fetch this candidate's audit history whenever the View dialog opens on a new candidate.
+  useEffect(() => {
+    if (!viewOpen || !viewingCandidate) {
+      setHistoryItems(null);
+      return;
+    }
+    setHistoryLoading(true);
+    fetch(`/api/candidates/${viewingCandidate.id}/history`)
+      .then((r) => r.json())
+      .then((j) => setHistoryItems(j.data ?? []))
+      .catch(() => setHistoryItems([]))
+      .finally(() => setHistoryLoading(false));
+  }, [viewOpen, viewingCandidate]);
 
   // Cross-link from the Hiring Incentives screen: if a candidate was chosen there, jump
   // straight to its View dialog here, regardless of the active/ended filter, then clear the
@@ -355,11 +408,22 @@ export default function CandidatesView() {
 
   const filteredCandidates = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return candidates;
-    return candidates.filter(
-      (c) => candName(c).toLowerCase().includes(q) || (c.client ?? '').toLowerCase().includes(q)
-    );
-  }, [candidates, searchQuery]);
+    let result = candidates;
+    if (q) {
+      result = result.filter(
+        (c) => candName(c).toLowerCase().includes(q) || (c.client ?? '').toLowerCase().includes(q)
+      );
+    }
+    if (probationOnly) {
+      result = result.filter(isProbationEndingSoon);
+    }
+    return result;
+  }, [candidates, searchQuery, probationOnly]);
+
+  const probationSoonCount = useMemo(
+    () => candidates.filter(isProbationEndingSoon).length,
+    [candidates]
+  );
 
   const totalPages = Math.max(1, Math.ceil(filteredCandidates.length / PAGE_SIZE));
   const paginatedCandidates = useMemo(
@@ -467,6 +531,86 @@ export default function CandidatesView() {
     toast.success('CSV downloaded');
   };
 
+  const handleExportListCsv = () => {
+    const headers = [
+      'Name', 'Client', 'Role', 'Type', 'Recruiter', 'Closing Date', 'Date of Joining',
+      'Probation End Date', 'Placement End Date', 'Monthly Salary', 'Annual Salary',
+      ...(isAdmin ? ['Billing Type', 'Billing Amount', 'Payment Status'] : []),
+      'Status', 'Incentive Status',
+    ];
+    const rows = filteredCandidates.map((c) => [
+      candName(c),
+      c.client ?? '',
+      c.role,
+      EMPLOYMENT_TYPE_LABEL[c.employmentType] ?? c.employmentType,
+      c.recruiter ? candName(c.recruiter) : '',
+      c.closingDate ? new Date(c.closingDate).toLocaleDateString('en-IN') : '',
+      new Date(c.dateOfJoining).toLocaleDateString('en-IN'),
+      c.probationEndDate ? new Date(c.probationEndDate).toLocaleDateString('en-IN') : '',
+      c.dateOfExit ? new Date(c.dateOfExit).toLocaleDateString('en-IN') : '',
+      c.monthlySalary ?? '',
+      c.annualSalary ?? '',
+      ...(isAdmin
+        ? [
+            c.billingType === 'percentage' ? `${c.billingValue}% of CTC` : c.billingType === 'flat' ? 'Flat' : '',
+            c.billingAmount ?? '',
+            c.billingAmount != null ? (c.paymentReceived ? 'Received' : 'Pending') : '',
+          ]
+        : []),
+      c.dateOfExit ? 'Ended' : 'Active',
+      c.hiringIncentive ? c.hiringIncentive.status : 'None',
+    ]);
+    downloadCsv(`candidates${statusFilter !== 'all' ? `-${statusFilter}` : ''}.csv`, headers, rows);
+    toast.success('CSV downloaded');
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllOnPage = () => {
+    const pageIds = paginatedCandidates.map((c) => c.id);
+    const allSelected = pageIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const handleMarkSelectedPaid = async () => {
+    if (selectedIds.size === 0) return;
+    setMarkingPaid(true);
+    try {
+      const res = await fetch('/api/candidates/bulk-payment', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidateIds: [...selectedIds] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update payments');
+      toast.success(
+        `Marked ${data.updated} candidate${data.updated === 1 ? '' : 's'} as paid` +
+          (data.skipped > 0 ? ` (${data.skipped} skipped — no unpaid billing charge)` : '')
+      );
+      setSelectedIds(new Set());
+      fetchCandidates();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update payments');
+    } finally {
+      setMarkingPaid(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -500,6 +644,10 @@ export default function CandidatesView() {
                 <SelectItem value="all">All</SelectItem>
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={handleExportListCsv}>
+              <Download className="size-4" />
+              Export CSV
+            </Button>
             <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={openAdd}>
               <Plus className="size-4" />
               Add Candidate
@@ -507,6 +655,24 @@ export default function CandidatesView() {
           </div>
         )}
       </div>
+
+      {tab === 'list' && probationSoonCount > 0 && (
+        <button
+          onClick={() => setProbationOnly((v) => !v)}
+          className={`w-full flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm text-left transition-colors ${
+            probationOnly
+              ? 'bg-amber-100 border-amber-300 text-amber-900'
+              : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+          }`}
+        >
+          <AlertTriangle className="size-4 shrink-0" />
+          <span>
+            <strong>{probationSoonCount}</strong> active candidate{probationSoonCount === 1 ? '' : 's'} with probation ending in the
+            next 30 days.
+          </span>
+          <span className="ml-auto text-xs font-medium underline">{probationOnly ? 'Clear filter' : 'Show only these'}</span>
+        </button>
+      )}
 
       {isAdmin && (
         <div className="flex gap-2 border-b">
@@ -526,9 +692,17 @@ export default function CandidatesView() {
 
       {tab === 'list' && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Candidates</CardTitle>
-            <CardDescription>Name, client, role, billing, and placement dates</CardDescription>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-base">Candidates</CardTitle>
+              <CardDescription>Name, client, role, billing, and placement dates</CardDescription>
+            </div>
+            {isAdmin && selectedIds.size > 0 && (
+              <Button size="sm" onClick={handleMarkSelectedPaid} disabled={markingPaid} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                {markingPaid ? <Loader2 className="size-4 animate-spin" /> : <IndianRupee className="size-4" />}
+                Mark {selectedIds.size} as Paid
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
@@ -542,6 +716,15 @@ export default function CandidatesView() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      {isAdmin && (
+                        <TableHead className="w-8">
+                          <Checkbox
+                            checked={paginatedCandidates.length > 0 && paginatedCandidates.every((c) => selectedIds.has(c.id))}
+                            onCheckedChange={toggleSelectAllOnPage}
+                            aria-label="Select all on page"
+                          />
+                        </TableHead>
+                      )}
                       <TableHead>Name</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Role</TableHead>
@@ -558,8 +741,18 @@ export default function CandidatesView() {
                   </TableHeader>
                   <TableBody>
                     {paginatedCandidates.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell className="font-medium">{candName(c)}</TableCell>
+                      <TableRow key={c.id} className={isProbationEndingSoon(c) ? 'bg-amber-50' : undefined}>
+                        {isAdmin && (
+                          <TableCell>
+                            <Checkbox checked={selectedIds.has(c.id)} onCheckedChange={() => toggleSelected(c.id)} aria-label={`Select ${candName(c)}`} />
+                          </TableCell>
+                        )}
+                        <TableCell className="font-medium">
+                          {candName(c)}
+                          {isProbationEndingSoon(c) && (
+                            <AlertTriangle className="inline-block ml-1.5 size-3.5 text-amber-600 align-text-top" />
+                          )}
+                        </TableCell>
                         <TableCell>{c.client ?? '—'}</TableCell>
                         <TableCell>{c.role}</TableCell>
                         <TableCell>{EMPLOYMENT_TYPE_LABEL[c.employmentType] ?? c.employmentType}</TableCell>
@@ -1029,6 +1222,41 @@ export default function CandidatesView() {
                     <p className="text-sm">{viewingCandidate.comment}</p>
                   </div>
                 )}
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <History className="size-3.5" />
+                    Change History
+                  </p>
+                  {historyLoading ? (
+                    <Skeleton className="h-16 w-full" />
+                  ) : !historyItems || historyItems.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">No changes recorded yet.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {historyItems.map((h) => (
+                        <div key={h.id} className="rounded-lg border p-2.5 text-xs space-y-1">
+                          <div className="flex items-center justify-between text-muted-foreground">
+                            <span>{h.userEmail} · {h.action}</span>
+                            <span>{new Date(h.createdAt).toLocaleString('en-IN')}</span>
+                          </div>
+                          {h.details && Object.keys(h.details).length > 0 ? (
+                            <ul className="space-y-0.5">
+                              {Object.entries(h.details).map(([field, change]) => (
+                                <li key={field}>
+                                  <span className="font-medium">{FIELD_LABEL[field] ?? field}:</span>{' '}
+                                  {formatHistoryValue(field, change.from)} → {formatHistoryValue(field, change.to)}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-muted-foreground italic">No field-level detail recorded.</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>

@@ -135,6 +135,13 @@ function formatTime(dateStr: string | null): string {
   return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
+function formatElapsed(fromMs: number, toMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor((toMs - fromMs) / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -218,6 +225,7 @@ export default function AttendanceView() {
   // ---- State: Live Clock ----
   const [currentTime, setCurrentTime] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('');
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   // ---- State: Punch ----
   const [punchEmployeeId, setPunchEmployeeId] = useState<string>('');
@@ -264,6 +272,7 @@ export default function AttendanceView() {
       const now = new Date();
       setCurrentTime(now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }));
       setCurrentDate(now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
+      setNowMs(now.getTime());
     };
     tick();
     const interval = setInterval(tick, 1000);
@@ -800,12 +809,19 @@ export default function AttendanceView() {
                 <span className="text-muted-foreground">Punched Out:</span>
                 <span className="font-medium">{todayPunch.punchOut ? formatTime(todayPunch.punchOut) : 'Not yet'}</span>
               </div>
-              {todayPunch.totalHours != null && (
+              {todayPunch.totalHours != null ? (
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground">Hours:</span>
                   <span className="font-medium">{todayPunch.totalHours}h</span>
                 </div>
-              )}
+              ) : todayPunch.punchIn ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Hours so far:</span>
+                  <span className="font-medium font-mono tabular-nums text-emerald-700">
+                    {formatElapsed(new Date(todayPunch.punchIn).getTime(), nowMs)}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">Method:</span>
                 <Badge variant="outline" className={METHOD_BADGE[todayPunch.punchInMethod ?? 'manual']}>

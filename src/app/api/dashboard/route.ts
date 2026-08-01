@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-utils";
+import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,6 +12,12 @@ export async function GET(request: NextRequest) {
     // figures, not one named person's data). Employee gets the generic company-pulse counts
     // only. The Dashboard nav item itself stays visible to every role; this scopes the data.
     const isElevated = session.role === "admin" || session.role === "hr" || session.role === "manager";
+    // Hiring Incentives/Candidates are admin/hr-only screens (manager has no nav access to
+    // either), so their dashboard widget data is scoped tighter than the general isElevated tier.
+    const canSeeRecruitment = session.role === "admin" || session.role === "hr";
+    if (canSeeRecruitment) {
+      await refreshPendingHiringIncentiveVesting();
+    }
 
     // --- Date helpers for today ---
     const now = new Date();
@@ -22,6 +29,7 @@ export async function GET(request: NextRequest) {
     const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
     const startOfQuarter = new Date(now.getFullYear(), quarterStartMonth, 1);
+    const in30Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30, 23, 59, 59, 999);
 
     // Run all independent queries in parallel. Financial/analytics queries are skipped
     // entirely (not just redacted after the fact) for a non-elevated caller — no reason to
@@ -38,6 +46,8 @@ export async function GET(request: NextRequest) {
       employeesInNotice,
       exitsThisMonth,
       exitsThisQuarter,
+      eligibleIncentives,
+      probationEndingSoon,
     ] = await Promise.all([
       // 1. Total active employees
       db.employee.count({
@@ -109,6 +119,18 @@ export async function GET(request: NextRequest) {
 
       // 11. Attrition — actually exited this quarter
       !isElevated ? Promise.resolve(0) : db.employee.count({ where: { dateOfExit: { gte: startOfQuarter, lt: startOfNextMonth } } }),
+
+      // 12. Hiring incentives vested and ready to pay out (not yet processed in a payroll run)
+      !canSeeRecruitment
+        ? Promise.resolve({ _count: 0, _sum: { amount: null } })
+        : db.hiringIncentive.aggregate({ where: { status: "eligible" }, _count: true, _sum: { amount: true } }),
+
+      // 13. Active candidates whose probation ends within the next 30 days
+      !canSeeRecruitment
+        ? Promise.resolve(0)
+        : db.candidate.count({
+            where: { dateOfExit: null, probationEndDate: { gte: startOfDay, lte: in30Days } },
+          }),
     ]);
 
     // Build monthly payroll summary from latest run
@@ -158,6 +180,13 @@ export async function GET(request: NextRequest) {
         exitsThisMonth,
         exitsThisQuarter,
       },
+      recruitment: canSeeRecruitment
+        ? {
+            eligibleIncentiveCount: eligibleIncentives._count,
+            eligibleIncentiveTotal: eligibleIncentives._sum.amount ?? 0,
+            probationEndingSoonCount: probationEndingSoon,
+          }
+        : null,
       recentPayrollRuns: recentPayrollRuns.map((r) => ({
         id: r.id,
         month: r.month,

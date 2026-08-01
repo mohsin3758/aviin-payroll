@@ -29,6 +29,8 @@ import {
   Clock,
   LogOut,
   TrendingDown,
+  UserPlus,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   PieChart,
@@ -43,6 +45,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { usePayrollStore } from '@/store/payroll-store';
+import { useSessionContext } from '@/hooks/session-context';
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -99,6 +102,11 @@ interface DashboardData {
     exitsThisQuarter: number;
   };
   recentPayrollRuns: PayrollRunRow[];
+  recruitment: {
+    eligibleIncentiveCount: number;
+    eligibleIncentiveTotal: number;
+    probationEndingSoonCount: number;
+  } | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -126,6 +134,12 @@ const statusBadge: Record<string, string> = {
 
 export default function DashboardView() {
   const { setActiveView, setSelectedPayrollRunId } = usePayrollStore();
+  const { user } = useSessionContext();
+  // Mirrors the sidebar's own nav-role gates (layout.tsx) — a screen hidden from the sidebar
+  // for a role must not be reachable via a Dashboard shortcut either. isElevated matches
+  // 'reports'/'exit-management' (admin/hr/manager); isPayrollAdmin matches 'payroll' (admin/hr).
+  const isElevated = user?.role === 'admin' || user?.role === 'hr' || user?.role === 'manager';
+  const isPayrollAdmin = user?.role === 'admin' || user?.role === 'hr';
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -262,8 +276,9 @@ export default function DashboardView() {
   return (
     <div className="space-y-6">
       {/* ============================================================ */}
-      {/*  1. KPI Cards Row                                            */}
+      {/*  1. KPI Cards Row — company-wide figures, admin/hr/manager only */}
       {/* ============================================================ */}
+      {isElevated && (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Total Employees */}
         <Card className="bg-white rounded-xl border shadow-sm">
@@ -331,6 +346,7 @@ export default function DashboardView() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* ============================================================ */}
       {/*  1b. Company Calendar — visible to every role                */}
@@ -366,8 +382,9 @@ export default function DashboardView() {
       )}
 
       {/* ============================================================ */}
-      {/*  2. Charts Row                                               */}
+      {/*  2. Charts Row — admin/hr/manager only                        */}
       {/* ============================================================ */}
+      {isElevated && (
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Department Distribution - PieChart */}
         <Card className="bg-white rounded-xl border shadow-sm">
@@ -503,10 +520,12 @@ export default function DashboardView() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* ============================================================ */}
-      {/*  3. Recent Payroll Runs Table                                */}
+      {/*  3. Recent Payroll Runs Table — admin/hr/manager only         */}
       {/* ============================================================ */}
+      {isElevated && (
       <Card className="bg-white rounded-xl border shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -568,12 +587,14 @@ export default function DashboardView() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* ============================================================ */}
-      {/*  4. Quick Actions Row                                        */}
+      {/*  4. Quick Actions Row — each card matches its screen's own nav role gate */}
       {/* ============================================================ */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {/* Process Payroll */}
+        {/* Process Payroll — admin/hr only, matches the 'payroll' nav item */}
+        {isPayrollAdmin && (
         <Card className="group cursor-pointer border-dashed border-emerald-200 bg-gradient-to-br from-white to-emerald-50/40 transition-all hover:border-emerald-400 hover:shadow-md">
           <CardContent className="flex items-center gap-4 p-6">
             <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm shadow-emerald-200">
@@ -595,8 +616,9 @@ export default function DashboardView() {
             </Button>
           </CardContent>
         </Card>
+        )}
 
-        {/* Mark Attendance */}
+        {/* Mark Attendance — every role, matches the 'attendance' nav item */}
         <Card className="group cursor-pointer border-dashed border-teal-200 bg-gradient-to-br from-white to-teal-50/40 transition-all hover:border-teal-400 hover:shadow-md">
           <CardContent className="flex items-center gap-4 p-6">
             <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-teal-600 text-white shadow-sm shadow-teal-200">
@@ -620,7 +642,8 @@ export default function DashboardView() {
           </CardContent>
         </Card>
 
-        {/* Generate Reports */}
+        {/* Generate Reports — admin/hr/manager, matches the 'reports' nav item */}
+        {isElevated && (
         <Card className="group cursor-pointer border-dashed border-rose-200 bg-gradient-to-br from-white to-rose-50/40 transition-all hover:border-rose-400 hover:shadow-md">
           <CardContent className="flex items-center gap-4 p-6">
             <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-rose-600 text-white shadow-sm shadow-rose-200">
@@ -643,11 +666,13 @@ export default function DashboardView() {
             </Button>
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* ============================================================ */}
-      {/*  Exit Analytics                                              */}
+      {/*  Exit Analytics — admin/hr/manager only, matches 'exit-management' nav item */}
       {/* ============================================================ */}
+      {isElevated && (
       <div>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-foreground">Exit Analytics</h3>
@@ -710,6 +735,62 @@ export default function DashboardView() {
           </Card>
         </div>
       </div>
+      )}
+
+      {/* ============================================================ */}
+      {/*  Recruitment / Hiring Incentives — admin/hr only              */}
+      {/* ============================================================ */}
+      {data.recruitment && (
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">Recruitment &amp; Hiring Incentives</h3>
+            <Button variant="ghost" size="sm" className="text-emerald-700" onClick={() => setActiveView('candidates')}>
+              View Candidates
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Card
+              className="group cursor-pointer bg-white rounded-xl border shadow-sm transition-all hover:border-emerald-300 hover:shadow-md"
+              onClick={() => setActiveView('hiring-incentives')}
+            >
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                    <UserPlus className="size-6" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-foreground">{data.recruitment.eligibleIncentiveCount}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Hiring incentive{data.recruitment.eligibleIncentiveCount === 1 ? '' : 's'} ready to pay
+                      {data.recruitment.eligibleIncentiveTotal > 0 && (
+                        <> &middot; {fmt(data.recruitment.eligibleIncentiveTotal)}</>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card
+              className="group cursor-pointer bg-white rounded-xl border shadow-sm transition-all hover:border-amber-300 hover:shadow-md"
+              onClick={() => setActiveView('candidates')}
+            >
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-amber-50 text-amber-600">
+                    <AlertTriangle className="size-6" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-foreground">{data.recruitment.probationEndingSoonCount}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Candidate{data.recruitment.probationEndingSoonCount === 1 ? '' : 's'} with probation ending in 30 days
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
