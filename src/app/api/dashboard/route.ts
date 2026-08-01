@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-utils";
 import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
+import { istDateOnly } from "@/lib/date-ist";
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,17 +20,20 @@ export async function GET(request: NextRequest) {
       await refreshPendingHiringIncentiveVesting();
     }
 
-    // --- Date helpers for today ---
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfNextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    // --- Date helpers for today, anchored to the IST calendar day (this company is India-only)
+    // rather than the server process's own local time — the container runs in UTC, so
+    // `new Date(now.getFullYear(), now.getMonth(), now.getDate())` would silently use the UTC
+    // day and misattribute anything computed between 00:00-05:29 IST to the previous day.
+    const startOfDay = istDateOnly();
+    const startOfNextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+    const endOfDay = new Date(startOfNextDay.getTime() - 1);
 
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
-    const startOfQuarter = new Date(now.getFullYear(), quarterStartMonth, 1);
-    const in30Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30, 23, 59, 59, 999);
+    const startOfMonth = new Date(Date.UTC(startOfDay.getUTCFullYear(), startOfDay.getUTCMonth(), 1));
+    const startOfNextMonth = new Date(Date.UTC(startOfDay.getUTCFullYear(), startOfDay.getUTCMonth() + 1, 1));
+    const quarterStartMonth = Math.floor(startOfDay.getUTCMonth() / 3) * 3;
+    const startOfQuarter = new Date(Date.UTC(startOfDay.getUTCFullYear(), quarterStartMonth, 1));
+    const in30DaysStart = new Date(startOfDay.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const in30Days = new Date(in30DaysStart.getTime() + 24 * 60 * 60 * 1000 - 1);
 
     // Run all independent queries in parallel. Financial/analytics queries are skipped
     // entirely (not just redacted after the fact) for a non-elevated caller — no reason to

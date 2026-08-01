@@ -315,7 +315,7 @@ export default function AttendanceView() {
   const fetchTodayPunch = useCallback(async (empId: string) => {
     if (!empId) { setTodayPunch(null); return; }
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = nowInIST().toISOString().split('T')[0];
       const res = await fetch(`/api/attendance?employeeId=${empId}&date=${today}`);
       if (!res.ok) return;
       const json = await res.json();
@@ -337,7 +337,7 @@ export default function AttendanceView() {
 
   // ---- KPI Summary ----
   const summary = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = nowInIST().toISOString().split('T')[0];
     const todayRecords = filterEmployeeId === 'all'
       ? attendanceRecords.filter((r) => r.date.startsWith(today))
       : attendanceRecords.filter((r) => r.date.startsWith(today) && r.employeeId === filterEmployeeId);
@@ -711,7 +711,7 @@ export default function AttendanceView() {
           {/* Mark Attendance Button — hidden for employee role: POST /api/attendance already
               requires admin/hr/manager server-side, so this always 403'd for employee anyway. */}
           {!isEmployeeRole && (
-            <Button variant="outline" onClick={() => { setMarkDate(new Date().toISOString().split('T')[0]); setMarkDialogOpen(true); }}>
+            <Button variant="outline" onClick={() => { setMarkDate(nowInIST().toISOString().split('T')[0]); setMarkDialogOpen(true); }}>
               <Pencil className="size-4" />
               Mark Attendance
             </Button>

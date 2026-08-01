@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { evaluateGeofence } from "@/lib/geo";
+import { istDateOnly } from "@/lib/date-ist";
 import type { SessionPayload } from "@/lib/auth";
 
 export interface RecordPunchParams {
@@ -65,8 +66,7 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
     return { ok: false, status: 400, error: geofence.reason ?? "Outside the allowed punch location." };
   }
 
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const today = istDateOnly();
   const now = new Date();
 
   if (action === "in") {

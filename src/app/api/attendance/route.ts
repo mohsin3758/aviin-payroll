@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { requireRole, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
+import { istDateOnly } from "@/lib/date-ist";
 
 type TxClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 
@@ -166,12 +167,11 @@ export async function POST(request: NextRequest) {
       return apiError("faceConfidence is required when faceVerified is true.", 400);
     }
 
-    // Determine the attendance date
-    const attendanceDate = date
-      ? new Date(date)
-      : new Date();
-
-    // Normalize to start of day (UTC)
+    // Determine the attendance date — an explicit date string is already a specific calendar
+    // day and gets normalized as-is; omitted defaults to "today" in IST (this company is
+    // India-only), not raw UTC, so a record made between 00:00-05:29 IST isn't misfiled under
+    // the previous day.
+    const attendanceDate = date ? new Date(date) : istDateOnly();
     attendanceDate.setUTCHours(0, 0, 0, 0);
 
     // Calculate totalHours if both punchIn and punchOut are provided
