@@ -22,6 +22,7 @@ import {
   UserMinus,
   LifeBuoy,
   HandCoins,
+  Package,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -45,6 +46,9 @@ const navItems: NavItem[] = [
   // My Portal instead of a company-wide directory.
   { id: 'employees', label: 'Employees', icon: Users, roles: ['admin', 'hr', 'manager'] },
   { id: 'onboarding', label: 'Onboarding', icon: UserPlus, roles: ['admin', 'hr'] },
+  // Company-wide inventory across every employee — everything else in the asset feature is
+  // scoped to one employee at a time (Onboarding tab), so this is the only cross-employee view.
+  { id: 'assets', label: 'Assets', icon: Package, roles: ['admin', 'hr'] },
   // Backend manager-approve route already accepts the manager role for stage-1 approval —
   // this was the one nav item actively blocking a capability the backend already supports.
   { id: 'exit-management', label: 'Exit Management', icon: UserMinus, roles: ['admin', 'hr', 'manager'] },

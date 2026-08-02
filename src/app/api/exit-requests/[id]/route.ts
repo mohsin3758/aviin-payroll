@@ -22,7 +22,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return apiError("You can only view your own exit request.", 403);
     }
 
-    return NextResponse.json({ data: exitRequest });
+    // So the checklist screen can show what's still outstanding before "Company assets
+    // returned" is checked off — see the matching guard in checklist/[itemId]/route.ts.
+    const assets = await db.employeeAsset.findMany({
+      where: { employeeId: exitRequest.employeeId },
+      orderBy: { allocatedDate: "desc" },
+    });
+
+    return NextResponse.json({ data: { ...exitRequest, assets } });
   } catch (error) {
     return handleApiError(error, "fetch exit request");
   }

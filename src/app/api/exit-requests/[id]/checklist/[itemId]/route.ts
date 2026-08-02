@@ -18,6 +18,22 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const existing = await db.exitChecklistItem.findUnique({ where: { id: itemId } });
     if (!existing || existing.exitRequestId !== id) return apiError("Checklist item not found", 404);
 
+    // "Company assets returned" is a free-text checklist title (see DEFAULT_EXIT_CHECKLIST in
+    // hr-approve/route.ts) — this is the one place it's cross-checked against real
+    // EmployeeAsset records, so HR can't tick it off while a laptop/phone is still outstanding.
+    if (isCompleted && existing.taskName === "Company assets returned") {
+      const exitRequest = await db.exitRequest.findUnique({ where: { id } });
+      if (exitRequest) {
+        const unreturned = await db.employeeAsset.findMany({
+          where: { employeeId: exitRequest.employeeId, returnedDate: null },
+        });
+        if (unreturned.length > 0) {
+          const list = unreturned.map((a) => `${a.assetType}${a.assetTag ? ` (${a.assetTag})` : ""}`).join(", ");
+          return apiError(`Cannot check this off — ${unreturned.length} asset(s) still not marked returned: ${list}. Mark them returned first.`, 400);
+        }
+      }
+    }
+
     const item = await db.exitChecklistItem.update({
       where: { id: itemId },
       data: { isCompleted, completedBy: isCompleted ? session.userId : null, completedAt: isCompleted ? new Date() : null },

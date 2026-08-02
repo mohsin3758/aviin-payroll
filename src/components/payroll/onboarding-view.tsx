@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  UserPlus, Loader2, CheckCircle2, Circle, Mail, KeyRound, Package, ListChecks,
+  UserPlus, Loader2, CheckCircle2, Circle, Mail, KeyRound, Package, ListChecks, Pencil, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { usePayrollStore } from '@/store/payroll-store';
 
 interface Employee { id: string; employeeCode: string; firstName: string; lastName: string | null; designation: string; email: string; }
@@ -46,6 +47,15 @@ export default function OnboardingView() {
   const [assetCondition, setAssetCondition] = useState('new');
   const [assetNotes, setAssetNotes] = useState('');
   const [allocating, setAllocating] = useState(false);
+
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [editAssetType, setEditAssetType] = useState('laptop');
+  const [editAssetTag, setEditAssetTag] = useState('');
+  const [editAssetBrand, setEditAssetBrand] = useState('');
+  const [editAssetModel, setEditAssetModel] = useState('');
+  const [editAssetCondition, setEditAssetCondition] = useState('new');
+  const [editAssetNotes, setEditAssetNotes] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const [sendingLetter, setSendingLetter] = useState<'offer' | 'appointment' | null>(null);
   const [activatingPortal, setActivatingPortal] = useState(false);
@@ -144,6 +154,55 @@ export default function OnboardingView() {
       fetchTasksAndAssets();
     } catch {
       toast.error('Failed to mark asset returned');
+    }
+  };
+
+  const openEditAsset = (a: Asset) => {
+    setEditingAsset(a);
+    setEditAssetType(a.assetType);
+    setEditAssetTag(a.assetTag ?? '');
+    setEditAssetBrand(a.brand ?? '');
+    setEditAssetModel(a.model ?? '');
+    setEditAssetCondition(a.condition ?? 'new');
+    setEditAssetNotes(a.notes ?? '');
+  };
+
+  const handleSaveEditAsset = async () => {
+    if (!editingAsset) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/employees/${employeeId}/assets/${editingAsset.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetType: editAssetType,
+          assetTag: editAssetTag.trim() || null,
+          brand: editAssetBrand.trim() || null,
+          model: editAssetModel.trim() || null,
+          condition: editAssetCondition || null,
+          notes: editAssetNotes.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update asset');
+      toast.success('Asset updated');
+      setEditingAsset(null);
+      fetchTasksAndAssets();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update asset');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteAsset = async (assetId: string) => {
+    if (!confirm('Delete this asset record permanently? Use "Mark Returned" instead if the employee actually returned it.')) return;
+    try {
+      const res = await fetch(`/api/employees/${employeeId}/assets/${assetId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete asset');
+      toast.success('Asset deleted');
+      fetchTasksAndAssets();
+    } catch {
+      toast.error('Failed to delete asset');
     }
   };
 
@@ -330,11 +389,15 @@ export default function OnboardingView() {
                         {a.condition && <span className="text-muted-foreground capitalize"> · {a.condition}</span>}
                         {a.notes && <p className="text-xs text-muted-foreground">{a.notes}</p>}
                       </div>
-                      {a.returnedDate ? (
-                        <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Returned</Badge>
-                      ) : (
-                        <Button variant="ghost" size="sm" onClick={() => handleReturnAsset(a.id)}>Mark Returned</Button>
-                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {a.returnedDate ? (
+                          <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Returned</Badge>
+                        ) : (
+                          <Button variant="ghost" size="sm" onClick={() => handleReturnAsset(a.id)}>Mark Returned</Button>
+                        )}
+                        <Button variant="ghost" size="icon" className="size-8" onClick={() => openEditAsset(a)} title="Edit"><Pencil className="size-4" /></Button>
+                        <Button variant="ghost" size="icon" className="size-8 text-red-600" onClick={() => handleDeleteAsset(a.id)} title="Delete"><Trash2 className="size-4" /></Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -343,6 +406,55 @@ export default function OnboardingView() {
           </Card>
         </>
       )}
+
+      <Dialog open={!!editingAsset} onOpenChange={(open) => { if (!open) setEditingAsset(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Asset</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Asset Type</Label>
+                <Select value={editAssetType} onValueChange={setEditAssetType}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="laptop">Laptop</SelectItem>
+                    <SelectItem value="phone">Phone</SelectItem>
+                    <SelectItem value="id_card">ID Card</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Condition</Label>
+                <Select value={editAssetCondition} onValueChange={setEditAssetCondition}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="new">New</SelectItem>
+                    <SelectItem value="good">Good</SelectItem>
+                    <SelectItem value="fair">Fair</SelectItem>
+                    <SelectItem value="damaged">Damaged</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label>Brand</Label><Input value={editAssetBrand} onChange={(e) => setEditAssetBrand(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Model</Label><Input value={editAssetModel} onChange={(e) => setEditAssetModel(e.target.value)} /></div>
+              <div className="space-y-1.5 col-span-2"><Label>{ASSET_TAG_LABEL[editAssetType]}</Label><Input value={editAssetTag} onChange={(e) => setEditAssetTag(e.target.value)} /></div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notes (optional)</Label>
+              <Input value={editAssetNotes} onChange={(e) => setEditAssetNotes(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingAsset(null)}>Cancel</Button>
+            <Button onClick={handleSaveEditAsset} disabled={savingEdit} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingEdit ? <Loader2 className="size-4 animate-spin" /> : null}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

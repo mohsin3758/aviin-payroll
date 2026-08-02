@@ -42,12 +42,14 @@ interface Settlement {
   id: string; status: string; leaveEncashmentAmount: number; pendingArrearsAmount: number;
   gratuityAmount: number; loanRecoveryAmount: number; noticeShortfallAmount: number; netSettlementAmount: number;
 }
+interface ExitAsset { id: string; assetType: string; assetTag: string | null; brand: string | null; model: string | null; returnedDate: string | null; }
 interface ExitDetail {
-  id: string; status: string; resignationDate: string; lastWorkingDate: string; noticePeriodDays: number;
+  id: string; employeeId: string; status: string; resignationDate: string; lastWorkingDate: string; noticePeriodDays: number;
   reason: string | null; managerComment: string | null; hrComment: string | null;
   employee: { firstName: string; lastName: string | null; employeeCode: string; designation: string; department: string; email: string };
   checklistItems: ChecklistItem[];
   finalSettlement: Settlement | null;
+  assets: ExitAsset[];
 }
 
 export default function ExitManagementView() {
@@ -140,9 +142,19 @@ export default function ExitManagementView() {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isCompleted: !isCompleted }),
       });
-      if (!res.ok) throw new Error('Failed to update checklist');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to update checklist');
       openDetail(selectedId);
-    } catch { toast.error('Failed to update checklist'); }
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to update checklist'); }
+  };
+
+  const handleReturnAssetFromExit = async (employeeId: string, assetId: string) => {
+    try {
+      const res = await fetch(`/api/employees/${employeeId}/assets/${assetId}`, { method: 'PUT' });
+      if (!res.ok) throw new Error('Failed to mark asset returned');
+      toast.success('Asset marked returned');
+      if (selectedId) openDetail(selectedId);
+    } catch { toast.error('Failed to mark asset returned'); }
   };
 
   const handleComputeSettlement = async () => {
@@ -297,6 +309,27 @@ export default function ExitManagementView() {
               {detail.status === 'approved' && (
                 <>
                   <Separator />
+                  {detail.assets.length > 0 && (
+                    <div>
+                      <Label className="text-xs font-medium">Company Assets</Label>
+                      <div className="mt-2 space-y-1.5">
+                        {detail.assets.map((a) => (
+                          <div key={a.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                            <span className="capitalize">{a.assetType.replace('_', ' ')}</span>
+                            {(a.brand || a.model) && <span className="text-muted-foreground">{[a.brand, a.model].filter(Boolean).join(' ')}</span>}
+                            {a.assetTag && <span className="text-muted-foreground font-mono text-xs">({a.assetTag})</span>}
+                            {a.returnedDate ? (
+                              <Badge variant="outline" className="ml-auto bg-emerald-100 text-emerald-800 border-emerald-200">Returned</Badge>
+                            ) : isHr ? (
+                              <Button variant="ghost" size="sm" className="ml-auto h-7" onClick={() => handleReturnAssetFromExit(detail.employeeId, a.id)}>Mark Returned</Button>
+                            ) : (
+                              <Badge variant="outline" className="ml-auto bg-amber-100 text-amber-800 border-amber-200">Outstanding</Badge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <Label className="text-xs font-medium">Exit Checklist</Label>
                     <div className="mt-2 space-y-1.5">
