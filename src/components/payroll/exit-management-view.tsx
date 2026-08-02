@@ -194,13 +194,18 @@ export default function ExitManagementView() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to send letter');
+      const letterLabel = letterType === 'experience' ? 'Experience' : 'Relieving';
       if (data.data.previewUrl) {
-        toast.success(`${letterType === 'experience' ? 'Experience' : 'Relieving'} letter sent (test mode)`, {
+        toast.success(`${letterLabel} letter sent (test mode)`, {
           description: 'Click to view the sent email',
           action: { label: 'Open preview', onClick: () => window.open(data.data.previewUrl, '_blank') },
         });
-      } else {
+      } else if (data.data.emailSent) {
         toast.success('Letter emailed');
+      } else {
+        toast.warning(`${letterLabel} letter saved, but the email failed to send`, {
+          description: 'Download it from the employee\'s Documents and send it manually.',
+        });
       }
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to send letter'); } finally { setProcessing(false); }
   };

@@ -1604,6 +1604,11 @@ export default function EmployeesView() {
                       <p className="text-sm">No salary structure defined</p>
                     </div>
                   )}
+                  <Separator />
+                  <div>
+                    <h4 className="text-xs text-muted-foreground font-medium mb-3">Salary History</h4>
+                    <SalaryHistorySection employeeId={viewEmployee.id} />
+                  </div>
                 </TabsContent>
 
                 {/* Bank Tab */}
@@ -1762,6 +1767,48 @@ function InfoItem({
       )}
     </div>
   )
+}
+
+function SalaryHistorySection({ employeeId }: { employeeId: string }) {
+  const [revisions, setRevisions] = useState<{
+    id: string; effectiveDate: string; reason: string;
+    previousBasic: number; newBasic: number; previousGross: number; newGross: number;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/employees/${employeeId}/salary-revisions`)
+      .then((r) => r.json())
+      .then((d) => setRevisions(d.data ?? []))
+      .catch(() => toast.error('Failed to load salary history'))
+      .finally(() => setLoading(false));
+  }, [employeeId]);
+
+  if (loading) return <Skeleton className="h-24 w-full" />;
+  if (revisions.length === 0) return <p className="text-sm text-muted-foreground py-4 text-center">No salary revisions on record yet.</p>;
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Effective Date</TableHead>
+          <TableHead>Reason</TableHead>
+          <TableHead className="text-right">Basic</TableHead>
+          <TableHead className="text-right">Gross</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {revisions.map((r) => (
+          <TableRow key={r.id}>
+            <TableCell>{new Date(r.effectiveDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</TableCell>
+            <TableCell className="capitalize">{r.reason}</TableCell>
+            <TableCell className="text-right">{fmt(r.previousBasic)} → <span className="font-medium">{fmt(r.newBasic)}</span></TableCell>
+            <TableCell className="text-right">{fmt(r.previousGross)} → <span className="font-medium">{fmt(r.newGross)}</span></TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
 }
 
 function ShiftAssignment({ employeeId, canManage }: { employeeId: string; canManage: boolean }) {

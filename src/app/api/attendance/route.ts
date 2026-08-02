@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { requireRole, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
+import { notifyEmployee } from "@/lib/notifications";
 import { istDateOnly } from "@/lib/date-ist";
 
 type TxClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
@@ -268,6 +269,12 @@ export async function POST(request: NextRequest) {
         return rec;
       });
 
+      await notifyEmployee(employeeId, {
+        title: "Attendance updated",
+        message: `Your attendance for ${attendanceDate.toISOString().split("T")[0]} was updated by an admin/HR (status: ${resolvedStatus}).`,
+        category: "attendance",
+      });
+
       return NextResponse.json({ data: updated }, { status: 200 });
     }
 
@@ -351,6 +358,12 @@ export async function POST(request: NextRequest) {
       entity: "Attendance",
       entityId: record.id,
       details: { employeeId, date: attendanceDate.toISOString(), status: resolvedStatus },
+    });
+
+    await notifyEmployee(employeeId, {
+      title: "Attendance updated",
+      message: `Your attendance for ${attendanceDate.toISOString().split("T")[0]} was set by an admin/HR (status: ${resolvedStatus}).`,
+      category: "attendance",
     });
 
     return NextResponse.json({ data: record }, { status: 201 });
