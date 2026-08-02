@@ -1518,6 +1518,11 @@ export default function EmployeesView() {
                   </div>
                   <Separator />
                   <div>
+                    <h4 className="text-xs text-muted-foreground font-medium mb-3">Work Location</h4>
+                    <WorkLocationAssignment employeeId={viewEmployee.id} canManage={canManage} />
+                  </div>
+                  <Separator />
+                  <div>
                     <h4 className="text-xs text-muted-foreground font-medium mb-3">Face Attendance</h4>
                     <FaceEnrollmentStatus employeeId={viewEmployee.id} canManage={canManage} />
                   </div>
@@ -1784,6 +1789,87 @@ function ShiftAssignment({ employeeId, canManage }: { employeeId: string; canMan
             {assignment ? 'Change Shift' : 'Assign Shift'}
           </Button>
         </div>
+      )}
+    </div>
+  );
+}
+
+function WorkLocationAssignment({ employeeId, canManage }: { employeeId: string; canManage: boolean }) {
+  const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
+  const [exempt, setExempt] = useState(false);
+  const [officeLocationId, setOfficeLocationId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const fetchEmployee = useCallback(async () => {
+    setLoading(true);
+    try {
+      // GET /api/employees/[id] returns the employee object directly, not wrapped in { data }.
+      const res = await fetch(`/api/employees/${employeeId}`);
+      const json = await res.json();
+      setExempt(!!json.exemptFromGeofence);
+      setOfficeLocationId(json.officeLocationId ?? '');
+    } catch {
+      /* leave defaults */
+    } finally {
+      setLoading(false);
+    }
+  }, [employeeId]);
+
+  useEffect(() => {
+    fetchEmployee();
+    if (canManage) {
+      fetch('/api/office-locations').then((r) => r.json()).then((j) => setLocations(j.data ?? [])).catch(() => {});
+    }
+  }, [fetchEmployee, canManage]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/employees/${employeeId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exemptFromGeofence: exempt, officeLocationId: exempt ? null : (officeLocationId || null) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update work location');
+      toast.success('Work location updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update work location');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <Skeleton className="h-11 w-full" />
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="flex items-center gap-2">
+          <Switch checked={exempt} onCheckedChange={setExempt} disabled={!canManage} />
+          <span className="text-sm">Work From Home <span className="text-muted-foreground">(exempt from office geofence entirely)</span></span>
+        </div>
+      </div>
+      {!exempt && (
+        <div className="flex items-center gap-2">
+          <Select value={officeLocationId || 'default'} onValueChange={(v) => setOfficeLocationId(v === 'default' ? '' : v)} disabled={!canManage}>
+            <SelectTrigger className="w-[220px]"><SelectValue placeholder="Head office (default)" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">Head office (default)</SelectItem>
+              {locations.map((l) => (
+                <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {canManage && (
+        <Button size="sm" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="size-4 animate-spin" /> : null}
+          Save
+        </Button>
       )}
     </div>
   );

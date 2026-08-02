@@ -52,6 +52,11 @@ export async function PUT(
       return apiError("Employee not found", 404);
     }
 
+    if (employeeData.officeLocationId) {
+      const location = await db.officeLocation.findUnique({ where: { id: employeeData.officeLocationId } });
+      if (!location) return apiError("Office location not found", 404);
+    }
+
     // Build salary structure update payload
     let salaryPayload: Record<string, unknown> | undefined;
     if (salaryStructureData) {

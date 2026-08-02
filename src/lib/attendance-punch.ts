@@ -88,7 +88,7 @@ export function sumSessionHours(sessions: PunchSession[]): number {
 export async function recordPunch(params: RecordPunchParams): Promise<RecordPunchResult> {
   const { employeeId, action, method, faceData, ipAddress, deviceInfo, latitude, longitude, accuracy, session } = params;
 
-  const employee = await db.employee.findUnique({ where: { id: employeeId } });
+  const employee = await db.employee.findUnique({ where: { id: employeeId }, include: { officeLocation: true } });
   if (!employee) {
     return { ok: false, status: 404, error: "Employee not found." };
   }
@@ -133,32 +133,44 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
     return { ok: false, status: 400, error: "Manual punch is currently disabled. Use face punch or contact your admin." };
   }
 
-  // evaluateGeofence itself never rejects on missing punch coordinates (by design — a
-  // login/logout-triggered punch never has any) but that same leniency, applied to an
-  // interactive face/manual punch, meant enforcement could be silently bypassed just by
-  // denying the browser's location permission (or it timing out) — the check would compute
-  // "not evaluable" and let the punch through unconditionally. When enforcement is actually
-  // on, an interactive punch missing coordinates is treated as a hard requirement, not a skip.
-  if (
-    method !== "login" &&
-    company?.enforceGeofence &&
-    company.officeLatitude != null &&
-    company.officeLongitude != null &&
-    (latitude == null || longitude == null)
-  ) {
-    return { ok: false, status: 400, error: "Location access is required to punch from here. Please allow location access in your browser and try again." };
-  }
+  // Effective geofence target: the employee's individually-assigned branch (officeLocation)
+  // if they have one, else Company's own officeLatitude/officeLongitude (the implicit default
+  // "head office"). exemptFromGeofence (Work From Home) skips this whole section — no distance
+  // computed, never blocked, regardless of company-wide enforcement.
+  const effectiveOfficeLatitude = employee.officeLocation?.latitude ?? company?.officeLatitude ?? null;
+  const effectiveOfficeLongitude = employee.officeLocation?.longitude ?? company?.officeLongitude ?? null;
+  const effectiveGeofenceRadiusMeters = employee.officeLocation?.radiusMeters ?? company?.geofenceRadiusMeters ?? null;
 
-  const geofence = evaluateGeofence({
-    officeLatitude: company?.officeLatitude ?? null,
-    officeLongitude: company?.officeLongitude ?? null,
-    geofenceRadiusMeters: company?.geofenceRadiusMeters ?? null,
-    enforceGeofence: company?.enforceGeofence ?? false,
-    latitude,
-    longitude,
-  });
-  if (geofence.shouldReject) {
-    return { ok: false, status: 400, error: geofence.reason ?? "Outside the allowed punch location." };
+  let geofence: { distanceMeters: number | null; shouldReject: boolean; reason?: string } = { distanceMeters: null, shouldReject: false };
+
+  if (!employee.exemptFromGeofence) {
+    // evaluateGeofence itself never rejects on missing punch coordinates (by design — a
+    // login/logout-triggered punch never has any) but that same leniency, applied to an
+    // interactive face/manual punch, meant enforcement could be silently bypassed just by
+    // denying the browser's location permission (or it timing out) — the check would compute
+    // "not evaluable" and let the punch through unconditionally. When enforcement is actually
+    // on, an interactive punch missing coordinates is treated as a hard requirement, not a skip.
+    if (
+      method !== "login" &&
+      company?.enforceGeofence &&
+      effectiveOfficeLatitude != null &&
+      effectiveOfficeLongitude != null &&
+      (latitude == null || longitude == null)
+    ) {
+      return { ok: false, status: 400, error: "Location access is required to punch from here. Please allow location access in your browser and try again." };
+    }
+
+    geofence = evaluateGeofence({
+      officeLatitude: effectiveOfficeLatitude,
+      officeLongitude: effectiveOfficeLongitude,
+      geofenceRadiusMeters: effectiveGeofenceRadiusMeters,
+      enforceGeofence: company?.enforceGeofence ?? false,
+      latitude,
+      longitude,
+    });
+    if (geofence.shouldReject) {
+      return { ok: false, status: 400, error: geofence.reason ?? "Outside the allowed punch location." };
+    }
   }
 
   const today = istDateOnly();

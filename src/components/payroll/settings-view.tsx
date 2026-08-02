@@ -120,6 +120,14 @@ interface Shift {
   gracePeriodMinutes: number;
 }
 
+interface OfficeLocation {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+}
+
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -763,6 +771,103 @@ export default function SettingsView() {
       fetchShifts();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete shift');
+    }
+  };
+
+  // ─── Branch Office Locations ────────────────────────────────────────────────
+  const [officeLocations, setOfficeLocations] = useState<OfficeLocation[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [newLocationName, setNewLocationName] = useState('');
+  const [newLocationLat, setNewLocationLat] = useState('');
+  const [newLocationLon, setNewLocationLon] = useState('');
+  const [newLocationRadius, setNewLocationRadius] = useState('200');
+  const [addingLocation, setAddingLocation] = useState(false);
+  const [editingLocation, setEditingLocation] = useState<OfficeLocation | null>(null);
+  const [editLocationName, setEditLocationName] = useState('');
+  const [editLocationLat, setEditLocationLat] = useState('');
+  const [editLocationLon, setEditLocationLon] = useState('');
+  const [editLocationRadius, setEditLocationRadius] = useState('');
+  const [savingLocation, setSavingLocation] = useState(false);
+
+  const fetchOfficeLocations = useCallback(async () => {
+    setLocationsLoading(true);
+    try {
+      const res = await fetch('/api/office-locations');
+      if (!res.ok) throw new Error('Failed to load branch offices');
+      const json = await res.json();
+      setOfficeLocations(json.data ?? []);
+    } catch {
+      toast.error('Failed to load branch offices');
+    } finally {
+      setLocationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOfficeLocations();
+  }, [fetchOfficeLocations, refreshKey]);
+
+  const handleAddLocation = async () => {
+    if (!newLocationName.trim() || !newLocationLat.trim() || !newLocationLon.trim()) {
+      toast.error('Name, latitude, and longitude are required.');
+      return;
+    }
+    setAddingLocation(true);
+    try {
+      const res = await fetch('/api/office-locations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newLocationName.trim(), latitude: newLocationLat, longitude: newLocationLon, radiusMeters: newLocationRadius }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add branch office');
+      toast.success(`"${newLocationName.trim()}" added`);
+      setNewLocationName(''); setNewLocationLat(''); setNewLocationLon(''); setNewLocationRadius('200');
+      fetchOfficeLocations();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add branch office');
+    } finally {
+      setAddingLocation(false);
+    }
+  };
+
+  const openEditLocation = (l: OfficeLocation) => {
+    setEditingLocation(l);
+    setEditLocationName(l.name);
+    setEditLocationLat(String(l.latitude));
+    setEditLocationLon(String(l.longitude));
+    setEditLocationRadius(String(l.radiusMeters));
+  };
+
+  const handleSaveEditLocation = async () => {
+    if (!editingLocation) return;
+    setSavingLocation(true);
+    try {
+      const res = await fetch(`/api/office-locations/${editingLocation.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editLocationName.trim(), latitude: editLocationLat, longitude: editLocationLon, radiusMeters: editLocationRadius }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update branch office');
+      toast.success('Branch office updated');
+      setEditingLocation(null);
+      fetchOfficeLocations();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update branch office');
+    } finally {
+      setSavingLocation(false);
+    }
+  };
+
+  const handleDeleteLocation = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"? This only works if no employee is currently assigned to it.`)) return;
+    try {
+      const res = await fetch(`/api/office-locations/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete branch office');
+      toast.success('Branch office deleted');
+      fetchOfficeLocations();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete branch office');
     }
   };
 
@@ -1956,8 +2061,10 @@ export default function SettingsView() {
               Office Location &amp; Attendance
             </CardTitle>
             <CardDescription>
-              Optional: set an office location to log how far each punch was from it. Leave blank and nothing
-              changes — no location is ever requested from employees until coordinates are set here.
+              Optional: set your default (head office) location to log how far each punch was from it. Leave blank
+              and nothing changes — no location is ever requested from employees until coordinates are set here.
+              Need another site? Add it under Branch Offices below and assign employees to it individually — Work
+              From Home employees can be exempted entirely from the Employees screen.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -2015,6 +2122,94 @@ export default function SettingsView() {
           </CardContent>
         </Card>
       )}
+
+      {/* ─── Branch Offices (admin only) ───────────────────────────────────────── */}
+      {user?.role === 'admin' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapPin className="h-4 w-4 text-emerald-600" />
+              Branch Offices
+            </CardTitle>
+            <CardDescription>
+              Additional locations beyond the head office above. Assign an employee to one from their record in
+              Employees — their punches are then geofenced against this location's own coordinates and radius
+              instead of the head office's.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Name</Label>
+                <Input placeholder="e.g. Bangalore Branch" value={newLocationName} onChange={(e) => setNewLocationName(e.target.value)} className="w-[200px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Latitude</Label>
+                <Input type="number" step="any" value={newLocationLat} onChange={(e) => setNewLocationLat(e.target.value)} placeholder="12.9716" className="w-[140px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Longitude</Label>
+                <Input type="number" step="any" value={newLocationLon} onChange={(e) => setNewLocationLon(e.target.value)} placeholder="77.5946" className="w-[140px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Radius (m)</Label>
+                <Input type="number" value={newLocationRadius} onChange={(e) => setNewLocationRadius(e.target.value)} className="w-[100px]" />
+              </div>
+              <Button size="sm" onClick={handleAddLocation} disabled={addingLocation} className="gap-1.5">
+                <PlusCircle className="h-4 w-4" />
+                Add Location
+              </Button>
+            </div>
+
+            <div className="divide-y rounded-lg border">
+              {locationsLoading ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
+              ) : officeLocations.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">No branch offices configured yet.</div>
+              ) : (
+                officeLocations.map((l) => (
+                  <div key={l.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                    <div>
+                      <span className="font-medium">{l.name}</span>{' '}
+                      <span className="text-muted-foreground">— {l.latitude.toFixed(4)}, {l.longitude.toFixed(4)} · {l.radiusMeters}m radius</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditLocation(l)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDeleteLocation(l.id, l.name)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={!!editingLocation} onOpenChange={(open) => { if (!open) setEditingLocation(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Branch Office</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5"><Label>Name</Label><Input value={editLocationName} onChange={(e) => setEditLocationName(e.target.value)} /></div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5"><Label>Latitude</Label><Input type="number" step="any" value={editLocationLat} onChange={(e) => setEditLocationLat(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Longitude</Label><Input type="number" step="any" value={editLocationLon} onChange={(e) => setEditLocationLon(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Radius (m)</Label><Input type="number" value={editLocationRadius} onChange={(e) => setEditLocationRadius(e.target.value)} /></div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingLocation(null)}>Cancel</Button>
+            <Button onClick={handleSaveEditLocation} disabled={savingLocation} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingLocation ? <Loader2 className="size-4 animate-spin" /> : null}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Bank Transfer Formats (admin/hr) ──────────────────────────────────── */}
       {(user?.role === 'admin' || user?.role === 'hr') && (

@@ -98,6 +98,21 @@ model Company {
   candidates          Candidate[]
 }
 
+// A named branch/office location employees can be individually assigned to for geofencing,
+// distinct from Company's own officeLatitude/officeLongitude (the implicit default/"head
+// office" location used for anyone not assigned to a specific branch here).
+model OfficeLocation {
+  id            String   @id @default(cuid())
+  name          String
+  latitude      Float
+  longitude     Float
+  radiusMeters  Int      @default(200)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employees     Employee[]
+}
+
 // Admin-configured column layout for generating a bank-specific salary-transfer Excel file.
 // Deliberately no auto-detection/pre-seeded bank templates: the admin builds the mapping by
 // hand from their own bank-provided sample, since this determines where real payments go.
@@ -169,10 +184,17 @@ model Employee {
   emergencyContact    String?
   currentAddress      String?
   permanentAddress    String?
+  // Geofence targeting: exemptFromGeofence (Work From Home) skips location checks entirely
+  // regardless of Company.enforceGeofence; officeLocationId, if set, checks distance against
+  // that branch instead of Company's own officeLatitude/officeLongitude (the implicit default
+  // "head office" location). Neither field changes anything for an employee left at defaults.
+  exemptFromGeofence  Boolean  @default(false)
+  officeLocationId    String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   company             Company  @relation(fields: [companyId], references: [id])
+  officeLocation      OfficeLocation? @relation(fields: [officeLocationId], references: [id])
   salaryStructure     SalaryStructure?
   attendance          Attendance[]
   leaveApplications   LeaveApplication[]

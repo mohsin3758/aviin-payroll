@@ -73,6 +73,9 @@ export const createEmployeeSchema = z.object({
   emergencyContact: z.string().trim().max(100).nullable().optional(),
   currentAddress: z.string().trim().max(500).nullable().optional(),
   permanentAddress: z.string().trim().max(500).nullable().optional(),
+  // Work-location geofence targeting — see the matching comment on the Employee model.
+  exemptFromGeofence: z.boolean().default(false),
+  officeLocationId: z.string().min(1).nullable().optional(),
   salaryStructure: salaryStructureSchema.optional(),
 });
 
