@@ -289,6 +289,8 @@ export default function EmployeesView() {
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('all')
   const [stateFilter, setStateFilter] = useState('all')
+  const [workLocationFilter, setWorkLocationFilter] = useState('all')
+  const [officeLocations, setOfficeLocations] = useState<{ id: string; name: string }[]>([])
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
@@ -367,6 +369,7 @@ export default function EmployeesView() {
       if (search) params.set('search', search)
       if (deptFilter && deptFilter !== 'all') params.set('department', deptFilter)
       if (stateFilter && stateFilter !== 'all') params.set('state', stateFilter)
+      if (workLocationFilter && workLocationFilter !== 'all') params.set('workLocation', workLocationFilter)
       params.set('page', String(page))
       params.set('limit', String(pageSize))
 
@@ -381,11 +384,15 @@ export default function EmployeesView() {
     } finally {
       setLoading(false)
     }
-  }, [search, deptFilter, stateFilter, page])
+  }, [search, deptFilter, stateFilter, workLocationFilter, page])
+
+  useEffect(() => {
+    fetch('/api/office-locations').then((r) => r.json()).then((j) => setOfficeLocations(j.data ?? [])).catch(() => {})
+  }, [])
 
   useEffect(() => {
     setPage(1)
-  }, [search, deptFilter, stateFilter])
+  }, [search, deptFilter, stateFilter, workLocationFilter])
 
   useEffect(() => {
     fetchEmployees()
@@ -671,6 +678,19 @@ export default function EmployeesView() {
             <SelectItem value="all">All States</SelectItem>
             {INDIAN_STATES.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={workLocationFilter} onValueChange={setWorkLocationFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All Work Locations" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Work Locations</SelectItem>
+            <SelectItem value="default">Head Office (default)</SelectItem>
+            <SelectItem value="wfh">Work From Home</SelectItem>
+            {officeLocations.map((l) => (
+              <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>

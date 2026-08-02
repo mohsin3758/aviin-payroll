@@ -5,7 +5,7 @@ import {
   UserCircle, Loader2, Plus, Trash2, Upload, Download, Printer,
   FileText, Award, Wallet, PiggyBank, Receipt, Save, HandCoins,
   Package, TrendingUp, DoorOpen, Send, Clock, ScanFace, ShieldCheck,
-  ListChecks, CheckCircle2, Circle,
+  ListChecks, CheckCircle2, Circle, MapPin,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -223,6 +223,7 @@ function ProfileTab({ profile, onSaved }: { profile: Profile; onSaved: () => voi
       <EducationCard employeeId={profile.id} records={profile.education} onChanged={onSaved} />
       <ExperienceCard employeeId={profile.id} records={profile.experiences} onChanged={onSaved} />
       <ShiftCard employeeId={profile.id} />
+      <WorkLocationCard employeeId={profile.id} />
       <OnboardingChecklistCard employeeId={profile.id} />
       <SalaryHistoryCard employeeId={profile.id} />
     </>
@@ -264,6 +265,57 @@ function ShiftCard({ employeeId }: { employeeId: string }) {
             <div><p className="text-muted-foreground">End</p><p className="font-medium">{assignment.shift.endTime}</p></div>
             <div><p className="text-muted-foreground">Grace Period</p><p className="font-medium">{assignment.shift.gracePeriodMinutes} min</p></div>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkLocationCard({ employeeId }: { employeeId: string }) {
+  const [exempt, setExempt] = useState(false);
+  const [locationName, setLocationName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [empRes, locRes] = await Promise.all([
+          fetch(`/api/employees/${employeeId}`),
+          fetch('/api/office-locations'),
+        ]);
+        const emp = await empRes.json();
+        const locJson = await locRes.json();
+        setExempt(!!emp.exemptFromGeofence);
+        if (emp.officeLocationId) {
+          const loc = (locJson.data ?? []).find((l: { id: string; name: string }) => l.id === emp.officeLocationId);
+          setLocationName(loc?.name ?? null);
+        }
+      } catch {
+        /* non-critical, card just shows the default state */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [employeeId]);
+
+  if (loading) return <Skeleton className="h-20 w-full" />;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <MapPin className="size-4 text-emerald-600" />
+          Work Location
+        </CardTitle>
+        <CardDescription>Where your punches are geofenced against, if your admin has location enforcement on</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {exempt ? (
+          <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200">Work From Home — exempt from office geofence</Badge>
+        ) : locationName ? (
+          <p className="text-sm">Assigned to <span className="font-medium">{locationName}</span></p>
+        ) : (
+          <p className="text-sm text-muted-foreground">Head office (default)</p>
         )}
       </CardContent>
     </Card>

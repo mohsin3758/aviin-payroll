@@ -15,6 +15,9 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get("search") ?? "";
     const department = searchParams.get("department");
     const state = searchParams.get("state");
+    // "wfh" -> exemptFromGeofence employees; "default" -> no branch assigned, not WFH (head
+    // office); any other value -> assigned to that specific OfficeLocation id.
+    const workLocation = searchParams.get("workLocation");
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10) || 20));
 
@@ -41,6 +44,15 @@ export async function GET(request: NextRequest) {
 
       if (state) {
         where.state = state;
+      }
+
+      if (workLocation === "wfh") {
+        where.exemptFromGeofence = true;
+      } else if (workLocation === "default") {
+        where.exemptFromGeofence = false;
+        where.officeLocationId = null;
+      } else if (workLocation) {
+        where.officeLocationId = workLocation;
       }
     }
 
