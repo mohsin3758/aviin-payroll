@@ -309,6 +309,9 @@ export default function SettingsView() {
   const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState('200');
   const [enforceGeofence, setEnforceGeofence] = useState(false);
   const [enableLoginAttendance, setEnableLoginAttendance] = useState(false);
+  const [enableLogoutAttendance, setEnableLogoutAttendance] = useState(false);
+  const [allowFacePunch, setAllowFacePunch] = useState(true);
+  const [allowManualPunch, setAllowManualPunch] = useState(true);
   const [savingGeofence, setSavingGeofence] = useState(false);
 
   const fetchGeofenceSettings = useCallback(async () => {
@@ -321,6 +324,9 @@ export default function SettingsView() {
       setGeofenceRadiusMeters(json.data.geofenceRadiusMeters != null ? String(json.data.geofenceRadiusMeters) : '200');
       setEnforceGeofence(!!json.data.enforceGeofence);
       setEnableLoginAttendance(!!json.data.enableLoginAttendance);
+      setEnableLogoutAttendance(!!json.data.enableLogoutAttendance);
+      setAllowFacePunch(json.data.allowFacePunch !== false);
+      setAllowManualPunch(json.data.allowManualPunch !== false);
     } catch {
       // non-critical; the main fetchSettings() call already surfaces a toast on failure
     }
@@ -348,6 +354,9 @@ export default function SettingsView() {
           geofenceRadiusMeters: geofenceRadiusMeters.trim() ? Number(geofenceRadiusMeters) : null,
           enforceGeofence,
           enableLoginAttendance,
+          enableLogoutAttendance,
+          allowFacePunch,
+          allowManualPunch,
         }),
       });
       const data = await res.json();
@@ -1729,7 +1738,27 @@ export default function SettingsView() {
             <div className="flex items-center gap-2">
               <Switch id="enable-login-attendance" checked={enableLoginAttendance} onCheckedChange={setEnableLoginAttendance} />
               <Label htmlFor="enable-login-attendance" className="cursor-pointer">
-                Automatically mark an employee present when they log in
+                Automatically punch in an employee when they log in
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch id="enable-logout-attendance" checked={enableLogoutAttendance} onCheckedChange={setEnableLogoutAttendance} />
+              <Label htmlFor="enable-logout-attendance" className="cursor-pointer">
+                Automatically punch out an employee when they log out <span className="text-xs font-normal text-muted-foreground">(only if they're still punched in for today)</span>
+              </Label>
+            </div>
+            <Separator />
+            <p className="text-sm font-medium">Interactive Punch Methods</p>
+            <div className="flex items-center gap-2">
+              <Switch id="allow-face-punch" checked={allowFacePunch} onCheckedChange={setAllowFacePunch} />
+              <Label htmlFor="allow-face-punch" className="cursor-pointer">
+                Allow Quick Confirm (face) punch on the Attendance screen
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch id="allow-manual-punch" checked={allowManualPunch} onCheckedChange={setAllowManualPunch} />
+              <Label htmlFor="allow-manual-punch" className="cursor-pointer">
+                Allow Manual Punch on the Attendance screen <span className="text-xs font-normal text-muted-foreground">(admin's separate Mark Attendance override is never affected by this)</span>
               </Label>
             </div>
             <Button onClick={handleSaveGeofence} disabled={savingGeofence} className="bg-emerald-600 hover:bg-emerald-700 text-white">

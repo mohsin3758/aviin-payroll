@@ -54,6 +54,14 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
   }
 
   const company = await db.company.findFirst();
+
+  if (method === "face" && company?.allowFacePunch === false) {
+    return { ok: false, status: 400, error: "Face punch is currently disabled. Use manual punch or contact your admin." };
+  }
+  if (method === "manual" && company?.allowManualPunch === false) {
+    return { ok: false, status: 400, error: "Manual punch is currently disabled. Use face punch or contact your admin." };
+  }
+
   const geofence = evaluateGeofence({
     officeLatitude: company?.officeLatitude ?? null,
     officeLongitude: company?.officeLongitude ?? null,

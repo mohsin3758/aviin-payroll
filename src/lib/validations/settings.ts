@@ -42,4 +42,7 @@ export const updateSettingsSchema = z.object({
   geofenceRadiusMeters: z.coerce.number().int().min(1).max(50000).nullable().optional(),
   enforceGeofence: z.boolean().optional(),
   enableLoginAttendance: z.boolean().optional(),
+  enableLogoutAttendance: z.boolean().optional(),
+  allowFacePunch: z.boolean().optional(),
+  allowManualPunch: z.boolean().optional(),
 });

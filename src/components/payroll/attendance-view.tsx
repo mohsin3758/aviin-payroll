@@ -169,6 +169,9 @@ export default function AttendanceView() {
   // the login-attendance info card reflects an active or inactive feature) ----
   const [officeConfigured, setOfficeConfigured] = useState(false);
   const [loginAttendanceEnabled, setLoginAttendanceEnabled] = useState(false);
+  const [logoutAttendanceEnabled, setLogoutAttendanceEnabled] = useState(false);
+  const [allowFacePunch, setAllowFacePunch] = useState(true);
+  const [allowManualPunch, setAllowManualPunch] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -177,6 +180,9 @@ export default function AttendanceView() {
         const json = await res.json();
         setOfficeConfigured(json.data?.officeLatitude != null && json.data?.officeLongitude != null);
         setLoginAttendanceEnabled(!!json.data?.enableLoginAttendance);
+        setLogoutAttendanceEnabled(!!json.data?.enableLogoutAttendance);
+        setAllowFacePunch(json.data?.allowFacePunch !== false);
+        setAllowManualPunch(json.data?.allowManualPunch !== false);
       } catch {
         /* non-critical, defaults are safe (no geo prompt, "not enabled" copy) */
       }
@@ -1171,16 +1177,24 @@ export default function AttendanceView() {
       {/* ============ LOGIN-BASED ATTENDANCE INFO ============ */}
       <Card className="border-muted-foreground/20">
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
+          <CardTitle className="text-base flex items-center gap-2 flex-wrap">
             <MonitorSmartphone className="size-5 text-sky-500" />
-            Login-based Attendance
+            Login / Logout Attendance
             <Badge
               variant="outline"
               className={loginAttendanceEnabled
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
                 : 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700'}
             >
-              {loginAttendanceEnabled ? 'Enabled' : 'Disabled'}
+              Login {loginAttendanceEnabled ? 'Enabled' : 'Disabled'}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={logoutAttendanceEnabled
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700'}
+            >
+              Logout {logoutAttendanceEnabled ? 'Enabled' : 'Disabled'}
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -1193,7 +1207,25 @@ export default function AttendanceView() {
               </p>
             ) : (
               <p>
-                Not currently active. An admin can turn this on under Settings → Office Location &amp; Attendance to automatically mark an employee present when they log in.
+                Login-based punch-in is not currently active. An admin can turn this on under Settings → Office Location &amp; Attendance to automatically punch in an employee when they log in.
+              </p>
+            )}
+            {logoutAttendanceEnabled ? (
+              <p>
+                Employees who are still punched in are automatically <span className="font-semibold text-sky-700 dark:text-sky-400">punched out</span> when they log out of the payroll system.
+              </p>
+            ) : (
+              <p>
+                Logout-based punch-out is not currently active. An admin can turn this on under Settings → Office Location &amp; Attendance.
+              </p>
+            )}
+            {(!allowFacePunch || !allowManualPunch) && (
+              <p>
+                {!allowFacePunch && !allowManualPunch
+                  ? 'Both Quick Confirm and Manual Punch are currently disabled for employees on this screen.'
+                  : !allowFacePunch
+                    ? 'Quick Confirm (face) punch is currently disabled for employees on this screen — only Manual Punch is available.'
+                    : 'Manual Punch is currently disabled for employees on this screen — only Quick Confirm is available.'}
               </p>
             )}
           </div>
@@ -1213,48 +1245,62 @@ export default function AttendanceView() {
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs defaultValue="face" className="mt-2">
-            <TabsList className="w-full">
-              <TabsTrigger value="face" className="flex-1">
-                <Fingerprint className="size-4" />
-                Quick Confirm
-              </TabsTrigger>
-              <TabsTrigger value="manual" className="flex-1">
-                <Clock className="size-4" />
-                Manual Punch
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="face" className="mt-4">
-              {renderVerificationContent()}
-            </TabsContent>
-            <TabsContent value="manual" className="mt-4">
-              <div className="space-y-4 py-2">
-                <div className="space-y-2">
-                  <Label htmlFor="manual-time">
-                    {punchAction === 'in' ? 'Punch In Time' : 'Punch Out Time'}
-                  </Label>
-                  <Input
-                    id="manual-time"
-                    type="time"
-                    value={manualTime}
-                    onChange={(e) => setManualTime(e.target.value)}
-                    className="font-mono"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Leave empty to use current time ({currentTime})
-                  </p>
-                </div>
-                <Button
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
-                  onClick={handleManualPunch}
-                  disabled={manualPunching}
-                >
-                  {manualPunching && <Loader2 className="size-4 animate-spin" />}
-                  Submit Manual {punchAction === 'in' ? 'Punch In' : 'Punch Out'}
-                </Button>
-              </div>
-            </TabsContent>
-          </Tabs>
+          {!allowFacePunch && !allowManualPunch ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              Both punch methods are currently disabled by your admin. Contact HR or use Login-based attendance if enabled.
+            </div>
+          ) : (
+            <Tabs defaultValue={allowFacePunch ? 'face' : 'manual'} className="mt-2">
+              <TabsList className="w-full">
+                {allowFacePunch && (
+                  <TabsTrigger value="face" className="flex-1">
+                    <Fingerprint className="size-4" />
+                    Quick Confirm
+                  </TabsTrigger>
+                )}
+                {allowManualPunch && (
+                  <TabsTrigger value="manual" className="flex-1">
+                    <Clock className="size-4" />
+                    Manual Punch
+                  </TabsTrigger>
+                )}
+              </TabsList>
+              {allowFacePunch && (
+                <TabsContent value="face" className="mt-4">
+                  {renderVerificationContent()}
+                </TabsContent>
+              )}
+              {allowManualPunch && (
+                <TabsContent value="manual" className="mt-4">
+                  <div className="space-y-4 py-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-time">
+                        {punchAction === 'in' ? 'Punch In Time' : 'Punch Out Time'}
+                      </Label>
+                      <Input
+                        id="manual-time"
+                        type="time"
+                        value={manualTime}
+                        onChange={(e) => setManualTime(e.target.value)}
+                        className="font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Leave empty to use current time ({currentTime})
+                      </p>
+                    </div>
+                    <Button
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                      onClick={handleManualPunch}
+                      disabled={manualPunching}
+                    >
+                      {manualPunching && <Loader2 className="size-4 animate-spin" />}
+                      Submit Manual {punchAction === 'in' ? 'Punch In' : 'Punch Out'}
+                    </Button>
+                  </div>
+                </TabsContent>
+              )}
+            </Tabs>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -79,6 +79,15 @@ model Company {
   // Auto-marks an employee "present" (punchInMethod: "login") on successful sign-in when true.
   // Defaults false so existing deployments see no behavior change until explicitly enabled.
   enableLoginAttendance Boolean  @default(false)
+  // Mirrors enableLoginAttendance for the other end of the day: auto-records a punch-out
+  // (method "login") when a session with a linked employee logs out, if they're still
+  // punched in for today. Defaults false for the same reason.
+  enableLogoutAttendance Boolean @default(false)
+  // Which interactive self-service punch methods are available on the Punch In/Out card
+  // (Quick Confirm vs Manual Punch tabs). Both default true — existing behavior unchanged
+  // until an admin narrows it down. Never restricts the admin "Mark Attendance" override tool.
+  allowFacePunch      Boolean  @default(true)
+  allowManualPunch    Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

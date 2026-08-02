@@ -23,6 +23,9 @@ const DEFAULT_COMPANY = {
   geofenceRadiusMeters: null,
   enforceGeofence: false,
   enableLoginAttendance: false,
+  enableLogoutAttendance: false,
+  allowFacePunch: true,
+  allowManualPunch: true,
 };
 
 function parseWeeklyOffDays(value: string): number[] {
@@ -98,6 +101,9 @@ export async function PUT(request: NextRequest) {
           ...(body.geofenceRadiusMeters !== undefined && { geofenceRadiusMeters: body.geofenceRadiusMeters }),
           ...(body.enforceGeofence !== undefined && { enforceGeofence: body.enforceGeofence }),
           ...(body.enableLoginAttendance !== undefined && { enableLoginAttendance: body.enableLoginAttendance }),
+          ...(body.enableLogoutAttendance !== undefined && { enableLogoutAttendance: body.enableLogoutAttendance }),
+          ...(body.allowFacePunch !== undefined && { allowFacePunch: body.allowFacePunch }),
+          ...(body.allowManualPunch !== undefined && { allowManualPunch: body.allowManualPunch }),
         },
       });
     } else {
@@ -127,6 +133,9 @@ export async function PUT(request: NextRequest) {
           geofenceRadiusMeters: body.geofenceRadiusMeters ?? null,
           enforceGeofence: body.enforceGeofence ?? false,
           enableLoginAttendance: body.enableLoginAttendance ?? false,
+          enableLogoutAttendance: body.enableLogoutAttendance ?? false,
+          allowFacePunch: body.allowFacePunch ?? true,
+          allowManualPunch: body.allowManualPunch ?? true,
         },
       });
     }
