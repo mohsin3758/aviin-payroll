@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   UserCircle, Loader2, Plus, Trash2, Upload, Download, Printer,
   FileText, Award, Wallet, PiggyBank, Receipt, Save, HandCoins,
+  Package, TrendingUp, DoorOpen, Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -113,6 +114,8 @@ export default function MyPortalView() {
             <TabsTrigger value="hiring-incentives">Hiring Incentives</TabsTrigger>
             <TabsTrigger value="investment">Investment Declaration</TabsTrigger>
             <TabsTrigger value="expenses">Expense Claims</TabsTrigger>
+            <TabsTrigger value="assets">My Assets</TabsTrigger>
+            <TabsTrigger value="resignation">Resignation</TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="space-y-6"><ProfileTab profile={profile} onSaved={fetchProfile} /></TabsContent>
@@ -125,6 +128,8 @@ export default function MyPortalView() {
           <TabsContent value="hiring-incentives" className="space-y-6"><HiringIncentivesTab /></TabsContent>
           <TabsContent value="investment" className="space-y-6"><InvestmentTab /></TabsContent>
           <TabsContent value="expenses" className="space-y-6"><ExpensesTab /></TabsContent>
+          <TabsContent value="assets" className="space-y-6"><AssetsTab employeeId={profile.id} /></TabsContent>
+          <TabsContent value="resignation" className="space-y-6"><ResignationTab /></TabsContent>
         </Tabs>
       )}
     </div>
@@ -214,7 +219,68 @@ function ProfileTab({ profile, onSaved }: { profile: Profile; onSaved: () => voi
       <FamilyCard employeeId={profile.id} members={profile.familyMembers} onChanged={onSaved} />
       <EducationCard employeeId={profile.id} records={profile.education} onChanged={onSaved} />
       <ExperienceCard employeeId={profile.id} records={profile.experiences} onChanged={onSaved} />
+      <SalaryHistoryCard employeeId={profile.id} />
     </>
+  );
+}
+
+function SalaryHistoryCard({ employeeId }: { employeeId: string }) {
+  const [revisions, setRevisions] = useState<{
+    id: string; effectiveDate: string; reason: string;
+    previousBasic: number; newBasic: number; previousGross: number; newGross: number; notes: string | null;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/employees/${employeeId}/salary-revisions`)
+      .then((r) => r.json())
+      .then((d) => setRevisions(d.data ?? []))
+      .catch(() => toast.error('Failed to load salary history'))
+      .finally(() => setLoading(false));
+  }, [employeeId]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <TrendingUp className="size-4 text-emerald-600" />
+          Salary History
+        </CardTitle>
+        <CardDescription>Past revisions to your basic and gross salary</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : revisions.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">No salary revisions on record yet.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Effective Date</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead className="text-right">Basic</TableHead>
+                <TableHead className="text-right">Gross</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {revisions.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{fmtDate(r.effectiveDate)}</TableCell>
+                  <TableCell className="capitalize">{r.reason}</TableCell>
+                  <TableCell className="text-right">
+                    {fmt(r.previousBasic)} → <span className="font-medium">{fmt(r.newBasic)}</span>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {fmt(r.previousGross)} → <span className="font-medium">{fmt(r.newGross)}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1118,6 +1184,222 @@ function ExpensesTab() {
             ))}
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  My Assets Tab                                                      */
+/* ------------------------------------------------------------------ */
+
+const ASSET_TYPE_LABEL: Record<string, string> = {
+  laptop: 'Laptop', phone: 'Phone', id_card: 'ID Card', other: 'Other',
+};
+
+function AssetsTab({ employeeId }: { employeeId: string }) {
+  const [assets, setAssets] = useState<{
+    id: string; assetType: string; assetTag: string | null;
+    allocatedDate: string; returnedDate: string | null; condition: string | null; notes: string | null;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/employees/${employeeId}/assets`)
+      .then((r) => r.json())
+      .then((d) => setAssets(d.data ?? []))
+      .catch(() => toast.error('Failed to load assets'))
+      .finally(() => setLoading(false));
+  }, [employeeId]);
+
+  if (loading) return <Skeleton className="h-40 w-full" />;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Package className="size-4 text-emerald-600" />
+          My Assets
+        </CardTitle>
+        <CardDescription>Company equipment currently or previously assigned to you</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {assets.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No assets on record.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Type</TableHead>
+                <TableHead>Tag</TableHead>
+                <TableHead>Allocated</TableHead>
+                <TableHead>Returned</TableHead>
+                <TableHead>Condition</TableHead>
+                <TableHead>Notes</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {assets.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell>{ASSET_TYPE_LABEL[a.assetType] ?? a.assetType}</TableCell>
+                  <TableCell className="font-mono text-xs">{a.assetTag ?? '—'}</TableCell>
+                  <TableCell>{fmtDate(a.allocatedDate)}</TableCell>
+                  <TableCell>
+                    {a.returnedDate ? fmtDate(a.returnedDate) : <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">With you</Badge>}
+                  </TableCell>
+                  <TableCell className="capitalize">{a.condition ?? '—'}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">{a.notes ?? '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Resignation Tab                                                    */
+/* ------------------------------------------------------------------ */
+
+interface ExitRequestRow {
+  id: string;
+  resignationDate: string;
+  noticePeriodDays: number;
+  lastWorkingDate: string;
+  reason: string | null;
+  status: string;
+  managerApprovedAt: string | null;
+  managerComment: string | null;
+  hrApprovedAt: string | null;
+  hrComment: string | null;
+}
+
+const EXIT_STATUS_LABEL: Record<string, string> = {
+  pending_manager: 'Awaiting manager approval',
+  pending_hr: 'Awaiting HR approval',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  withdrawn: 'Withdrawn',
+};
+
+function ResignationTab() {
+  const [existing, setExisting] = useState<ExitRequestRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [resignationDate, setResignationDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchExisting = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/exit-requests');
+      const json = await res.json();
+      const rows: ExitRequestRow[] = json.data ?? [];
+      // Self-scoped server-side, so at most one row (ExitRequest.employeeId is unique) —
+      // but a rejected/withdrawn one is a closed cycle, not something to display as "current".
+      const active = rows.find((r) => r.status !== 'rejected' && r.status !== 'withdrawn');
+      setExisting(active ?? null);
+    } catch {
+      toast.error('Failed to load resignation status');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchExisting(); }, [fetchExisting]);
+
+  const handleSubmit = async () => {
+    if (!resignationDate) {
+      toast.error('Resignation date is required.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/exit-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resignationDate, reason: reason.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit resignation');
+      toast.success('Resignation submitted');
+      setResignationDate('');
+      setReason('');
+      fetchExisting();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to submit resignation');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) return <Skeleton className="h-48 w-full" />;
+
+  if (existing) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <DoorOpen className="size-4 text-emerald-600" />
+            Your Resignation
+          </CardTitle>
+          <CardDescription>Submitted {fmtDate(existing.resignationDate)}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Status:</span>
+            <Badge variant="outline" className={badge(existing.status)}>{EXIT_STATUS_LABEL[existing.status] ?? existing.status}</Badge>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+            <div><span className="text-muted-foreground">Notice Period</span><div className="font-medium">{existing.noticePeriodDays} days</div></div>
+            <div><span className="text-muted-foreground">Last Working Date</span><div className="font-medium">{fmtDate(existing.lastWorkingDate)}</div></div>
+          </div>
+          {existing.reason && (
+            <div className="text-sm"><span className="text-muted-foreground">Your reason:</span> <span>{existing.reason}</span></div>
+          )}
+          {existing.managerComment && (
+            <div className="text-sm rounded-lg border p-3">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Manager comment</span>
+              <p>{existing.managerComment}</p>
+            </div>
+          )}
+          {existing.hrComment && (
+            <div className="text-sm rounded-lg border p-3">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">HR comment</span>
+              <p>{existing.hrComment}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <DoorOpen className="size-4 text-emerald-600" />
+          Submit Your Resignation
+        </CardTitle>
+        <CardDescription>This starts your manager and HR approval process — your last working date is calculated from your company&apos;s standard notice period.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>Resignation Date</Label>
+            <Input type="date" value={resignationDate} onChange={(e) => setResignationDate(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Reason (optional)</Label>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} />
+        </div>
+        <Button onClick={handleSubmit} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+          {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+          Submit Resignation
+        </Button>
       </CardContent>
     </Card>
   );
