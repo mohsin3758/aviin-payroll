@@ -7,8 +7,12 @@ import { logAudit } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { recordPunch } from "@/lib/attendance-punch";
 
+// Email is normalized to lowercase before lookup — User.email is stored lowercase everywhere
+// it's created, but this login is the one place a mismatch (e.g. someone typing their email
+// exactly as capitalized on their profile page) would otherwise silently 401 with a correct
+// password, since SQLite's default text comparison is case-sensitive.
 const loginSchema = z.object({
-  email: z.string().trim().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
 });
 

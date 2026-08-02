@@ -29,7 +29,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return apiError("This employee already has a portal login.", 409);
     }
 
-    const existingEmail = await db.user.findUnique({ where: { email: employee.email } });
+    // Lowercased for the login credential — Employee.email is free-text contact info and may
+    // have been typed with any casing, but the login lookup normalizes to lowercase, so the
+    // account created here must match or the employee's own email would never find it.
+    const loginEmail = employee.email.trim().toLowerCase();
+
+    const existingEmail = await db.user.findUnique({ where: { email: loginEmail } });
     if (existingEmail) {
       return apiError(`A login already exists for ${employee.email}, but it isn't linked to this employee record.`, 409);
     }
@@ -39,7 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const user = await db.user.create({
       data: {
-        email: employee.email,
+        email: loginEmail,
         name: `${employee.firstName} ${employee.lastName ?? ""}`.trim(),
         role: "employee",
         passwordHash,

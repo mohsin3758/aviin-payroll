@@ -3,7 +3,9 @@ import { z } from "zod";
 export const ROLES = ["admin", "hr", "manager", "employee"] as const;
 
 export const createUserSchema = z.object({
-  email: z.string().trim().email(),
+  // Lowercased so it always matches the login lookup, which also normalizes to lowercase
+  // (SQLite's default text comparison is case-sensitive, and email casing isn't meaningful).
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8).max(100),
   name: z.string().trim().min(1).max(100),
   role: z.enum(ROLES),
