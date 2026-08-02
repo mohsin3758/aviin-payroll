@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     const declaration = await db.investmentDeclaration.upsert({
       where: { employeeId_year: { employeeId: parsed.employeeId, year: parsed.year } },
       create: parsed,
-      update: { section80C: parsed.section80C, section80D: parsed.section80D },
+      update: { section80C: parsed.section80C, section80D: parsed.section80D, status: parsed.status },
       include: { employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
     });
 
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       action: "update",
       entity: "InvestmentDeclaration",
       entityId: declaration.id,
-      details: { employeeId: parsed.employeeId, year: parsed.year, section80C: parsed.section80C, section80D: parsed.section80D },
+      details: { employeeId: parsed.employeeId, year: parsed.year, section80C: parsed.section80C, section80D: parsed.section80D, status: parsed.status },
     });
 
     return NextResponse.json(declaration, { status: 201 });

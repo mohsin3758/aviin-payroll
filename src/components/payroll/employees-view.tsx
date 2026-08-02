@@ -314,6 +314,7 @@ export default function EmployeesView() {
   const currentFinancialYear = new Date().getFullYear()
   const [declaration80C, setDeclaration80C] = useState('')
   const [declaration80D, setDeclaration80D] = useState('')
+  const [declarationStatus, setDeclarationStatus] = useState<'declared' | 'verified' | null>(null)
   const [declarationLoading, setDeclarationLoading] = useState(false)
   const [declarationSaving, setDeclarationSaving] = useState(false)
 
@@ -326,6 +327,7 @@ export default function EmployeesView() {
       const existing = json.data?.[0]
       setDeclaration80C(existing ? String(existing.section80C) : '')
       setDeclaration80D(existing ? String(existing.section80D) : '')
+      setDeclarationStatus(existing ? existing.status : null)
     } catch {
       toast.error('Failed to load investment declaration')
     } finally {
@@ -333,7 +335,7 @@ export default function EmployeesView() {
     }
   }, [currentFinancialYear])
 
-  const handleSaveDeclaration = async () => {
+  const handleSaveDeclaration = async (status?: 'declared' | 'verified') => {
     if (!viewEmployee) return
     setDeclarationSaving(true)
     try {
@@ -345,11 +347,17 @@ export default function EmployeesView() {
           year: currentFinancialYear,
           section80C: parseFloat(declaration80C) || 0,
           section80D: parseFloat(declaration80D) || 0,
+          ...(status && { status }),
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save declaration')
-      toast.success('Investment declaration saved — will apply from the next payroll run.')
+      setDeclarationStatus(data.status)
+      toast.success(
+        status === 'verified' ? 'Declaration marked verified — the employee can no longer self-edit it.'
+          : status === 'declared' ? 'Verification reset — the employee can edit it again.'
+            : 'Investment declaration saved — will apply from the next payroll run.'
+      )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save declaration')
     } finally {
@@ -1610,10 +1618,17 @@ export default function EmployeesView() {
                 {/* Tax Declaration Tab (old regime only) */}
                 {viewEmployee.taxRegime === 'old' && (
                   <TabsContent value="tax" className="mt-4 space-y-4">
-                    <p className="text-xs text-muted-foreground">
-                      Financial year {currentFinancialYear} — combined with PF+ESI, 80C is capped at ₹1,50,000 and 80D at ₹25,000.
-                      Changes apply starting with the next payroll run processed for this year.
-                    </p>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground flex-1">
+                        Financial year {currentFinancialYear} — combined with PF+ESI, 80C is capped at ₹1,50,000 and 80D at ₹25,000.
+                        Changes apply starting with the next payroll run processed for this year.
+                      </p>
+                      {declarationStatus && (
+                        <Badge variant="outline" className={declarationStatus === 'verified' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'}>
+                          {declarationStatus === 'verified' ? 'Verified' : 'Declared'}
+                        </Badge>
+                      )}
+                    </div>
                     {declarationLoading ? (
                       <div className="space-y-3">
                         <Skeleton className="h-10 w-full" />
@@ -1645,14 +1660,35 @@ export default function EmployeesView() {
                         </div>
                       </div>
                     )}
-                    <Button
-                      size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                      disabled={declarationSaving || declarationLoading}
-                      onClick={handleSaveDeclaration}
-                    >
-                      {declarationSaving ? 'Saving...' : 'Save Declaration'}
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        disabled={declarationSaving || declarationLoading}
+                        onClick={() => handleSaveDeclaration()}
+                      >
+                        {declarationSaving ? 'Saving...' : 'Save Declaration'}
+                      </Button>
+                      {declarationStatus === 'verified' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={declarationSaving || declarationLoading}
+                          onClick={() => handleSaveDeclaration('declared')}
+                        >
+                          Reset Verification
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={declarationSaving || declarationLoading || !declarationStatus}
+                          onClick={() => handleSaveDeclaration('verified')}
+                        >
+                          Mark Verified
+                        </Button>
+                      )}
+                    </div>
                   </TabsContent>
                 )}
               </Tabs>

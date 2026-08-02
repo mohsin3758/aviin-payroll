@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { notifyEmployee } from "@/lib/notifications";
 
 // PUT /api/hiring-incentives/[id] — cancel a pending/eligible incentive before it's been paid.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -31,6 +32,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     });
 
     await logAudit({ session, action: "update", entity: "HiringIncentive", entityId: id, details: { toStatus: "cancelled" } });
+
+    await notifyEmployee(existing.recruiterId, {
+      title: "Hiring incentive cancelled",
+      message: `Your ₹${existing.amount.toLocaleString("en-IN")} hiring incentive (pay month ${existing.payMonth}/${existing.payYear}) was cancelled.`,
+      category: "general",
+      link: "hiring-incentives",
+    });
 
     return NextResponse.json(incentive);
   } catch (error) {

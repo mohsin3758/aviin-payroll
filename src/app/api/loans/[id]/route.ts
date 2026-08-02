@@ -6,6 +6,18 @@ import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 
+// "closed" is also reached automatically from payroll processing once every EMI is paid
+// (src/app/api/payroll/route.ts) — not reachable through this manual route, only through here
+// for the human-driven transitions. Every other state is terminal: no route anywhere moves a
+// loan back out of rejected/closed/cancelled.
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  pending: ["active", "rejected", "cancelled"],
+  active: ["closed", "cancelled"],
+  closed: [],
+  cancelled: [],
+  rejected: [],
+};
+
 // PUT /api/loans/[id] — change status (e.g. cancel an active loan before any EMI is deducted)
 export async function PUT(
   request: NextRequest,
@@ -23,6 +35,10 @@ export async function PUT(
     });
     if (!existing) {
       return apiError("Loan not found", 404);
+    }
+    const allowedNext = VALID_TRANSITIONS[existing.status] ?? [];
+    if (!allowedNext.includes(status)) {
+      return apiError(`Cannot change status from "${existing.status}" to "${status}".`, 409);
     }
 
     const loan = await db.employeeLoan.update({

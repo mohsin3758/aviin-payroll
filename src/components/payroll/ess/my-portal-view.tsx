@@ -1421,6 +1421,17 @@ function LoansTab() {
     }
   };
 
+  const handleWithdraw = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ess/loans/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to withdraw request');
+      toast.success('Request withdrawn');
+      fetchLoans();
+    } catch {
+      toast.error('Failed to withdraw request');
+    }
+  };
+
   if (loading) return <Skeleton className="h-40 w-full" />;
 
   return (
@@ -1463,7 +1474,7 @@ function LoansTab() {
       <CardContent>
         {loans.length === 0 ? <p className="text-sm text-muted-foreground py-8 text-center">No loans or advances on record.</p> : (
           <Table>
-            <TableHeader><TableRow><TableHead>Type</TableHead><TableHead className="text-right">Principal</TableHead><TableHead className="text-right">EMI</TableHead><TableHead className="text-right">Remaining</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Type</TableHead><TableHead className="text-right">Principal</TableHead><TableHead className="text-right">EMI</TableHead><TableHead className="text-right">Remaining</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
             <TableBody>
               {loans.map((l) => (
                 <TableRow key={l.id}>
@@ -1472,6 +1483,7 @@ function LoansTab() {
                   <TableCell className="text-right">{fmt(l.emiAmount)}</TableCell>
                   <TableCell className="text-right">{l.status === 'pending' ? '—' : `${l.remainingMonths} / ${l.totalMonths} mo`}</TableCell>
                   <TableCell><Badge variant="outline" className={LOAN_STATUS_BADGE[l.status] ?? 'capitalize'}>{l.status}</Badge></TableCell>
+                  <TableCell>{l.status === 'pending' && <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleWithdraw(l.id)}>Withdraw</Button>}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
