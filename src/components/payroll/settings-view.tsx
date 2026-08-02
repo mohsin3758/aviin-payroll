@@ -1171,11 +1171,39 @@ export default function SettingsView() {
         </div>
       </div>
 
-      <Tabs defaultValue="company">
-        <TabsList>
-          <TabsTrigger value="company" className="gap-1.5">
+      <Tabs defaultValue="company-info">
+        <TabsList className="flex flex-wrap h-auto">
+          <TabsTrigger value="company-info" className="gap-1.5">
             <Building2 className="size-4" />
-            Company
+            Company Info
+          </TabsTrigger>
+          <TabsTrigger value="compliance" className="gap-1.5">
+            <Shield className="size-4" />
+            Compliance
+          </TabsTrigger>
+          <TabsTrigger value="calendar" className="gap-1.5">
+            <CalendarDays className="size-4" />
+            Calendar
+          </TabsTrigger>
+          <TabsTrigger value="shifts" className="gap-1.5">
+            <Clock className="size-4" />
+            Shifts
+          </TabsTrigger>
+          <TabsTrigger value="location" className="gap-1.5">
+            <MapPin className="size-4" />
+            Location
+          </TabsTrigger>
+          <TabsTrigger value="email" className="gap-1.5">
+            <Mail className="size-4" />
+            Email
+          </TabsTrigger>
+          <TabsTrigger value="bank-formats" className="gap-1.5">
+            <FileSpreadsheet className="size-4" />
+            Bank Formats
+          </TabsTrigger>
+          <TabsTrigger value="audit-log" className="gap-1.5">
+            <ScrollText className="size-4" />
+            Audit Log
           </TabsTrigger>
           <TabsTrigger value="users" className="gap-1.5">
             <Users className="size-4" />
@@ -1183,7 +1211,7 @@ export default function SettingsView() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="company" className="space-y-6">
+        <TabsContent value="company-info" className="space-y-6">
 
       {/* ─── 1. Company Information ──────────────────────────────────────────── */}
       <Card>
@@ -1362,6 +1390,10 @@ export default function SettingsView() {
           </Button>
         </CardFooter>
       </Card>
+
+        </TabsContent>
+
+        <TabsContent value="compliance" className="space-y-6">
 
       {/* ─── 2. Statutory Compliance Reference ───────────────────────────────── */}
       <Card>
@@ -1794,6 +1826,10 @@ export default function SettingsView() {
         </CardContent>
       </Card>
 
+        </TabsContent>
+
+        <TabsContent value="calendar" className="space-y-6">
+
       {/* ─── Company Calendar: Weekly Off + Holidays ─────────────────────────── */}
       <Card>
         <CardHeader>
@@ -1901,6 +1937,10 @@ export default function SettingsView() {
         </DialogContent>
       </Dialog>
 
+        </TabsContent>
+
+        <TabsContent value="shifts" className="space-y-6">
+
       {/* ─── Shift Definitions ────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
@@ -1989,6 +2029,10 @@ export default function SettingsView() {
         </DialogContent>
       </Dialog>
 
+        </TabsContent>
+
+        <TabsContent value="email" className="space-y-6">
+
       {/* ─── Email (SMTP) Configuration (admin only) ─────────────────────────── */}
       {user?.role === 'admin' && (
         <Card>
@@ -2051,6 +2095,10 @@ export default function SettingsView() {
           </CardContent>
         </Card>
       )}
+
+        </TabsContent>
+
+        <TabsContent value="location" className="space-y-6">
 
       {/* ─── Office Location & Attendance (admin only) ────────────────────────── */}
       {user?.role === 'admin' && (
@@ -2210,6 +2258,10 @@ export default function SettingsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+        </TabsContent>
+
+        <TabsContent value="bank-formats" className="space-y-6">
 
       {/* ─── Bank Transfer Formats (admin/hr) ──────────────────────────────────── */}
       {(user?.role === 'admin' || user?.role === 'hr') && (
@@ -2431,6 +2483,10 @@ export default function SettingsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+        </TabsContent>
+
+        <TabsContent value="audit-log" className="space-y-6">
 
       {/* Audit Log (admin only) */}
       {user?.role === 'admin' && (
