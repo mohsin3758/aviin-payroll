@@ -133,6 +133,22 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
     return { ok: false, status: 400, error: "Manual punch is currently disabled. Use face punch or contact your admin." };
   }
 
+  // evaluateGeofence itself never rejects on missing punch coordinates (by design — a
+  // login/logout-triggered punch never has any) but that same leniency, applied to an
+  // interactive face/manual punch, meant enforcement could be silently bypassed just by
+  // denying the browser's location permission (or it timing out) — the check would compute
+  // "not evaluable" and let the punch through unconditionally. When enforcement is actually
+  // on, an interactive punch missing coordinates is treated as a hard requirement, not a skip.
+  if (
+    method !== "login" &&
+    company?.enforceGeofence &&
+    company.officeLatitude != null &&
+    company.officeLongitude != null &&
+    (latitude == null || longitude == null)
+  ) {
+    return { ok: false, status: 400, error: "Location access is required to punch from here. Please allow location access in your browser and try again." };
+  }
+
   const geofence = evaluateGeofence({
     officeLatitude: company?.officeLatitude ?? null,
     officeLongitude: company?.officeLongitude ?? null,

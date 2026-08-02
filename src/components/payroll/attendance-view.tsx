@@ -201,6 +201,7 @@ export default function AttendanceView() {
   // ---- Office location config (drives whether geolocation is captured at all, and whether
   // the login-attendance info card reflects an active or inactive feature) ----
   const [officeConfigured, setOfficeConfigured] = useState(false);
+  const [geofenceEnforced, setGeofenceEnforced] = useState(false);
   const [loginAttendanceEnabled, setLoginAttendanceEnabled] = useState(false);
   const [logoutAttendanceEnabled, setLogoutAttendanceEnabled] = useState(false);
   const [allowFacePunch, setAllowFacePunch] = useState(true);
@@ -212,6 +213,7 @@ export default function AttendanceView() {
         const res = await fetch('/api/settings');
         const json = await res.json();
         setOfficeConfigured(json.data?.officeLatitude != null && json.data?.officeLongitude != null);
+        setGeofenceEnforced(!!json.data?.enforceGeofence);
         setLoginAttendanceEnabled(!!json.data?.enableLoginAttendance);
         setLogoutAttendanceEnabled(!!json.data?.enableLogoutAttendance);
         setAllowFacePunch(json.data?.allowFacePunch !== false);
@@ -459,8 +461,13 @@ export default function AttendanceView() {
 
   // ---- Best-effort geolocation capture ----
   // Only ever attempted once an admin has configured an office location — otherwise no
-  // location permission prompt appears at all. Never blocks or delays a punch: resolves null
-  // on denial, timeout, or an unsupported browser rather than rejecting.
+  // location permission prompt appears at all. Doesn't itself reject anything here (the server
+  // is the one that enforces — see recordPunch's "coordinates required when enforced" guard in
+  // attendance-punch.ts); this just gives the user a clear heads-up when enforcement is on and
+  // location couldn't be obtained, instead of a confusing rejection with no visible cause.
+  // 10s timeout + a 60s maximumAge: network-based positioning (no GPS chip, e.g. most laptops)
+  // routinely takes longer than the previous 5s to resolve, and reusing a very recent fix avoids
+  // re-prompting the OS location stack on every single punch.
   const captureGeoLocation = useCallback((): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
     if (!officeConfigured || typeof navigator === 'undefined' || !navigator.geolocation) {
       return Promise.resolve(null);
@@ -468,11 +475,16 @@ export default function AttendanceView() {
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-        () => resolve(null),
-        { timeout: 5000 }
+        () => {
+          if (geofenceEnforced) {
+            toast.error("Couldn't determine your location — allow location access in your browser and try again.");
+          }
+          resolve(null);
+        },
+        { timeout: 10000, maximumAge: 60000 }
       );
     });
-  }, [officeConfigured]);
+  }, [officeConfigured, geofenceEnforced]);
 
   // ---- Face Punch: camera lifecycle ----
   // Starts the moment the Confirm Punch dialog opens (while allowFacePunch is on — no point

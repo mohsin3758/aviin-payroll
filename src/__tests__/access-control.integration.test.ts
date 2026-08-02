@@ -499,12 +499,13 @@ describe("Access control fixes (requires live dev server)", () => {
   // ---- Geofence (gap 4) ----
   describe("geofence", () => {
     afterAll(async () => {
-      // Always leave enforcement off, whatever happens above — this must never linger enabled
-      // on a shared dev DB just because a test ran.
+      // Always leave enforcement (and login-attendance, enabled by the exemption test below)
+      // off, whatever happens above — this must never linger enabled on a shared dev DB just
+      // because a test ran.
       await fetch(`${BASE}/api/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Cookie: adminCookie },
-        body: JSON.stringify({ enforceGeofence: false }),
+        body: JSON.stringify({ enforceGeofence: false, enableLoginAttendance: false }),
       });
     });
 
@@ -532,6 +533,38 @@ describe("Access control fixes (requires live dev server)", () => {
       // Never 400 (geofence) — 201/409 both prove the geofence check itself passed.
       expect(res.status).not.toBe(400);
       expect([201, 409]).toContain(res.status);
+    });
+
+    it("rejects an interactive (manual) punch with no coordinates at all when enforcement is on — the actual bug: enforcement was previously silently bypassable just by denying location", async () => {
+      const res = await fetch(`${BASE}/api/attendance/punch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ employeeId: selfId, action: "in", method: "manual" }), // no latitude/longitude
+      });
+      expect(res.status).toBe(400);
+      const { error } = await res.json();
+      expect(error).toMatch(/location/i);
+    });
+
+    it("does not reject a login-triggered punch even with no coordinates, when enforcement is on (login punches never have any, by design)", async () => {
+      // A different employee than EMP001-EMP005 deliberately — those are claimed by other
+      // describe blocks (self/other/exit/link-employee/login-based-attendance) elsewhere in
+      // this file, and linking a login to one here would collide with their expectations.
+      const freshEmployeeId = await resolveEmployeeId(adminCookie, "EMP0007");
+      await fetch(`${BASE}/api/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ enableLoginAttendance: true }),
+      });
+      await ensureEmployeeLogin(adminCookie, "qa.employee7geofence@test.local", freshEmployeeId);
+
+      // No date filter (rather than computing "today" client-side) — the record's `date` is
+      // stored as an IST calendar date server-side (see istDateOnly()), which can differ from
+      // the UTC date right around IST midnight, making a client-computed date param flaky.
+      const res = await fetch(`${BASE}/api/attendance?employeeId=${freshEmployeeId}`, { headers: { Cookie: adminCookie } });
+      const { data } = await res.json();
+      expect(data.length).toBeGreaterThan(0);
+      expect(data[0].punchInMethod).toBe("login");
     });
   });
 
