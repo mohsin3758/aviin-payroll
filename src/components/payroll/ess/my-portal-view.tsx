@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   UserCircle, Loader2, Plus, Trash2, Upload, Download, Printer,
   FileText, Award, Wallet, PiggyBank, Receipt, Save, HandCoins,
-  Package, TrendingUp, DoorOpen, Send, Clock,
+  Package, TrendingUp, DoorOpen, Send, Clock, ScanFace, ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -23,6 +24,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { usePayrollStore } from '@/store/payroll-store';
+import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
 
 const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
@@ -810,7 +812,225 @@ function AttendanceTab() {
           )}
         </CardContent>
       </Card>
+
+      <FaceEnrollmentCard />
     </>
+  );
+}
+
+interface FaceEnrollmentStatus {
+  enrolled: boolean;
+  enrolledAt?: string;
+  consentedAt?: string;
+}
+
+function FaceEnrollmentCard() {
+  const [status, setStatus] = useState<FaceEnrollmentStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [modelsReady, setModelsReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/ess/face-enrollment');
+      const data = await res.json();
+      setStatus(data.data ?? { enrolled: false });
+    } catch {
+      toast.error('Failed to load face enrollment status');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setCameraReady(false);
+  }, []);
+
+  // Camera only ever turns on after explicit consent, and always stops the moment the dialog
+  // closes for any reason (cancel, success, or unmount) — never lingers running in the background.
+  useEffect(() => {
+    if (!open || !consent) return;
+    let cancelled = false;
+    setCameraError(null);
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        setCameraReady(true);
+      } catch {
+        if (!cancelled) setCameraError('Camera access was denied or is unavailable. Check your browser permissions and try again.');
+      }
+      try {
+        await loadFaceModels();
+        if (!cancelled) setModelsReady(true);
+      } catch {
+        if (!cancelled) setCameraError('Failed to load the face recognition models. Check your connection and try again.');
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stopCamera();
+    };
+  }, [open, consent, stopCamera]);
+
+  const closeDialog = () => {
+    stopCamera();
+    setOpen(false);
+    setConsent(false);
+    setModelsReady(false);
+  };
+
+  const handleCapture = async () => {
+    if (!videoRef.current) return;
+    setCapturing(true);
+    try {
+      const result = await captureFaceDescriptor(videoRef.current);
+      if (!result.ok) {
+        toast.error(
+          result.reason === 'no-face' ? 'No face detected — center your face in the frame and try again.'
+            : result.reason === 'multiple-faces' ? 'More than one face detected — make sure only you are in frame.'
+              : 'Capture failed. Try again.'
+        );
+        return;
+      }
+      const res = await fetch('/api/ess/face-enrollment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descriptor: result.descriptor, consent: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to enroll');
+      toast.success('Face enrolled — you can now use Quick Confirm to punch in/out.');
+      closeDialog();
+      fetchStatus();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to enroll');
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Remove your enrolled face? Quick Confirm punch will be unavailable until you re-enroll.')) return;
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/ess/face-enrollment', { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove enrollment');
+      toast.success('Face enrollment removed');
+      fetchStatus();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove enrollment');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <ScanFace className="size-4 text-emerald-600" />
+          Face Recognition
+        </CardTitle>
+        <CardDescription>Enroll your face once to use Quick Confirm punch — it compares a live capture against this reference every time.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? <Skeleton className="h-16 w-full" /> : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {status?.enrolled ? (
+                <>
+                  <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200">Enrolled</Badge>
+                  <span className="text-xs text-muted-foreground">since {fmtDate(status.enrolledAt ?? null)}</span>
+                </>
+              ) : (
+                <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Not enrolled</Badge>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+                {status?.enrolled ? 'Re-enroll' : 'Enroll My Face'}
+              </Button>
+              {status?.enrolled && (
+                <Button size="sm" variant="ghost" className="text-red-600" disabled={deleting} onClick={handleDelete}>
+                  {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+
+      <Dialog open={open} onOpenChange={(o) => { if (!o) closeDialog(); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ScanFace className="size-5 text-emerald-500" />Enroll Your Face</DialogTitle>
+            <DialogDescription>This captures a live photo from your camera, converts it into a numeric face descriptor, and stores only that descriptor — never the photo itself.</DialogDescription>
+          </DialogHeader>
+
+          {!consent ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-2">
+                <p className="flex items-start gap-2"><ShieldCheck className="size-4 shrink-0 mt-0.5 text-emerald-600" />Your camera only turns on after you consent below, and only for this enrollment.</p>
+                <p>Used only to verify your identity when you choose Quick Confirm punch. You can remove your enrollment at any time from this screen.</p>
+              </div>
+              <div className="flex items-start gap-2">
+                <Checkbox id="face-consent" checked={consent} onCheckedChange={(v) => setConsent(!!v)} />
+                <Label htmlFor="face-consent" className="cursor-pointer font-normal text-sm">
+                  I consent to my camera capturing my face for identity verification, and to storing the resulting face descriptor for that purpose.
+                </Label>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeDialog}>Cancel</Button>
+                <Button disabled={!consent} onClick={() => setConsent(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white">Continue</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="relative w-full aspect-video rounded-lg bg-muted overflow-hidden border">
+                <video ref={videoRef} muted playsInline className="w-full h-full object-cover -scale-x-100" />
+                {!cameraReady && !cameraError && (
+                  <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground bg-muted/80">
+                    <Loader2 className="size-5 animate-spin mr-2" />Starting camera…
+                  </div>
+                )}
+              </div>
+              {cameraError && <p className="text-sm text-red-600">{cameraError}</p>}
+              {cameraReady && !modelsReady && !cameraError && (
+                <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="size-3.5 animate-spin" />Loading face recognition models…</p>
+              )}
+              <p className="text-xs text-muted-foreground">Look straight at the camera in good lighting, with only your face in frame, then capture.</p>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeDialog} disabled={capturing}>Cancel</Button>
+                <Button onClick={handleCapture} disabled={!cameraReady || !modelsReady || capturing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  {capturing ? <Loader2 className="size-4 animate-spin" /> : <ScanFace className="size-4" />}
+                  Capture &amp; Enroll
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }
 

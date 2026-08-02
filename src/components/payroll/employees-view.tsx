@@ -76,6 +76,7 @@ import {
   FileText,
   Loader2,
   Wallet,
+  ScanFace,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePayrollStore } from '@/store/payroll-store'
@@ -1510,6 +1511,11 @@ export default function EmployeesView() {
                       <ComplianceBadge label="LWF" active={viewEmployee.lwfApplicable} />
                     </div>
                   </div>
+                  <Separator />
+                  <div>
+                    <h4 className="text-xs text-muted-foreground font-medium mb-3">Face Attendance</h4>
+                    <FaceEnrollmentStatus employeeId={viewEmployee.id} canManage={canManage} />
+                  </div>
                 </TabsContent>
 
                 {/* Salary Tab */}
@@ -1687,6 +1693,77 @@ function InfoItem({
       </div>
       {children || (
         <p className={`text-sm pl-6 ${mono ? 'font-mono' : ''}`}>{value || '—'}</p>
+      )}
+    </div>
+  )
+}
+
+function FaceEnrollmentStatus({ employeeId, canManage }: { employeeId: string; canManage: boolean }) {
+  const [status, setStatus] = useState<{ enrolled: boolean; enrolledAt?: string } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [revoking, setRevoking] = useState(false)
+
+  const fetchStatus = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/employees/${employeeId}/face-enrollment`)
+      const json = await res.json()
+      setStatus(res.ok ? json.data : null)
+    } catch {
+      setStatus(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [employeeId])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  const handleRevoke = async () => {
+    if (!confirm("Revoke this employee's face enrollment? They will need to re-enroll in My Portal before using face punch again.")) return
+    setRevoking(true)
+    try {
+      const res = await fetch(`/api/employees/${employeeId}/face-enrollment`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to revoke enrollment' }))
+        throw new Error(err.error || 'Failed to revoke enrollment')
+      }
+      toast.success('Face enrollment revoked.')
+      fetchStatus()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to revoke enrollment')
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  if (loading) {
+    return <Skeleton className="h-11 w-full" />
+  }
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border p-3">
+      <div className="flex items-center gap-2.5">
+        <ScanFace className="size-4 text-muted-foreground" />
+        {status?.enrolled ? (
+          <div>
+            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-transparent">
+              Enrolled
+            </Badge>
+            {status.enrolledAt && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Since {new Date(status.enrolledAt).toLocaleDateString('en-IN')}
+              </p>
+            )}
+          </div>
+        ) : (
+          <Badge variant="secondary">Not enrolled</Badge>
+        )}
+      </div>
+      {canManage && status?.enrolled && (
+        <Button variant="outline" size="sm" onClick={handleRevoke} disabled={revoking}>
+          {revoking ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+          Revoke
+        </Button>
       )}
     </div>
   )

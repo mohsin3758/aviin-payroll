@@ -23,6 +23,7 @@ import {
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
 import { istDateOnly } from '@/lib/date-ist';
+import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -297,6 +298,11 @@ export default function AttendanceView() {
   const [punchAction, setPunchAction] = useState<PunchAction>('in');
   const [verificationStep, setVerificationStep] = useState<VerificationStep>('idle');
   const [verificationPunching, setVerificationPunching] = useState(false);
+  const [faceCameraReady, setFaceCameraReady] = useState(false);
+  const [faceModelsReady, setFaceModelsReady] = useState(false);
+  const [faceCameraError, setFaceCameraError] = useState<string | null>(null);
+  const faceVideoRef = useRef<HTMLVideoElement>(null);
+  const faceStreamRef = useRef<MediaStream | null>(null);
 
   // ---- State: Manual Punch Dialog ----
   const [manualTime, setManualTime] = useState<string>('');
@@ -468,6 +474,46 @@ export default function AttendanceView() {
     });
   }, [officeConfigured]);
 
+  // ---- Face Punch: camera lifecycle ----
+  // Starts the moment the Confirm Punch dialog opens (while allowFacePunch is on — no point
+  // requesting camera access if that tab won't even render) and always stops when the dialog
+  // closes for any reason, never lingering running in the background.
+  const stopFaceCamera = useCallback(() => {
+    faceStreamRef.current?.getTracks().forEach((t) => t.stop());
+    faceStreamRef.current = null;
+    setFaceCameraReady(false);
+  }, []);
+
+  useEffect(() => {
+    if (!verificationOpen || !allowFacePunch) return;
+    let cancelled = false;
+    setFaceCameraError(null);
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        faceStreamRef.current = stream;
+        if (faceVideoRef.current) {
+          faceVideoRef.current.srcObject = stream;
+          await faceVideoRef.current.play();
+        }
+        setFaceCameraReady(true);
+      } catch {
+        if (!cancelled) setFaceCameraError('Camera access was denied or is unavailable. Use Manual Punch instead.');
+      }
+      try {
+        await loadFaceModels();
+        if (!cancelled) setFaceModelsReady(true);
+      } catch {
+        if (!cancelled) setFaceCameraError('Failed to load the face recognition models. Use Manual Punch instead.');
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stopFaceCamera();
+    };
+  }, [verificationOpen, allowFacePunch, stopFaceCamera]);
+
   // ---- Punch Handler ----
   const handlePunchClick = (action: PunchAction) => {
     if (!punchEmployeeId) {
@@ -488,16 +534,23 @@ export default function AttendanceView() {
     setVerificationOpen(true);
   };
 
-  // ---- Confirm Punch Animation ----
+  // ---- Confirm Punch: real camera capture + server-side face match ----
   const runFaceVerification = useCallback(async () => {
+    if (!faceVideoRef.current || !faceCameraReady || !faceModelsReady) return;
     setVerificationPunching(true);
-    const steps: VerificationStep[] = ['initializing', 'detecting', 'verifying', 'verified'];
-    for (const step of steps) {
-      setVerificationStep(step);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    // Submit punch
+    setVerificationStep('detecting');
     try {
+      const capture = await captureFaceDescriptor(faceVideoRef.current);
+      if (!capture.ok) {
+        setVerificationStep('error');
+        toast.error(
+          capture.reason === 'no-face' ? 'No face detected — center your face in the frame and try again.'
+            : capture.reason === 'multiple-faces' ? 'More than one face detected — make sure only you are in frame.'
+              : 'Capture failed. Try again.'
+        );
+        return;
+      }
+      setVerificationStep('verifying');
       const geo = await captureGeoLocation();
       const res = await fetch('/api/attendance/punch', {
         method: 'POST',
@@ -506,7 +559,7 @@ export default function AttendanceView() {
           employeeId: punchEmployeeId,
           action: punchAction,
           method: 'face',
-          faceData: { verified: true, confidence: 98.5 },
+          faceData: { descriptor: capture.descriptor },
           ...(geo && { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy }),
         }),
       });
@@ -514,17 +567,18 @@ export default function AttendanceView() {
         const err = await res.json().catch(() => ({ error: 'Punch failed' }));
         throw new Error(err.error || 'Punch failed');
       }
+      setVerificationStep('verified');
       toast.success(`Punch ${punchAction === 'in' ? 'IN' : 'OUT'} recorded successfully!`);
-      setVerificationOpen(false);
       fetchAttendance();
       fetchTodayPunch(punchEmployeeId);
+      setTimeout(() => setVerificationOpen(false), 900);
     } catch (err) {
       setVerificationStep('error');
       toast.error(err instanceof Error ? err.message : 'Punch failed');
     } finally {
       setVerificationPunching(false);
     }
-  }, [punchEmployeeId, punchAction, fetchAttendance, fetchTodayPunch, captureGeoLocation]);
+  }, [punchEmployeeId, punchAction, fetchAttendance, fetchTodayPunch, captureGeoLocation, faceCameraReady, faceModelsReady]);
 
   // ---- Manual Punch Submit ----
   const handleManualPunch = useCallback(async () => {
@@ -609,48 +663,84 @@ export default function AttendanceView() {
   }, [markEmployeeId, markDate, markPunchIn, markPunchOut, markStatus, markMethod, markNotes, fetchAttendance]);
 
   // ---- Confirmation Step UI ----
-  // Deliberately not a real biometric check: this is a short confirmation animation that adds
-  // a moment of friction against accidental taps, nothing more. Labels avoid any wording that
-  // would imply identity/face verification actually happened (see gap 5 in the training guide).
-  const renderVerificationContent = () => (
+  // Real biometric check: the boxed area below is a live front-camera feed. On "Start
+  // Confirmation" we run on-device face detection + descriptor extraction (captureFaceDescriptor)
+  // and send only the resulting 128-number descriptor to the server, which matches it against
+  // the employee's enrolled FaceEnrollment — see face-recognition-client.ts / face-match.ts.
+  const renderVerificationContent = () => {
+    const showLiveVideo = verificationStep !== 'verified';
+    return (
     <div className="flex flex-col items-center gap-5 py-2">
-      {/* Confirmation placeholder */}
+      {/* Live camera feed, with state overlays on top */}
       <div className="relative w-48 h-48 rounded-2xl bg-muted/60 border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-3 overflow-hidden">
+        <video
+          ref={faceVideoRef}
+          muted
+          playsInline
+          className={`absolute inset-0 size-full object-cover -scale-x-100 ${showLiveVideo && faceCameraReady ? 'opacity-100' : 'opacity-0'}`}
+        />
         <AnimatePresence mode="wait">
-          {verificationStep === 'idle' && (
+          {!faceCameraError && verificationStep === 'idle' && !faceCameraReady && (
             <motion.div
-              key="idle"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="flex flex-col items-center gap-3"
+              key="starting-camera"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center gap-3 bg-muted/60 px-3 py-2 rounded-lg"
             >
-              <Fingerprint className="size-12 text-muted-foreground/50" />
-              <span className="text-sm text-muted-foreground">Ready to confirm</span>
+              <Loader2 className="size-8 animate-spin text-muted-foreground/60" />
+              <span className="text-sm text-muted-foreground">Starting camera...</span>
             </motion.div>
           )}
-          {(verificationStep === 'initializing' || verificationStep === 'detecting' || verificationStep === 'verifying') && (
+          {!faceCameraError && verificationStep === 'idle' && faceCameraReady && !faceModelsReady && (
             <motion.div
-              key={verificationStep}
+              key="loading-models"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center gap-3 bg-black/40 px-3 py-2 rounded-lg"
+            >
+              <Loader2 className="size-8 animate-spin text-white" />
+              <span className="text-sm text-white">Loading face recognition...</span>
+            </motion.div>
+          )}
+          {!faceCameraError && verificationStep === 'idle' && faceCameraReady && faceModelsReady && (
+            <motion.div
+              key="ready"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-3 rounded-xl border-2 border-emerald-500/50 pointer-events-none"
+            />
+          )}
+          {faceCameraError && (
+            <motion.div
+              key="camera-error"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="flex flex-col items-center gap-3"
+              className="flex flex-col items-center gap-2 px-3 text-center"
             >
-              <motion.div
-                animate={{ scale: [1, 1.1, 1], opacity: [0.6, 1, 0.6] }}
-                transition={{ repeat: Infinity, duration: 1.5 }}
-              >
-                <Fingerprint className="size-12 text-emerald-500" />
-              </motion.div>
-              {/* Scanning line */}
+              <AlertCircle className="size-8 text-red-500" />
+              <span className="text-xs text-muted-foreground">{faceCameraError}</span>
+            </motion.div>
+          )}
+          {(verificationStep === 'detecting' || verificationStep === 'verifying') && (
+            <motion.div
+              key={verificationStep}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              {/* Scanning line over the live video */}
               <motion.div
                 className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent"
                 initial={{ top: '10%' }}
                 animate={{ top: ['10%', '90%', '10%'] }}
                 transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
               />
-              <div className="absolute inset-3 rounded-xl border-2 border-emerald-500/40" />
+              <div className="absolute inset-3 rounded-xl border-2 border-emerald-500/60" />
             </motion.div>
           )}
           {verificationStep === 'verified' && (
@@ -672,12 +762,12 @@ export default function AttendanceView() {
               key="error"
               initial={{ opacity: 0, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center gap-3"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50"
             >
               <div className="size-16 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
                 <AlertCircle className="size-10 text-red-600 dark:text-red-400" />
               </div>
-              <span className="text-sm font-medium text-red-600 dark:text-red-400">Confirmation Failed</span>
+              <span className="text-sm font-medium text-red-100">Confirmation Failed</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -738,7 +828,7 @@ export default function AttendanceView() {
           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
           size="lg"
           onClick={runFaceVerification}
-          disabled={verificationPunching}
+          disabled={verificationPunching || !faceCameraReady || !faceModelsReady || !!faceCameraError}
         >
           {verificationPunching ? <Loader2 className="size-4 animate-spin" /> : <Fingerprint className="size-4" />}
           Start Confirmation
@@ -749,14 +839,15 @@ export default function AttendanceView() {
           className="w-full"
           variant="outline"
           onClick={runFaceVerification}
-          disabled={verificationPunching}
+          disabled={verificationPunching || !faceCameraReady || !faceModelsReady || !!faceCameraError}
         >
           <Loader2 className={`size-4 ${verificationPunching ? 'animate-spin' : 'hidden'}`} />
           Retry
         </Button>
       )}
     </div>
-  );
+    );
+  };
 
   // ---- Render ----
   return (

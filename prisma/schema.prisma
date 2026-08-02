@@ -197,6 +197,7 @@ model Employee {
   hiringIncentives    HiringIncentive[]
   recruitedCandidates Candidate[]
   regularizations     AttendanceRegularizationRequest[]
+  faceEnrollment      FaceEnrollment?
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
@@ -441,6 +442,22 @@ model AttendanceRegularizationRequest {
 
   @@index([employeeId])
   @@index([status])
+}
+
+// An employee's enrolled reference face, captured with explicit consent — never a photo,
+// only the 128-number face-api.js descriptor computed from it client-side (the photo itself
+// never leaves the browser). One per employee; re-enrolling overwrites the previous descriptor.
+// consentedAt is kept as evidence of consent even across a later re-enrollment (updatedAt would
+// otherwise overwrite that record).
+model FaceEnrollment {
+  id            String   @id @default(cuid())
+  employeeId    String   @unique
+  descriptor    String   // JSON-encoded number[128]
+  consentedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee      Employee @relation(fields: [employeeId], references: [id])
 }
 
 model LeaveType {

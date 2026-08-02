@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { evaluateGeofence } from "@/lib/geo";
 import { istDateOnly } from "@/lib/date-ist";
+import { isValidDescriptor, matchFaceDescriptors } from "@/lib/face-match";
 import type { SessionPayload } from "@/lib/auth";
 import type { Attendance } from "@prisma/client";
 
@@ -16,7 +17,10 @@ export interface RecordPunchParams {
   employeeId: string;
   action: "in" | "out";
   method: "face" | "manual" | "login";
-  faceData?: { verified?: boolean; confidence?: number };
+  /** A 128-number face-api.js descriptor computed client-side from a live camera capture —
+   * never a photo. The server never trusts a client-asserted "verified" flag; it always
+   * recomputes the match itself against the employee's enrolled FaceEnrollment. */
+  faceData?: { descriptor?: unknown };
   ipAddress?: string | null;
   deviceInfo?: string | null;
   latitude?: number | null;
@@ -92,17 +96,32 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
     return { ok: false, status: 400, error: "Cannot record attendance for an exited employee." };
   }
 
-  const faceVerified = faceData?.verified === true;
+  let faceVerified = false;
   let faceConfidence: number | null = null;
 
   if (method === "face") {
-    if (!faceData || !faceData.verified) {
-      return { ok: false, status: 400, error: "Face data with verified=true is required for face method." };
+    if (!isValidDescriptor(faceData?.descriptor)) {
+      return { ok: false, status: 400, error: "A live face capture is required for face punch." };
     }
-    if (typeof faceData.confidence !== "number" || faceData.confidence < 0) {
-      return { ok: false, status: 400, error: "faceData.confidence must be a non-negative number." };
+    const enrollment = await db.faceEnrollment.findUnique({ where: { employeeId } });
+    if (!enrollment) {
+      return { ok: false, status: 400, error: "You haven't enrolled your face yet. Enroll it in My Portal, or use Manual Punch." };
     }
-    faceConfidence = faceData.confidence;
+    let storedDescriptor: unknown;
+    try {
+      storedDescriptor = JSON.parse(enrollment.descriptor);
+    } catch {
+      storedDescriptor = null;
+    }
+    if (!isValidDescriptor(storedDescriptor)) {
+      return { ok: false, status: 400, error: "Your face enrollment is corrupted — please re-enroll in My Portal." };
+    }
+    const match = matchFaceDescriptors(faceData.descriptor, storedDescriptor);
+    if (!match.matched) {
+      return { ok: false, status: 400, error: "Face not recognized. Try again with better lighting, or use Manual Punch." };
+    }
+    faceVerified = true;
+    faceConfidence = match.confidence;
   }
 
   const company = await db.company.findFirst();
