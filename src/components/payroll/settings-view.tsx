@@ -69,7 +69,7 @@ import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
 import { findLikelyHeaderRowIndex, guessFieldForHeader } from '@/lib/bank-format';
-import { ScrollText, CalendarDays, Trash2, PlusCircle, Pencil, Upload, ArrowUp, ArrowDown, FileSpreadsheet } from 'lucide-react';
+import { ScrollText, CalendarDays, Trash2, PlusCircle, Pencil, Upload, ArrowUp, ArrowDown, FileSpreadsheet, Clock } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 
@@ -110,6 +110,14 @@ interface Holiday {
   name: string;
   date: string;
   type: string;
+}
+
+interface Shift {
+  id: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  gracePeriodMinutes: number;
 }
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -627,6 +635,134 @@ export default function SettingsView() {
       fetchHolidays();
     } catch {
       toast.error('Failed to delete holiday');
+    }
+  };
+
+  const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
+  const [editHolidayName, setEditHolidayName] = useState('');
+  const [editHolidayDate, setEditHolidayDate] = useState('');
+  const [savingHoliday, setSavingHoliday] = useState(false);
+
+  const openEditHoliday = (h: Holiday) => {
+    setEditingHoliday(h);
+    setEditHolidayName(h.name);
+    setEditHolidayDate(h.date.slice(0, 10));
+  };
+
+  const handleSaveEditHoliday = async () => {
+    if (!editingHoliday) return;
+    setSavingHoliday(true);
+    try {
+      const res = await fetch(`/api/holidays/${editingHoliday.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editHolidayName.trim(), date: editHolidayDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update holiday');
+      toast.success('Holiday updated');
+      setEditingHoliday(null);
+      fetchHolidays();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update holiday');
+    } finally {
+      setSavingHoliday(false);
+    }
+  };
+
+  // ─── Shifts ───────────────────────────────────────────────────────────────
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [shiftsLoading, setShiftsLoading] = useState(false);
+  const [newShiftName, setNewShiftName] = useState('');
+  const [newShiftStart, setNewShiftStart] = useState('09:00');
+  const [newShiftEnd, setNewShiftEnd] = useState('18:00');
+  const [newShiftGrace, setNewShiftGrace] = useState('15');
+  const [addingShift, setAddingShift] = useState(false);
+  const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [editShiftName, setEditShiftName] = useState('');
+  const [editShiftStart, setEditShiftStart] = useState('');
+  const [editShiftEnd, setEditShiftEnd] = useState('');
+  const [editShiftGrace, setEditShiftGrace] = useState('');
+  const [savingShift, setSavingShift] = useState(false);
+
+  const fetchShifts = useCallback(async () => {
+    setShiftsLoading(true);
+    try {
+      const res = await fetch('/api/shifts');
+      if (!res.ok) throw new Error('Failed to load shifts');
+      const json = await res.json();
+      setShifts(json.data ?? []);
+    } catch {
+      toast.error('Failed to load shifts');
+    } finally {
+      setShiftsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchShifts();
+  }, [fetchShifts, refreshKey]);
+
+  const handleAddShift = async () => {
+    if (!newShiftName.trim()) {
+      toast.error('Shift name is required.');
+      return;
+    }
+    setAddingShift(true);
+    try {
+      const res = await fetch('/api/shifts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newShiftName.trim(), startTime: newShiftStart, endTime: newShiftEnd, gracePeriodMinutes: newShiftGrace }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add shift');
+      toast.success(`Shift "${newShiftName.trim()}" created`);
+      setNewShiftName(''); setNewShiftStart('09:00'); setNewShiftEnd('18:00'); setNewShiftGrace('15');
+      fetchShifts();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add shift');
+    } finally {
+      setAddingShift(false);
+    }
+  };
+
+  const openEditShift = (s: Shift) => {
+    setEditingShift(s);
+    setEditShiftName(s.name);
+    setEditShiftStart(s.startTime);
+    setEditShiftEnd(s.endTime);
+    setEditShiftGrace(String(s.gracePeriodMinutes));
+  };
+
+  const handleSaveEditShift = async () => {
+    if (!editingShift) return;
+    setSavingShift(true);
+    try {
+      const res = await fetch(`/api/shifts/${editingShift.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editShiftName.trim(), startTime: editShiftStart, endTime: editShiftEnd, gracePeriodMinutes: editShiftGrace }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update shift');
+      toast.success('Shift updated');
+      setEditingShift(null);
+      fetchShifts();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update shift');
+    } finally {
+      setSavingShift(false);
+    }
+  };
+
+  const handleDeleteShift = async (id: string, name: string) => {
+    if (!confirm(`Delete the "${name}" shift? This only works if no employee is currently assigned to it.`)) return;
+    try {
+      const res = await fetch(`/api/shifts/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete shift');
+      toast.success('Shift deleted');
+      fetchShifts();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete shift');
     }
   };
 
@@ -1625,9 +1761,14 @@ export default function SettingsView() {
                       {h.type === 'optional' && <Badge variant="outline" className="ml-2 text-[10px]">Optional</Badge>}
                     </div>
                     {user?.role !== 'employee' && (
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDeleteHoliday(h.id, h.name)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHoliday(h)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDeleteHoliday(h.id, h.name)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     )}
                   </div>
                 ))
@@ -1636,6 +1777,112 @@ export default function SettingsView() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!editingHoliday} onOpenChange={(open) => { if (!open) setEditingHoliday(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Holiday</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5"><Label>Name</Label><Input value={editHolidayName} onChange={(e) => setEditHolidayName(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={editHolidayDate} onChange={(e) => setEditHolidayDate(e.target.value)} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingHoliday(null)}>Cancel</Button>
+            <Button onClick={handleSaveEditHoliday} disabled={savingHoliday} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingHoliday ? <Loader2 className="size-4 animate-spin" /> : null}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Shift Definitions ────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Clock className="h-4 w-4 text-emerald-600" />
+            Shift Definitions
+          </CardTitle>
+          <CardDescription>
+            Define working-hour shifts here, then assign one to each employee from their record in Employees — used for attendance grace-period calculation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {user?.role !== 'employee' && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="space-y-1.5 flex-1">
+                <Label className="text-xs">Name</Label>
+                <Input placeholder="e.g. General Shift" value={newShiftName} onChange={(e) => setNewShiftName(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Start</Label>
+                <Input type="time" value={newShiftStart} onChange={(e) => setNewShiftStart(e.target.value)} className="w-[130px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">End</Label>
+                <Input type="time" value={newShiftEnd} onChange={(e) => setNewShiftEnd(e.target.value)} className="w-[130px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Grace (min)</Label>
+                <Input type="number" min={0} max={120} value={newShiftGrace} onChange={(e) => setNewShiftGrace(e.target.value)} className="w-[100px]" />
+              </div>
+              <Button size="sm" onClick={handleAddShift} disabled={addingShift} className="gap-1.5">
+                <PlusCircle className="h-4 w-4" />
+                Add Shift
+              </Button>
+            </div>
+          )}
+
+          <div className="divide-y rounded-lg border">
+            {shiftsLoading ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : shifts.length === 0 ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">No shifts configured yet.</div>
+            ) : (
+              shifts.map((s) => (
+                <div key={s.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                  <div>
+                    <span className="font-medium">{s.name}</span>{' '}
+                    <span className="text-muted-foreground">— {s.startTime}–{s.endTime} · {s.gracePeriodMinutes}min grace</span>
+                  </div>
+                  {user?.role !== 'employee' && (
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditShift(s)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDeleteShift(s.id, s.name)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!editingShift} onOpenChange={(open) => { if (!open) setEditingShift(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Shift</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5"><Label>Name</Label><Input value={editShiftName} onChange={(e) => setEditShiftName(e.target.value)} /></div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5"><Label>Start</Label><Input type="time" value={editShiftStart} onChange={(e) => setEditShiftStart(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>End</Label><Input type="time" value={editShiftEnd} onChange={(e) => setEditShiftEnd(e.target.value)} /></div>
+              <div className="space-y-1.5"><Label>Grace (min)</Label><Input type="number" min={0} max={120} value={editShiftGrace} onChange={(e) => setEditShiftGrace(e.target.value)} /></div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingShift(null)}>Cancel</Button>
+            <Button onClick={handleSaveEditShift} disabled={savingShift} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingShift ? <Loader2 className="size-4 animate-spin" /> : null}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Email (SMTP) Configuration (admin only) ─────────────────────────── */}
       {user?.role === 'admin' && (

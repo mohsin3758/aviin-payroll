@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { requireRole, requireSelfOrRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { notifyEmployee } from "@/lib/notifications";
 
 // GET /api/leaves/[id]
 export async function GET(
@@ -112,6 +113,12 @@ export async function PUT(
         details: { approvedBy },
       });
 
+      await notifyEmployee(result.employeeId, {
+        title: "Leave approved",
+        message: `Your ${result.leaveType.name} leave (${result.totalDays} day${result.totalDays === 1 ? "" : "s"}) was approved.`,
+        category: "leave",
+      });
+
       return NextResponse.json(result);
     }
 
@@ -129,6 +136,12 @@ export async function PUT(
     });
 
     await logAudit({ session, action: "reject", entity: "LeaveApplication", entityId: id });
+
+    await notifyEmployee(updated.employeeId, {
+      title: "Leave rejected",
+      message: `Your ${updated.leaveType.name} leave request (${updated.totalDays} day${updated.totalDays === 1 ? "" : "s"}) was not approved.`,
+      category: "leave",
+    });
 
     return NextResponse.json(updated);
   } catch (error) {

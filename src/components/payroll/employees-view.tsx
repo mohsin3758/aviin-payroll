@@ -1513,6 +1513,11 @@ export default function EmployeesView() {
                   </div>
                   <Separator />
                   <div>
+                    <h4 className="text-xs text-muted-foreground font-medium mb-3">Shift Assignment</h4>
+                    <ShiftAssignment employeeId={viewEmployee.id} canManage={canManage} />
+                  </div>
+                  <Separator />
+                  <div>
                     <h4 className="text-xs text-muted-foreground font-medium mb-3">Face Attendance</h4>
                     <FaceEnrollmentStatus employeeId={viewEmployee.id} canManage={canManage} />
                   </div>
@@ -1696,6 +1701,92 @@ function InfoItem({
       )}
     </div>
   )
+}
+
+function ShiftAssignment({ employeeId, canManage }: { employeeId: string; canManage: boolean }) {
+  const [assignment, setAssignment] = useState<{
+    effectiveFrom: string;
+    shift: { id: string; name: string; startTime: string; endTime: string; gracePeriodMinutes: number };
+  } | null>(null);
+  const [shifts, setShifts] = useState<{ id: string; name: string; startTime: string; endTime: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedShiftId, setSelectedShiftId] = useState('');
+  const [assigning, setAssigning] = useState(false);
+
+  const fetchAssignment = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/employees/${employeeId}/shift`);
+      const json = await res.json();
+      setAssignment(res.ok ? json.data : null);
+    } catch {
+      setAssignment(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [employeeId]);
+
+  useEffect(() => {
+    fetchAssignment();
+    if (canManage) {
+      fetch('/api/shifts').then((r) => r.json()).then((j) => setShifts(j.data ?? [])).catch(() => {});
+    }
+  }, [fetchAssignment, canManage]);
+
+  const handleAssign = async () => {
+    if (!selectedShiftId) return;
+    setAssigning(true);
+    try {
+      const res = await fetch(`/api/employees/${employeeId}/shift`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shiftId: selectedShiftId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to assign shift');
+      toast.success('Shift assigned');
+      setSelectedShiftId('');
+      fetchAssignment();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to assign shift');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  if (loading) {
+    return <Skeleton className="h-11 w-full" />
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between rounded-lg border p-3">
+        {assignment ? (
+          <div className="text-sm">
+            <span className="font-medium">{assignment.shift.name}</span>{' '}
+            <span className="text-muted-foreground">— {assignment.shift.startTime}–{assignment.shift.endTime} · {assignment.shift.gracePeriodMinutes}min grace</span>
+          </div>
+        ) : (
+          <Badge variant="secondary">No shift assigned</Badge>
+        )}
+      </div>
+      {canManage && (
+        <div className="flex items-center gap-2">
+          <Select value={selectedShiftId} onValueChange={setSelectedShiftId}>
+            <SelectTrigger className="w-[220px]"><SelectValue placeholder="Select a shift..." /></SelectTrigger>
+            <SelectContent>
+              {shifts.map((s) => (
+                <SelectItem key={s.id} value={s.id}>{s.name} ({s.startTime}–{s.endTime})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" onClick={handleAssign} disabled={!selectedShiftId || assigning}>
+            {assigning ? <Loader2 className="size-4 animate-spin" /> : null}
+            {assignment ? 'Change Shift' : 'Assign Shift'}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function FaceEnrollmentStatus({ employeeId, canManage }: { employeeId: string; canManage: boolean }) {

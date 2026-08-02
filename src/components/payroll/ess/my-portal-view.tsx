@@ -5,6 +5,7 @@ import {
   UserCircle, Loader2, Plus, Trash2, Upload, Download, Printer,
   FileText, Award, Wallet, PiggyBank, Receipt, Save, HandCoins,
   Package, TrendingUp, DoorOpen, Send, Clock, ScanFace, ShieldCheck,
+  ListChecks, CheckCircle2, Circle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -222,6 +223,7 @@ function ProfileTab({ profile, onSaved }: { profile: Profile; onSaved: () => voi
       <EducationCard employeeId={profile.id} records={profile.education} onChanged={onSaved} />
       <ExperienceCard employeeId={profile.id} records={profile.experiences} onChanged={onSaved} />
       <ShiftCard employeeId={profile.id} />
+      <OnboardingChecklistCard employeeId={profile.id} />
       <SalaryHistoryCard employeeId={profile.id} />
     </>
   );
@@ -263,6 +265,46 @@ function ShiftCard({ employeeId }: { employeeId: string }) {
             <div><p className="text-muted-foreground">Grace Period</p><p className="font-medium">{assignment.shift.gracePeriodMinutes} min</p></div>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OnboardingChecklistCard({ employeeId }: { employeeId: string }) {
+  const [tasks, setTasks] = useState<{ id: string; taskName: string; isCompleted: boolean }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/onboarding/tasks?employeeId=${employeeId}`)
+      .then((r) => r.json())
+      .then((d) => setTasks(d.data ?? []))
+      .catch(() => toast.error('Failed to load onboarding checklist'))
+      .finally(() => setLoading(false));
+  }, [employeeId]);
+
+  if (loading) return <Skeleton className="h-24 w-full" />;
+  // Nothing seeded for this employee yet (e.g. hired before this checklist existed) — no
+  // point showing an empty card for something HR never started tracking.
+  if (tasks.length === 0) return null;
+
+  const completedCount = tasks.filter((t) => t.isCompleted).length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <ListChecks className="size-4 text-emerald-600" />
+          Onboarding Checklist
+        </CardTitle>
+        <CardDescription>{completedCount} of {tasks.length} steps completed by HR — read-only, contact HR with questions</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-1.5">
+        {tasks.map((t) => (
+          <div key={t.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+            {t.isCompleted ? <CheckCircle2 className="size-4 text-emerald-600 shrink-0" /> : <Circle className="size-4 text-muted-foreground shrink-0" />}
+            <span className={t.isCompleted ? '' : 'text-muted-foreground'}>{t.taskName}</span>
+          </div>
+        ))}
       </CardContent>
     </Card>
   );
