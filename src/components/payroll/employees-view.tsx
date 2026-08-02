@@ -638,6 +638,7 @@ export default function EmployeesView() {
       </div>
 
       {canManage && <LoanRequestsCard />}
+      {canManage && <DocumentVerificationCard />}
 
       {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1776,6 +1777,106 @@ function LoanRequestsCard() {
                     {actingId === r.id ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Approve
                   </Button>
                   <Button size="sm" variant="outline" className="text-red-600 border-red-200" disabled={actingId === r.id} onClick={() => handleAction(r.id, 'rejected')}>
+                    <X className="size-4" />Reject
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const DOC_TYPE_LABEL: Record<string, string> = {
+  pan: 'PAN Card',
+  aadhaar: 'Aadhaar Card',
+  passport: 'Passport',
+  offer_letter: 'Offer Letter',
+  appointment_letter: 'Appointment Letter',
+  experience_letter: 'Experience Letter',
+  relieving_letter: 'Relieving Letter',
+  investment_proof: 'Investment Proof',
+  other: 'Other',
+}
+
+function DocumentVerificationCard() {
+  const [docs, setDocs] = useState<{
+    id: string; docType: string; fileName: string; createdAt: string;
+    employee: { firstName: string; lastName: string | null; employeeCode: string };
+  }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actingId, setActingId] = useState<string | null>(null)
+
+  const fetchDocs = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/documents?verifiedStatus=pending')
+      const json = await res.json()
+      setDocs(json.data ?? [])
+    } catch {
+      toast.error('Failed to load pending documents')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchDocs() }, [fetchDocs])
+
+  const handleAction = async (id: string, verifiedStatus: 'verified' | 'rejected') => {
+    setActingId(id)
+    try {
+      const res = await fetch(`/api/documents/${id}/verify`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verifiedStatus }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to update document')
+      toast.success(verifiedStatus === 'verified' ? 'Document verified' : 'Document rejected')
+      fetchDocs()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update document')
+    } finally {
+      setActingId(null)
+    }
+  }
+
+  if (!loading && docs.length === 0) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileText className="size-4 text-emerald-600" />
+          Pending Document Verifications
+        </CardTitle>
+        <CardDescription>PAN, Aadhaar, Passport, offer letters, investment proofs, and other uploads awaiting review</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : (
+          <div className="divide-y">
+            {docs.map((d) => (
+              <div key={d.id} className="flex items-center justify-between py-3 gap-4">
+                <div className="text-sm space-y-0.5">
+                  <p className="font-medium">
+                    {d.employee.firstName} {d.employee.lastName ?? ''} <span className="text-xs text-muted-foreground font-normal">({d.employee.employeeCode})</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {DOC_TYPE_LABEL[d.docType] ?? d.docType} — {d.fileName}
+                  </p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => window.open(`/api/documents/${d.id}`, '_blank')}>
+                    <Eye className="size-4" />View
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-emerald-700 border-emerald-200" disabled={actingId === d.id} onClick={() => handleAction(d.id, 'verified')}>
+                    {actingId === d.id ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Verify
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-red-600 border-red-200" disabled={actingId === d.id} onClick={() => handleAction(d.id, 'rejected')}>
                     <X className="size-4" />Reject
                   </Button>
                 </div>

@@ -11,26 +11,32 @@ import {
 } from "@/lib/documents";
 import { logAudit } from "@/lib/audit";
 
-// GET /api/documents?employeeId=xxx — list an employee's documents.
+// GET /api/documents?employeeId=xxx&verifiedStatus=pending — list an employee's documents.
 // An employee-role session can only ever list their own; admin/hr/manager can list anyone's.
+// Omitting employeeId is a company-wide listing (e.g. the verification queue) — admin/hr only.
 export async function GET(request: NextRequest) {
   try {
     const session = await requireAuth(request);
     const { searchParams } = request.nextUrl;
     let employeeId = searchParams.get("employeeId");
+    const verifiedStatus = searchParams.get("verifiedStatus");
 
     if (session.role === "employee") {
       if (!session.employeeId) {
         return apiError("Your login isn't linked to an employee record.", 403);
       }
       employeeId = session.employeeId;
-    }
-    if (!employeeId) {
+    } else if (!employeeId && session.role !== "admin" && session.role !== "hr") {
       return apiError("employeeId is required", 400);
     }
 
+    const where: Record<string, unknown> = {};
+    if (employeeId) where.employeeId = employeeId;
+    if (verifiedStatus) where.verifiedStatus = verifiedStatus;
+
     const documents = await db.employeeDocument.findMany({
-      where: { employeeId },
+      where,
+      include: employeeId ? undefined : { employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json({ data: documents });

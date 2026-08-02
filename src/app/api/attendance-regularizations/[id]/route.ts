@@ -31,6 +31,15 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         data: { status: "rejected", reviewedBy: session.userId, reviewedAt: new Date(), reviewComment: comment ?? null },
       });
       await logAudit({ session, action: "update", entity: "AttendanceRegularizationRequest", entityId: id, details: { toStatus: "rejected" } });
+      if (existing.employee.user) {
+        await notify({
+          userId: existing.employee.user.id,
+          title: "Attendance correction rejected",
+          message: `Your correction request for ${existing.date.toDateString()} was rejected.`,
+          category: "attendance",
+          link: "my-portal",
+        });
+      }
       return NextResponse.json({ data: rejected });
     }
 
