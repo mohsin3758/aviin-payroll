@@ -661,10 +661,12 @@ model EmployeeAsset {
   id                  String   @id @default(cuid())
   employeeId          String
   assetType           String   // "laptop" | "phone" | "id_card" | "other"
-  assetTag            String?
+  assetTag            String?  // serial number (laptop/id_card) or IMEI (phone) — label adapts per assetType in the UI
+  brand               String?
+  model               String?
   allocatedDate       DateTime @default(now())
   returnedDate        DateTime?
-  condition           String?
+  condition           String?  // "new" | "good" | "fair" | "damaged"
   notes               String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

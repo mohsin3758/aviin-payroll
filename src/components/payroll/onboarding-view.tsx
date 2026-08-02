@@ -19,7 +19,14 @@ import { usePayrollStore } from '@/store/payroll-store';
 
 interface Employee { id: string; employeeCode: string; firstName: string; lastName: string | null; designation: string; email: string; }
 interface Task { id: string; taskName: string; isCompleted: boolean; order: number; }
-interface Asset { id: string; assetType: string; assetTag: string | null; allocatedDate: string; returnedDate: string | null; }
+interface Asset {
+  id: string; assetType: string; assetTag: string | null; brand: string | null; model: string | null;
+  condition: string | null; notes: string | null; allocatedDate: string; returnedDate: string | null;
+}
+
+const ASSET_TAG_LABEL: Record<string, string> = {
+  laptop: 'Serial Number', phone: 'IMEI', id_card: 'Serial Number', other: 'Reference / Tag',
+};
 
 export default function OnboardingView() {
   const { refreshKey } = usePayrollStore();
@@ -34,6 +41,10 @@ export default function OnboardingView() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetType, setAssetType] = useState('laptop');
   const [assetTag, setAssetTag] = useState('');
+  const [assetBrand, setAssetBrand] = useState('');
+  const [assetModel, setAssetModel] = useState('');
+  const [assetCondition, setAssetCondition] = useState('new');
+  const [assetNotes, setAssetNotes] = useState('');
   const [allocating, setAllocating] = useState(false);
 
   const [sendingLetter, setSendingLetter] = useState<'offer' | 'appointment' | null>(null);
@@ -105,12 +116,19 @@ export default function OnboardingView() {
     try {
       const res = await fetch(`/api/employees/${employeeId}/assets`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetType, assetTag: assetTag.trim() || null }),
+        body: JSON.stringify({
+          assetType,
+          assetTag: assetTag.trim() || null,
+          brand: assetBrand.trim() || null,
+          model: assetModel.trim() || null,
+          condition: assetCondition || null,
+          notes: assetNotes.trim() || null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to allocate asset');
       toast.success('Asset allocated');
-      setAssetTag('');
+      setAssetTag(''); setAssetBrand(''); setAssetModel(''); setAssetCondition('new'); setAssetNotes('');
       fetchTasksAndAssets();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to allocate asset');
@@ -275,11 +293,29 @@ export default function OnboardingView() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5"><Label>Asset Tag / Serial</Label><Input value={assetTag} onChange={(e) => setAssetTag(e.target.value)} className="w-[200px]" /></div>
-                <Button onClick={handleAllocateAsset} disabled={allocating} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-                  {allocating ? <Loader2 className="size-4 animate-spin" /> : null}Allocate
-                </Button>
+                <div className="space-y-1.5"><Label>Brand</Label><Input value={assetBrand} onChange={(e) => setAssetBrand(e.target.value)} placeholder="e.g. Dell, Apple" className="w-[160px]" /></div>
+                <div className="space-y-1.5"><Label>Model</Label><Input value={assetModel} onChange={(e) => setAssetModel(e.target.value)} placeholder="e.g. Latitude 5420" className="w-[180px]" /></div>
+                <div className="space-y-1.5"><Label>{ASSET_TAG_LABEL[assetType]}</Label><Input value={assetTag} onChange={(e) => setAssetTag(e.target.value)} className="w-[180px]" /></div>
+                <div className="space-y-1.5">
+                  <Label>Condition</Label>
+                  <Select value={assetCondition} onValueChange={setAssetCondition}>
+                    <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new">New</SelectItem>
+                      <SelectItem value="good">Good</SelectItem>
+                      <SelectItem value="fair">Fair</SelectItem>
+                      <SelectItem value="damaged">Damaged</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+              <div className="space-y-1.5">
+                <Label>Notes (optional)</Label>
+                <Input value={assetNotes} onChange={(e) => setAssetNotes(e.target.value)} placeholder="Any other detail worth recording" />
+              </div>
+              <Button onClick={handleAllocateAsset} disabled={allocating} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                {allocating ? <Loader2 className="size-4 animate-spin" /> : null}Allocate
+              </Button>
               <Separator />
               {assets.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-4 text-center">No assets allocated yet.</p>
@@ -287,7 +323,13 @@ export default function OnboardingView() {
                 <div className="divide-y">
                   {assets.map((a) => (
                     <div key={a.id} className="flex items-center justify-between py-2 text-sm">
-                      <div><span className="font-medium capitalize">{a.assetType.replace('_', ' ')}</span> {a.assetTag && <span className="text-muted-foreground">({a.assetTag})</span>}</div>
+                      <div>
+                        <span className="font-medium capitalize">{a.assetType.replace('_', ' ')}</span>{' '}
+                        {(a.brand || a.model) && <span>{[a.brand, a.model].filter(Boolean).join(' ')} </span>}
+                        {a.assetTag && <span className="text-muted-foreground">({a.assetTag})</span>}
+                        {a.condition && <span className="text-muted-foreground capitalize"> · {a.condition}</span>}
+                        {a.notes && <p className="text-xs text-muted-foreground">{a.notes}</p>}
+                      </div>
                       {a.returnedDate ? (
                         <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Returned</Badge>
                       ) : (

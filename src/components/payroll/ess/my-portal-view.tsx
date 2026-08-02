@@ -1726,7 +1726,7 @@ const ASSET_TYPE_LABEL: Record<string, string> = {
 
 function AssetsTab({ employeeId }: { employeeId: string }) {
   const [assets, setAssets] = useState<{
-    id: string; assetType: string; assetTag: string | null;
+    id: string; assetType: string; assetTag: string | null; brand: string | null; model: string | null;
     allocatedDate: string; returnedDate: string | null; condition: string | null; notes: string | null;
   }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1758,6 +1758,7 @@ function AssetsTab({ employeeId }: { employeeId: string }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Type</TableHead>
+                <TableHead>Brand / Model</TableHead>
                 <TableHead>Tag</TableHead>
                 <TableHead>Allocated</TableHead>
                 <TableHead>Returned</TableHead>
@@ -1769,6 +1770,7 @@ function AssetsTab({ employeeId }: { employeeId: string }) {
               {assets.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell>{ASSET_TYPE_LABEL[a.assetType] ?? a.assetType}</TableCell>
+                  <TableCell>{[a.brand, a.model].filter(Boolean).join(' ') || '—'}</TableCell>
                   <TableCell className="font-mono text-xs">{a.assetTag ?? '—'}</TableCell>
                   <TableCell>{fmtDate(a.allocatedDate)}</TableCell>
                   <TableCell>

@@ -8,6 +8,9 @@ import { logAudit } from "@/lib/audit";
 const allocateAssetSchema = z.object({
   assetType: z.enum(["laptop", "phone", "id_card", "other"]),
   assetTag: z.string().trim().max(100).nullable().optional(),
+  brand: z.string().trim().max(100).nullable().optional(),
+  model: z.string().trim().max(100).nullable().optional(),
+  condition: z.enum(["new", "good", "fair", "damaged"]).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
 });
 
