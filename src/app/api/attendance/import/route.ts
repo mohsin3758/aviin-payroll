@@ -70,11 +70,14 @@ export async function POST(request: NextRequest) {
       const punchIn = row.punchIn?.trim() ? new Date(`${row.date.trim()}T${row.punchIn.trim()}:00.000Z`) : null;
       const punchOut = row.punchOut?.trim() ? new Date(`${row.date.trim()}T${row.punchOut.trim()}:00.000Z`) : null;
       const totalHours = punchIn && punchOut ? Math.max(0, Math.round(((punchOut.getTime() - punchIn.getTime()) / (1000 * 60 * 60)) * 100) / 100) : null;
+      // Overwrites, so the sessions array is reset to match — never leaves a stale
+      // multi-session history behind that no longer agrees with the imported punchIn/punchOut.
+      const punchSessions = punchIn ? JSON.stringify([{ punchIn: punchIn.toISOString(), punchOut: punchOut ? punchOut.toISOString() : null, punchInMethod: "manual", punchOutMethod: punchOut ? "manual" : null }]) : JSON.stringify([]);
 
       await db.attendance.upsert({
         where: { employeeId_date: { employeeId, date } },
-        create: { employeeId, date, status, punchIn, punchOut, totalHours, notes: row.notes?.trim() || null, punchInMethod: punchIn ? "manual" : null, punchOutMethod: punchOut ? "manual" : null },
-        update: { status, punchIn, punchOut, totalHours, notes: row.notes?.trim() || null },
+        create: { employeeId, date, status, punchIn, punchOut, totalHours, punchSessions, notes: row.notes?.trim() || null, punchInMethod: punchIn ? "manual" : null, punchOutMethod: punchOut ? "manual" : null },
+        update: { status, punchIn, punchOut, totalHours, punchSessions, notes: row.notes?.trim() || null },
       });
       results.push({ row: rowNum, status: "imported" });
     }

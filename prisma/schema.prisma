@@ -383,6 +383,10 @@ model Attendance {
   id                  String   @id @default(cuid())
   employeeId          String
   date                DateTime
+  // punchIn/punchOut/punchInMethod/punchOutMethod mean "first punch-in of the day" / "most
+  // recent punch-out of the day" (and their respective methods) — kept for backward
+  // compatibility with every existing display/report that reads them directly. The full
+  // in/out history for the day (however many sessions) lives in punchSessions.
   punchIn             DateTime?
   punchOut            DateTime?
   punchInMethod       String?  // "face", "manual", "login"
@@ -390,7 +394,13 @@ model Attendance {
   faceVerified        Boolean  @default(false)
   faceConfidence      Float?
   status              String   @default("absent") // "present", "absent", "half-day", "holiday", "weekly-off"
-  totalHours          Float?   // calculated as punchOut - punchIn
+  // Sum of every completed session's duration that day (not just the first-in/last-out span) —
+  // so a lunch-break-and-back punch cycle counts both halves of the day worked.
+  totalHours          Float?
+  // JSON-encoded PunchSession[] (see src/lib/attendance-punch.ts) — every punch-in/punch-out
+  // pair recorded that day, in order. Null/empty means no interactive punch has happened yet
+  // (e.g. a record created entirely through the admin Mark Attendance override).
+  punchSessions       String?
   notes               String?
   ipAddress           String?
   deviceInfo          String?

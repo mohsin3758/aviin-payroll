@@ -5,6 +5,7 @@ import { apiError, handleApiError } from "@/lib/api-utils";
 import { reviewRegularizationSchema } from "@/lib/validations/attendance-regularization";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
+import { effectiveSessions, sumSessionHours, type PunchSession } from "@/lib/attendance-punch";
 
 // PUT /api/attendance-regularizations/[id] — admin/hr/manager approves or rejects. Approval
 // applies the requested punch time(s) onto the real Attendance record for that date (creating
@@ -51,14 +52,43 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return apiError("No existing attendance record for this date, and no punch-in was requested — cannot approve a punch-out-only correction without a punch-in first.", 400);
     }
 
-    const finalPunchIn = existing.requestedPunchIn ?? existingAttendance?.punchIn ?? null;
-    const finalPunchOut = existing.requestedPunchOut ?? existingAttendance?.punchOut ?? null;
-    let totalHours: number | null = existingAttendance?.totalHours ?? null;
-    if (finalPunchIn && finalPunchOut) {
-      const diffMs = finalPunchOut.getTime() - finalPunchIn.getTime();
-      if (diffMs < 0) return apiError("Resulting punchOut would be before punchIn — check the request.", 400);
-      totalHours = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
+    // Merge the requested correction into the day's actual session history (rather than
+    // collapsing it to one pair) so this only ever patches the specific missing punch —
+    // any other sessions already recorded that day are left untouched.
+    const sessions: PunchSession[] = existingAttendance ? effectiveSessions(existingAttendance) : [];
+    const lastIndex = sessions.length - 1;
+    const lastOpen = lastIndex >= 0 && !sessions[lastIndex].punchOut;
+
+    if (existing.requestedPunchIn && existing.requestedPunchOut) {
+      if (existing.requestedPunchOut < existing.requestedPunchIn) {
+        return apiError("Resulting punchOut would be before punchIn — check the request.", 400);
+      }
+      sessions.push({
+        punchIn: existing.requestedPunchIn.toISOString(),
+        punchOut: existing.requestedPunchOut.toISOString(),
+        punchInMethod: "manual",
+        punchOutMethod: "manual",
+      });
+    } else if (existing.requestedPunchIn) {
+      sessions.push({ punchIn: existing.requestedPunchIn.toISOString(), punchOut: null, punchInMethod: "manual", punchOutMethod: null });
+    } else if (existing.requestedPunchOut) {
+      if (lastOpen) {
+        if (new Date(sessions[lastIndex].punchIn) > existing.requestedPunchOut) {
+          return apiError("Resulting punchOut would be before punchIn — check the request.", 400);
+        }
+        sessions[lastIndex] = { ...sessions[lastIndex], punchOut: existing.requestedPunchOut.toISOString(), punchOutMethod: "manual" };
+      } else {
+        // No open session to close (e.g. an admin-created record already fully closed) —
+        // append a same-instant open+closed session so the requested punch-out is still
+        // reflected somewhere rather than silently dropped.
+        sessions.push({ punchIn: existing.requestedPunchOut.toISOString(), punchOut: existing.requestedPunchOut.toISOString(), punchInMethod: "manual", punchOutMethod: "manual" });
+      }
     }
+
+    const finalPunchIn = sessions.length > 0 ? new Date(sessions[0].punchIn) : null;
+    const lastSession = sessions.length > 0 ? sessions[sessions.length - 1] : null;
+    const finalPunchOut = lastSession?.punchOut ? new Date(lastSession.punchOut) : null;
+    const totalHours = sessions.length > 0 ? sumSessionHours(sessions) : null;
 
     const [, updated] = await db.$transaction([
       db.attendance.upsert({
@@ -68,19 +98,21 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           date: existing.date,
           punchIn: finalPunchIn,
           punchOut: finalPunchOut,
-          punchInMethod: existing.requestedPunchIn ? "manual" : null,
-          punchOutMethod: existing.requestedPunchOut ? "manual" : null,
+          punchInMethod: sessions[0]?.punchInMethod ?? null,
+          punchOutMethod: lastSession?.punchOutMethod ?? null,
           status: finalPunchIn ? "present" : "absent",
           totalHours,
+          punchSessions: JSON.stringify(sessions),
           notes: `Applied from regularization request: ${existing.reason}`,
         },
         update: {
           punchIn: finalPunchIn ?? undefined,
-          punchOut: finalPunchOut ?? undefined,
-          punchInMethod: existing.requestedPunchIn ? "manual" : undefined,
-          punchOutMethod: existing.requestedPunchOut ? "manual" : undefined,
+          punchOut: finalPunchOut,
+          punchInMethod: sessions[0]?.punchInMethod ?? undefined,
+          punchOutMethod: lastSession?.punchOutMethod ?? undefined,
           status: finalPunchIn ? "present" : undefined,
           totalHours: totalHours ?? undefined,
+          punchSessions: JSON.stringify(sessions),
         },
       }),
       db.attendanceRegularizationRequest.update({

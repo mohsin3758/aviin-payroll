@@ -75,6 +75,7 @@ interface AttendanceRecord {
   punchOut: string | null;
   punchInMethod: string | null;
   punchOutMethod: string | null;
+  punchSessions: string | null;
   faceVerified: boolean;
   faceConfidence: number | null;
   distanceFromOfficeMeters: number | null;
@@ -88,13 +89,44 @@ interface AttendanceRecord {
   };
 }
 
+interface PunchSession {
+  punchIn: string;
+  punchOut: string | null;
+  punchInMethod: string;
+  punchOutMethod: string | null;
+}
+
+/** Mirrors the server's effectiveSessions() fallback: a legacy/admin-only record with no
+ * punchSessions JSON is treated as one implicit session from its top-level punchIn/punchOut. */
+function parseSessions(record: { punchSessions: string | null; punchIn: string | null; punchOut: string | null; punchInMethod: string | null; punchOutMethod: string | null } | null): PunchSession[] {
+  if (!record) return [];
+  if (record.punchSessions) {
+    try {
+      const parsed = JSON.parse(record.punchSessions);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {
+      /* fall through to legacy fallback */
+    }
+  }
+  if (!record.punchIn) return [];
+  return [{ punchIn: record.punchIn, punchOut: record.punchOut, punchInMethod: record.punchInMethod ?? 'manual', punchOutMethod: record.punchOutMethod }];
+}
+
+function isSessionOpen(record: { punchSessions: string | null; punchIn: string | null; punchOut: string | null; punchInMethod: string | null; punchOutMethod: string | null } | null): boolean {
+  const sessions = parseSessions(record);
+  if (sessions.length === 0) return false;
+  return !sessions[sessions.length - 1].punchOut;
+}
+
 interface TodayPunch {
   id: string;
   punchIn: string | null;
   punchOut: string | null;
+  punchSessions: string | null;
   status: string;
   totalHours: number | null;
   punchInMethod: string | null;
+  punchOutMethod: string | null;
   distanceFromOfficeMeters: number | null;
 }
 
@@ -277,7 +309,10 @@ export default function AttendanceView() {
   const [markPunchIn, setMarkPunchIn] = useState<string>('');
   const [markPunchOut, setMarkPunchOut] = useState<string>('');
   const [markStatus, setMarkStatus] = useState<string>('present');
-  const [markMethod, setMarkMethod] = useState<string>('manual');
+  // Always "manual" — Login and Face are only ever set by the system itself (the login/logout
+  // hooks and the interactive Quick Confirm flow), never something an admin should be able to
+  // manually attest to on someone else's behalf.
+  const markMethod = 'manual';
   const [markNotes, setMarkNotes] = useState<string>('');
   const [markSubmitting, setMarkSubmitting] = useState(false);
 
@@ -390,7 +425,7 @@ export default function AttendanceView() {
       const records: AttendanceRecord[] = json.data ?? [];
       if (records.length > 0) {
         const r = records[0];
-        setTodayPunch({ id: r.id, punchIn: r.punchIn, punchOut: r.punchOut, status: r.status, totalHours: r.totalHours, punchInMethod: r.punchInMethod, distanceFromOfficeMeters: r.distanceFromOfficeMeters });
+        setTodayPunch({ id: r.id, punchIn: r.punchIn, punchOut: r.punchOut, punchSessions: r.punchSessions, status: r.status, totalHours: r.totalHours, punchInMethod: r.punchInMethod, punchOutMethod: r.punchOutMethod, distanceFromOfficeMeters: r.distanceFromOfficeMeters });
       } else {
         setTodayPunch(null);
       }
@@ -439,16 +474,13 @@ export default function AttendanceView() {
       toast.error('Please select an employee before punching.');
       return;
     }
-    if (action === 'in' && todayPunch?.punchIn) {
-      toast.error('Already punched in today.');
+    const sessionOpen = isSessionOpen(todayPunch);
+    if (action === 'in' && sessionOpen) {
+      toast.error('Already punched in — punch out first before starting a new session.');
       return;
     }
-    if (action === 'out' && todayPunch?.punchOut) {
-      toast.error('Already punched out today.');
-      return;
-    }
-    if (action === 'out' && !todayPunch?.punchIn) {
-      toast.error('No punch-in record found for today. Punch in first.');
+    if (action === 'out' && !sessionOpen) {
+      toast.error(todayPunch?.punchIn ? 'Already punched out today.' : 'No punch-in record found for today. Punch in first.');
       return;
     }
     setPunchAction(action);
@@ -567,7 +599,6 @@ export default function AttendanceView() {
       setMarkPunchIn('');
       setMarkPunchOut('');
       setMarkStatus('present');
-      setMarkMethod('manual');
       setMarkNotes('');
       fetchAttendance();
     } catch (err) {
@@ -845,15 +876,15 @@ export default function AttendanceView() {
             <Button
               className="flex-1 h-14 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-200 dark:shadow-emerald-900/30 transition-all hover:scale-[1.01] active:scale-[0.99]"
               onClick={() => handlePunchClick('in')}
-              disabled={!punchEmployeeId || !!todayPunch?.punchIn}
+              disabled={!punchEmployeeId || isSessionOpen(todayPunch)}
             >
               <Fingerprint className="size-5" />
-              Punch IN
+              {todayPunch && parseSessions(todayPunch).length > 0 && !isSessionOpen(todayPunch) ? 'Punch IN Again' : 'Punch IN'}
             </Button>
             <Button
               className="flex-1 h-14 text-base font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-200 dark:shadow-rose-900/30 transition-all hover:scale-[1.01] active:scale-[0.99]"
               onClick={() => handlePunchClick('out')}
-              disabled={!punchEmployeeId || !todayPunch?.punchIn || !!todayPunch?.punchOut}
+              disabled={!punchEmployeeId || !isSessionOpen(todayPunch)}
             >
               <LogOut className="size-5" />
               Punch OUT
@@ -869,27 +900,44 @@ export default function AttendanceView() {
             >
               <div className="flex items-center gap-2">
                 <Clock className="size-4 text-emerald-500" />
-                <span className="text-muted-foreground">Punched In:</span>
+                <span className="text-muted-foreground">First In:</span>
                 <span className="font-medium">{formatTime(todayPunch.punchIn)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="size-4 text-rose-500" />
-                <span className="text-muted-foreground">Punched Out:</span>
-                <span className="font-medium">{todayPunch.punchOut ? formatTime(todayPunch.punchOut) : 'Not yet'}</span>
+                <span className="text-muted-foreground">{isSessionOpen(todayPunch) ? 'Currently:' : 'Last Out:'}</span>
+                <span className="font-medium">{isSessionOpen(todayPunch) ? 'Punched in' : (todayPunch.punchOut ? formatTime(todayPunch.punchOut) : 'Not yet')}</span>
               </div>
-              {todayPunch.totalHours != null ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Hours:</span>
-                  <span className="font-medium">{todayPunch.totalHours}h</span>
-                </div>
-              ) : todayPunch.punchIn ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Hours so far:</span>
-                  <span className="font-medium font-mono tabular-nums text-emerald-700">
-                    {formatElapsed(new Date(todayPunch.punchIn).getTime(), nowMs)}
-                  </span>
-                </div>
-              ) : null}
+              {parseSessions(todayPunch).length > 1 && (
+                <Badge variant="outline" className="bg-sky-100 text-sky-700 border-sky-200">
+                  {parseSessions(todayPunch).length} sessions today
+                </Badge>
+              )}
+              {(() => {
+                const sessions = parseSessions(todayPunch);
+                const openSession = sessions.length > 0 && !sessions[sessions.length - 1].punchOut ? sessions[sessions.length - 1] : null;
+                if (openSession) {
+                  const completedMs = (todayPunch.totalHours ?? 0) * 60 * 60 * 1000;
+                  const openElapsedMs = Math.max(0, nowMs - new Date(openSession.punchIn).getTime());
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Hours so far:</span>
+                      <span className="font-medium font-mono tabular-nums text-emerald-700">
+                        {formatElapsed(0, completedMs + openElapsedMs)}
+                      </span>
+                    </div>
+                  );
+                }
+                if (todayPunch.totalHours != null) {
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Hours:</span>
+                      <span className="font-medium">{todayPunch.totalHours}h</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">Method:</span>
                 <Badge variant="outline" className={METHOD_BADGE[todayPunch.punchInMethod ?? 'manual']}>
@@ -1351,35 +1399,21 @@ export default function AttendanceView() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mark-status">Status <span className="text-red-500">*</span></Label>
-                <Select value={markStatus} onValueChange={setMarkStatus}>
-                  <SelectTrigger id="mark-status" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="present">Present</SelectItem>
-                    <SelectItem value="absent">Absent</SelectItem>
-                    <SelectItem value="half-day">Half Day</SelectItem>
-                    <SelectItem value="holiday">Holiday</SelectItem>
-                    <SelectItem value="weekly-off">Weekly Off</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mark-method">Method</Label>
-                <Select value={markMethod} onValueChange={setMarkMethod}>
-                  <SelectTrigger id="mark-method" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">Manual</SelectItem>
-                    <SelectItem value="login">Login</SelectItem>
-                    <SelectItem value="face">Face</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="mark-status">Status <span className="text-red-500">*</span></Label>
+              <Select value={markStatus} onValueChange={setMarkStatus}>
+                <SelectTrigger id="mark-status" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="present">Present</SelectItem>
+                  <SelectItem value="absent">Absent</SelectItem>
+                  <SelectItem value="half-day">Half Day</SelectItem>
+                  <SelectItem value="holiday">Holiday</SelectItem>
+                  <SelectItem value="weekly-off">Weekly Off</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Recorded with method &quot;Manual&quot; — Login and Face are only ever set by the system itself, never a manual entry.</p>
             </div>
 
             <div className="space-y-2">

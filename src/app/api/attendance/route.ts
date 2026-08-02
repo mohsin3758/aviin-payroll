@@ -226,6 +226,19 @@ export async function POST(request: NextRequest) {
         totalHours = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
       }
 
+      // This admin override is always a single-session correction — it supersedes whatever
+      // interactive multi-session history existed for the day rather than trying to merge
+      // into it, so the record never ends up with punchSessions out of sync with the
+      // punchIn/punchOut this admin actually set.
+      const overrideSessions = existingRecord.punchIn
+        ? [{
+            punchIn: existingRecord.punchIn.toISOString(),
+            punchOut: punchOutTime.toISOString(),
+            punchInMethod: existingRecord.punchInMethod ?? "manual",
+            punchOutMethod: punchOutMethod || "manual",
+          }]
+        : [];
+
       const updated = await db.$transaction(async (tx) => {
         const rec = await tx.attendance.update({
           where: { id: existingRecord.id },
@@ -235,6 +248,7 @@ export async function POST(request: NextRequest) {
             faceVerified: faceVerified !== undefined ? faceVerified : existingRecord.faceVerified,
             faceConfidence: faceConfidence !== undefined ? faceConfidence : existingRecord.faceConfidence,
             totalHours: totalHours ?? existingRecord.totalHours,
+            punchSessions: JSON.stringify(overrideSessions),
             status: resolvedStatus,
             notes: notes !== undefined ? notes : existingRecord.notes,
             ipAddress: ipAddress || existingRecord.ipAddress,
@@ -262,6 +276,23 @@ export async function POST(request: NextRequest) {
       where: { employeeId_date: { employeeId, date: attendanceDate } },
     });
 
+    // Same reasoning as the punch-out-only branch above: this admin override always
+    // supersedes any interactive multi-session history with a single session matching
+    // whatever punchIn/punchOut ends up saved (merging in the untouched existing value when
+    // this request only sets one of the two).
+    const finalPunchIn = punchInTime ?? existingForUpsert?.punchIn ?? null;
+    const finalPunchOut = punchOutTime ?? existingForUpsert?.punchOut ?? null;
+    const finalPunchInMethod = punchInMethod ?? existingForUpsert?.punchInMethod ?? null;
+    const finalPunchOutMethod = punchOutMethod ?? existingForUpsert?.punchOutMethod ?? null;
+    const overrideSessions = finalPunchIn
+      ? [{
+          punchIn: finalPunchIn.toISOString(),
+          punchOut: finalPunchOut ? finalPunchOut.toISOString() : null,
+          punchInMethod: finalPunchInMethod ?? "manual",
+          punchOutMethod: finalPunchOutMethod,
+        }]
+      : [];
+
     const record = await db.$transaction(async (tx) => {
       const rec = await tx.attendance.upsert({
       where: {
@@ -281,6 +312,7 @@ export async function POST(request: NextRequest) {
         faceConfidence: faceConfidence ?? null,
         status: resolvedStatus,
         totalHours,
+        punchSessions: JSON.stringify(overrideSessions),
         notes: notes || null,
         ipAddress: ipAddress || null,
         deviceInfo: deviceInfo || null,
@@ -294,6 +326,7 @@ export async function POST(request: NextRequest) {
         faceConfidence: faceConfidence !== undefined ? faceConfidence : undefined,
         status: resolvedStatus,
         totalHours: totalHours ?? undefined,
+        punchSessions: JSON.stringify(overrideSessions),
         notes: notes !== undefined ? notes : undefined,
         ipAddress: ipAddress !== undefined ? ipAddress : undefined,
         deviceInfo: deviceInfo !== undefined ? deviceInfo : undefined,
