@@ -15,6 +15,7 @@ export const ALLOWED_DOC_TYPES = [
   "appointment_letter",
   "experience_letter",
   "relieving_letter",
+  "investment_proof",
   "other",
 ] as const;
 export type DocType = (typeof ALLOWED_DOC_TYPES)[number];

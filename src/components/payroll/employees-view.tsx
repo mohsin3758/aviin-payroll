@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import {
   Table,
   TableBody,
@@ -74,6 +74,8 @@ import {
   Shield,
   Banknote,
   FileText,
+  Loader2,
+  Wallet,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { usePayrollStore } from '@/store/payroll-store'
@@ -634,6 +636,8 @@ export default function EmployeesView() {
           </Button>
         )}
       </div>
+
+      {canManage && <LoanRequestsCard />}
 
       {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1697,5 +1701,89 @@ function ComplianceBadge({ label, active }: { label: string; active: boolean }) 
       )}
       <span className="text-sm">{label} {active ? 'Applicable' : 'Not Applicable'}</span>
     </div>
+  )
+}
+
+function LoanRequestsCard() {
+  const [requests, setRequests] = useState<{
+    id: string; loanType: string; principal: number; totalMonths: number; reason: string | null;
+    employee: { firstName: string; lastName: string | null; employeeCode: string };
+  }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actingId, setActingId] = useState<string | null>(null)
+
+  const fetchRequests = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/loans?status=pending')
+      const json = await res.json()
+      setRequests(json.data ?? [])
+    } catch {
+      toast.error('Failed to load loan requests')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchRequests() }, [fetchRequests])
+
+  const handleAction = async (id: string, status: 'active' | 'rejected') => {
+    setActingId(id)
+    try {
+      const res = await fetch(`/api/loans/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to update request')
+      toast.success(status === 'active' ? 'Loan approved' : 'Loan request rejected')
+      fetchRequests()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update request')
+    } finally {
+      setActingId(null)
+    }
+  }
+
+  if (!loading && requests.length === 0) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Wallet className="size-4 text-emerald-600" />
+          Pending Loan / Advance Requests
+        </CardTitle>
+        <CardDescription>Employee-submitted requests awaiting approval — approving starts EMI deductions from next month&apos;s payroll</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : (
+          <div className="divide-y">
+            {requests.map((r) => (
+              <div key={r.id} className="flex items-center justify-between py-3 gap-4">
+                <div className="text-sm space-y-0.5">
+                  <p className="font-medium capitalize">
+                    {r.employee.firstName} {r.employee.lastName ?? ''} <span className="text-xs text-muted-foreground font-normal">({r.employee.employeeCode})</span>
+                    {' — '}{r.loanType} of ₹{r.principal.toLocaleString('en-IN')} over {r.totalMonths} months
+                  </p>
+                  {r.reason && <p className="text-xs text-muted-foreground">{r.reason}</p>}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" variant="outline" className="text-emerald-700 border-emerald-200" disabled={actingId === r.id} onClick={() => handleAction(r.id, 'active')}>
+                    {actingId === r.id ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Approve
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-red-600 border-red-200" disabled={actingId === r.id} onClick={() => handleAction(r.id, 'rejected')}>
+                    <X className="size-4" />Reject
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

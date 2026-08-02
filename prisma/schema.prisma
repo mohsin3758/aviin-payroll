@@ -187,6 +187,7 @@ model Employee {
   employeeShifts      EmployeeShift[]
   hiringIncentives    HiringIncentive[]
   recruitedCandidates Candidate[]
+  regularizations     AttendanceRegularizationRequest[]
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
@@ -400,6 +401,29 @@ model Attendance {
   @@unique([employeeId, date])
 }
 
+// An employee's self-service request to add or correct a punch-in/punch-out on a past date
+// (e.g. forgot to punch out) — reviewed by admin/hr/manager, who approve or reject it. Approval
+// applies the requested times to the real Attendance record for that date.
+model AttendanceRegularizationRequest {
+  id                  String   @id @default(cuid())
+  employeeId          String
+  date                DateTime // the day being corrected, IST-calendar-day normalized
+  requestedPunchIn    DateTime?
+  requestedPunchOut   DateTime?
+  reason              String
+  status              String   @default("pending") // "pending" | "approved" | "rejected"
+  reviewedBy          String?
+  reviewedAt          DateTime?
+  reviewComment       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employee            Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+}
+
 model LeaveType {
   id                  String   @id @default(cuid())
   name                String   // "Casual Leave", "Sick Leave", "Earned Leave", etc.
@@ -581,7 +605,7 @@ model EmployeeExperience {
 model EmployeeDocument {
   id                  String   @id @default(cuid())
   employeeId          String
-  docType             String   // "pan" | "aadhaar" | "passport" | "offer_letter" | "appointment_letter" | "experience_letter" | "relieving_letter" | "other"
+  docType             String   // "pan" | "aadhaar" | "passport" | "offer_letter" | "appointment_letter" | "experience_letter" | "relieving_letter" | "investment_proof" | "other"
   fileName            String
   filePath            String   // relative path under the uploads volume
   mimeType            String

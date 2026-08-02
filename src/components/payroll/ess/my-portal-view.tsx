@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   UserCircle, Loader2, Plus, Trash2, Upload, Download, Printer,
   FileText, Award, Wallet, PiggyBank, Receipt, Save, HandCoins,
-  Package, TrendingUp, DoorOpen, Send,
+  Package, TrendingUp, DoorOpen, Send, Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -219,8 +219,50 @@ function ProfileTab({ profile, onSaved }: { profile: Profile; onSaved: () => voi
       <FamilyCard employeeId={profile.id} members={profile.familyMembers} onChanged={onSaved} />
       <EducationCard employeeId={profile.id} records={profile.education} onChanged={onSaved} />
       <ExperienceCard employeeId={profile.id} records={profile.experiences} onChanged={onSaved} />
+      <ShiftCard employeeId={profile.id} />
       <SalaryHistoryCard employeeId={profile.id} />
     </>
+  );
+}
+
+function ShiftCard({ employeeId }: { employeeId: string }) {
+  const [assignment, setAssignment] = useState<{
+    effectiveFrom: string;
+    shift: { name: string; startTime: string; endTime: string; gracePeriodMinutes: number };
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/employees/${employeeId}/shift`)
+      .then((r) => r.json())
+      .then((d) => setAssignment(d.data ?? null))
+      .catch(() => toast.error('Failed to load shift'))
+      .finally(() => setLoading(false));
+  }, [employeeId]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Clock className="size-4 text-emerald-600" />
+          My Shift
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : !assignment ? (
+          <p className="text-sm text-muted-foreground py-2 text-center">No shift assigned yet.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+            <div><p className="text-muted-foreground">Shift</p><p className="font-medium">{assignment.shift.name}</p></div>
+            <div><p className="text-muted-foreground">Start</p><p className="font-medium">{assignment.shift.startTime}</p></div>
+            <div><p className="text-muted-foreground">End</p><p className="font-medium">{assignment.shift.endTime}</p></div>
+            <div><p className="text-muted-foreground">Grace Period</p><p className="font-medium">{assignment.shift.gracePeriodMinutes} min</p></div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -606,12 +648,31 @@ function DocumentsTab({ employeeId }: { employeeId: string }) {
 /*  Attendance Tab                                                     */
 /* ------------------------------------------------------------------ */
 
+interface RegularizationRow {
+  id: string;
+  date: string;
+  requestedPunchIn: string | null;
+  requestedPunchOut: string | null;
+  reason: string;
+  status: string;
+  reviewComment: string | null;
+}
+
 function AttendanceTab() {
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [year, setYear] = useState(String(now.getFullYear()));
   const [records, setRecords] = useState<{ id: string; date: string; status: string; punchIn: string | null; punchOut: string | null; totalHours: number | null }[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [requests, setRequests] = useState<RegularizationRow[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [reqDate, setReqDate] = useState('');
+  const [reqPunchIn, setReqPunchIn] = useState('');
+  const [reqPunchOut, setReqPunchOut] = useState('');
+  const [reqReason, setReqReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -622,39 +683,134 @@ function AttendanceTab() {
       .finally(() => setLoading(false));
   }, [month, year]);
 
+  const fetchRequests = useCallback(async () => {
+    setRequestsLoading(true);
+    try {
+      const res = await fetch('/api/attendance-regularizations');
+      const data = await res.json();
+      setRequests(data.data ?? []);
+    } catch {
+      toast.error('Failed to load correction requests');
+    } finally {
+      setRequestsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchRequests(); }, [fetchRequests]);
+
+  const handleSubmitRequest = async () => {
+    if (!reqDate) { toast.error('Date is required.'); return; }
+    if (!reqPunchIn && !reqPunchOut) { toast.error('Enter at least a punch-in or punch-out time.'); return; }
+    if (!reqReason.trim()) { toast.error('Reason is required.'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/attendance-regularizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: reqDate,
+          requestedPunchIn: reqPunchIn ? `${reqDate}T${reqPunchIn}:00.000Z` : null,
+          requestedPunchOut: reqPunchOut ? `${reqDate}T${reqPunchOut}:00.000Z` : null,
+          reason: reqReason.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit request');
+      toast.success('Correction request submitted');
+      setOpen(false);
+      setReqDate(''); setReqPunchIn(''); setReqPunchOut(''); setReqReason('');
+      fetchRequests();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to submit request');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">My Attendance</CardTitle>
-        <div className="flex gap-3 pt-2">
-          <Select value={month} onValueChange={setMonth}>
-            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
-            <SelectContent>{MONTHS.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}</SelectContent>
-          </Select>
-          <Input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-[100px]" />
-        </div>
-      </CardHeader>
-      <CardContent>
-        {loading ? <Skeleton className="h-40 w-full" /> : records.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8 text-center">No attendance records for this month.</p>
-        ) : (
-          <Table>
-            <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Status</TableHead><TableHead>Punch In</TableHead><TableHead>Punch Out</TableHead><TableHead className="text-right">Hours</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {records.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>{fmtDate(r.date)}</TableCell>
-                  <TableCell><Badge variant="outline" className={badge(r.status)}>{r.status}</Badge></TableCell>
-                  <TableCell className="font-mono text-xs">{r.punchIn ? new Date(r.punchIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--'}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.punchOut ? new Date(r.punchOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--'}</TableCell>
-                  <TableCell className="text-right">{r.totalHours ?? '--'}</TableCell>
-                </TableRow>
+    <>
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle className="text-base">My Attendance</CardTitle>
+            <div className="flex gap-3 pt-2">
+              <Select value={month} onValueChange={setMonth}>
+                <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+                <SelectContent>{MONTHS.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}</SelectContent>
+              </Select>
+              <Input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-[100px]" />
+            </div>
+          </div>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <Button size="sm" variant="outline" onClick={() => setOpen(true)}>Request Correction</Button>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Request Attendance Correction</DialogTitle>
+                <DialogDescription>Missed a punch-in or punch-out? Ask your manager or HR to add or fix it.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={reqDate} onChange={(e) => setReqDate(e.target.value)} /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5"><Label>Punch In (optional)</Label><Input type="time" value={reqPunchIn} onChange={(e) => setReqPunchIn(e.target.value)} /></div>
+                  <div className="space-y-1.5"><Label>Punch Out (optional)</Label><Input type="time" value={reqPunchOut} onChange={(e) => setReqPunchOut(e.target.value)} /></div>
+                </div>
+                <div className="space-y-1.5"><Label>Reason</Label><Textarea value={reqReason} onChange={(e) => setReqReason(e.target.value)} rows={2} placeholder="e.g. Forgot to punch out before leaving" /></div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                <Button onClick={handleSubmitRequest} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700 text-white">Submit</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          {loading ? <Skeleton className="h-40 w-full" /> : records.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">No attendance records for this month.</p>
+          ) : (
+            <Table>
+              <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Status</TableHead><TableHead>Punch In</TableHead><TableHead>Punch Out</TableHead><TableHead className="text-right">Hours</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {records.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>{fmtDate(r.date)}</TableCell>
+                    <TableCell><Badge variant="outline" className={badge(r.status)}>{r.status}</Badge></TableCell>
+                    <TableCell className="font-mono text-xs">{r.punchIn ? new Date(r.punchIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--'}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.punchOut ? new Date(r.punchOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--'}</TableCell>
+                    <TableCell className="text-right">{r.totalHours ?? '--'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">My Correction Requests</CardTitle></CardHeader>
+        <CardContent>
+          {requestsLoading ? <Skeleton className="h-24 w-full" /> : requests.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No correction requests yet.</p>
+          ) : (
+            <div className="divide-y">
+              {requests.map((r) => (
+                <div key={r.id} className="py-2.5 text-sm space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{fmtDate(r.date)}</span>
+                    <Badge variant="outline" className={badge(r.status)}>{r.status}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {r.requestedPunchIn && <>In: {new Date(r.requestedPunchIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} </>}
+                    {r.requestedPunchOut && <>Out: {new Date(r.requestedPunchOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{r.reason}</p>
+                  {r.reviewComment && <p className="text-xs italic text-muted-foreground">HR/Manager: {r.reviewComment}</p>}
+                </div>
               ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -899,19 +1055,97 @@ function Form16Tab() {
 /*  Loans Tab                                                          */
 /* ------------------------------------------------------------------ */
 
+const LOAN_STATUS_BADGE: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-800 border-amber-200',
+  active: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  closed: 'bg-gray-100 text-gray-700 border-gray-200',
+  cancelled: 'bg-gray-100 text-gray-700 border-gray-200',
+  rejected: 'bg-red-100 text-red-800 border-red-200',
+};
+
 function LoansTab() {
   const [loans, setLoans] = useState<{ id: string; loanType: string; principal: number; emiAmount: number; totalMonths: number; remainingMonths: number; status: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [loanType, setLoanType] = useState('loan');
+  const [principal, setPrincipal] = useState('');
+  const [totalMonths, setTotalMonths] = useState('');
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
+  const fetchLoans = useCallback(() => {
+    setLoading(true);
     fetch('/api/ess/loans').then((r) => r.json()).then((d) => setLoans(d.data ?? [])).catch(() => toast.error('Failed to load loans')).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { fetchLoans(); }, [fetchLoans]);
+
+  const hasPending = loans.some((l) => l.status === 'pending');
+
+  const handleSubmit = async () => {
+    const principalNum = Number(principal);
+    const monthsNum = Number(totalMonths);
+    if (!principalNum || principalNum <= 0) { toast.error('Enter a valid amount.'); return; }
+    if (!monthsNum || monthsNum <= 0) { toast.error('Enter a valid repayment period.'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/ess/loans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loanType, principal: principalNum, totalMonths: monthsNum, reason: reason.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit request');
+      toast.success('Request submitted — awaiting HR review');
+      setOpen(false);
+      setPrincipal(''); setTotalMonths(''); setReason('');
+      fetchLoans();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to submit request');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (loading) return <Skeleton className="h-40 w-full" />;
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Wallet className="size-4 text-emerald-600" />My Loans &amp; Advances</CardTitle></CardHeader>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base flex items-center gap-2"><Wallet className="size-4 text-emerald-600" />My Loans &amp; Advances</CardTitle>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)} disabled={hasPending}>
+            <Plus className="size-4" />Request Loan/Advance
+          </Button>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Request a Loan or Advance</DialogTitle>
+              <DialogDescription>Submitted for HR review — nothing is deducted from your salary until it's approved.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Type</Label>
+                <Select value={loanType} onValueChange={setLoanType}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="loan">Loan</SelectItem>
+                    <SelectItem value="advance">Advance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><Label>Amount</Label><Input type="number" value={principal} onChange={(e) => setPrincipal(e.target.value)} placeholder="e.g. 50000" /></div>
+                <div className="space-y-1.5"><Label>Repay over (months)</Label><Input type="number" value={totalMonths} onChange={(e) => setTotalMonths(e.target.value)} placeholder="e.g. 10" /></div>
+              </div>
+              <div className="space-y-1.5"><Label>Reason (optional)</Label><Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={handleSubmit} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700 text-white">Submit</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
       <CardContent>
         {loans.length === 0 ? <p className="text-sm text-muted-foreground py-8 text-center">No loans or advances on record.</p> : (
           <Table>
@@ -922,8 +1156,8 @@ function LoansTab() {
                   <TableCell className="capitalize">{l.loanType}</TableCell>
                   <TableCell className="text-right">{fmt(l.principal)}</TableCell>
                   <TableCell className="text-right">{fmt(l.emiAmount)}</TableCell>
-                  <TableCell className="text-right">{l.remainingMonths} / {l.totalMonths} mo</TableCell>
-                  <TableCell><Badge variant="outline" className="capitalize">{l.status}</Badge></TableCell>
+                  <TableCell className="text-right">{l.status === 'pending' ? '—' : `${l.remainingMonths} / ${l.totalMonths} mo`}</TableCell>
+                  <TableCell><Badge variant="outline" className={LOAN_STATUS_BADGE[l.status] ?? 'capitalize'}>{l.status}</Badge></TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -1027,6 +1261,11 @@ function InvestmentTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const [proofs, setProofs] = useState<DocRow[]>([]);
+  const [proofsLoading, setProofsLoading] = useState(true);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [uploadingProof, setUploadingProof] = useState(false);
+
   const fetchDeclaration = useCallback(async () => {
     setLoading(true);
     try {
@@ -1044,6 +1283,17 @@ function InvestmentTab() {
 
   useEffect(() => { fetchDeclaration(); }, [fetchDeclaration]);
 
+  const fetchProofs = useCallback(async () => {
+    setProofsLoading(true);
+    try {
+      const res = await fetch('/api/documents');
+      const data = await res.json();
+      setProofs((data.data ?? []).filter((d: DocRow) => d.docType === 'investment_proof'));
+    } catch { toast.error('Failed to load proof documents'); } finally { setProofsLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchProofs(); }, [fetchProofs]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -1058,26 +1308,83 @@ function InvestmentTab() {
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to save'); } finally { setSaving(false); }
   };
 
+  const handleUploadProof = async () => {
+    if (!proofFile) { toast.error('Select a file first'); return; }
+    setUploadingProof(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', proofFile);
+      formData.append('docType', 'investment_proof');
+      const res = await fetch('/api/documents', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      toast.success('Proof uploaded');
+      setProofFile(null);
+      fetchProofs();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Upload failed'); } finally { setUploadingProof(false); }
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2"><PiggyBank className="size-4 text-emerald-600" />Investment Declaration</CardTitle>
-        <CardDescription>Only applies under the Old Tax Regime. HR verifies declarations against submitted proofs.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 max-w-md">
-        <div className="space-y-1.5"><Label>Financial Year (start)</Label><Input type="number" value={year} onChange={(e) => setYear(e.target.value)} /></div>
-        {loading ? <Skeleton className="h-24 w-full" /> : (
-          <>
-            {status && <Badge variant="outline" className={badge(status)}>{status}</Badge>}
-            <div className="space-y-1.5"><Label>Section 80C (LIC, PPF, ELSS, etc.)</Label><Input type="number" value={section80C} onChange={(e) => setSection80C(e.target.value)} disabled={status === 'verified'} /></div>
-            <div className="space-y-1.5"><Label>Section 80D (health insurance)</Label><Input type="number" value={section80D} onChange={(e) => setSection80D(e.target.value)} disabled={status === 'verified'} /></div>
-            <Button onClick={handleSave} disabled={saving || status === 'verified'} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Save
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><PiggyBank className="size-4 text-emerald-600" />Investment Declaration</CardTitle>
+          <CardDescription>Only applies under the Old Tax Regime. HR verifies declarations against submitted proofs.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 max-w-md">
+          <div className="space-y-1.5"><Label>Financial Year (start)</Label><Input type="number" value={year} onChange={(e) => setYear(e.target.value)} /></div>
+          {loading ? <Skeleton className="h-24 w-full" /> : (
+            <>
+              {status && <Badge variant="outline" className={badge(status)}>{status}</Badge>}
+              <div className="space-y-1.5"><Label>Section 80C (LIC, PPF, ELSS, etc.)</Label><Input type="number" value={section80C} onChange={(e) => setSection80C(e.target.value)} disabled={status === 'verified'} /></div>
+              <div className="space-y-1.5"><Label>Section 80D (health insurance)</Label><Input type="number" value={section80D} onChange={(e) => setSection80D(e.target.value)} disabled={status === 'verified'} /></div>
+              <Button onClick={handleSave} disabled={saving || status === 'verified'} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Save
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Proof Documents</CardTitle>
+          <CardDescription>Upload rent receipts, LIC/PPF/ELSS statements, insurance premium receipts, etc. — JPEG, PNG, or PDF (max 10MB).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label>File</Label>
+              <Input type="file" accept="image/jpeg,image/png,application/pdf" onChange={(e) => setProofFile(e.target.files?.[0] ?? null)} />
+            </div>
+            <Button onClick={handleUploadProof} disabled={uploadingProof || !proofFile} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {uploadingProof ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              Upload
             </Button>
-          </>
-        )}
-      </CardContent>
-    </Card>
+          </div>
+          <Separator />
+          {proofsLoading ? <Skeleton className="h-16 w-full" /> : proofs.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No proof documents uploaded yet.</p>
+          ) : (
+            <Table>
+              <TableHeader><TableRow><TableHead>File</TableHead><TableHead>Status</TableHead><TableHead>Uploaded</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {proofs.map((d) => (
+                  <TableRow key={d.id}>
+                    <TableCell className="truncate max-w-[200px]">{d.fileName}</TableCell>
+                    <TableCell><Badge variant="outline" className={badge(d.verifiedStatus)}>{d.verifiedStatus}</Badge></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{fmtDate(d.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={() => window.open(`/api/documents/${d.id}`, '_blank')}><Download className="size-3.5 mr-1" />Download</Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }
 

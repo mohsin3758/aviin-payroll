@@ -16,6 +16,8 @@ import {
   MonitorSmartphone,
   Pencil,
   Upload,
+  XCircle,
+  CalendarClock,
 } from 'lucide-react';
 
 import { usePayrollStore } from '@/store/payroll-store';
@@ -51,6 +53,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -158,6 +161,7 @@ export default function AttendanceView() {
   const { user } = useSessionContext();
   const isStaff = user?.role === 'admin' || user?.role === 'hr';
   const isEmployeeRole = user?.role === 'employee';
+  const canReviewRegularizations = user?.role === 'admin' || user?.role === 'hr' || user?.role === 'manager';
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
@@ -216,6 +220,22 @@ export default function AttendanceView() {
   // ---- State: Attendance Data ----
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [attendanceLoading, setAttendanceLoading] = useState(true);
+
+  // ---- State: Regularization Requests ----
+  const [regularizations, setRegularizations] = useState<{
+    id: string;
+    date: string;
+    requestedPunchIn: string | null;
+    requestedPunchOut: string | null;
+    reason: string;
+    status: string;
+    employee: { firstName: string; lastName: string | null; employeeCode: string };
+  }[]>([]);
+  const [regularizationsLoading, setRegularizationsLoading] = useState(true);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewTarget, setReviewTarget] = useState<{ id: string; approved: boolean } | null>(null);
+  const [reviewing, setReviewing] = useState(false);
 
   // ---- State: Live Clock ----
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -305,6 +325,53 @@ export default function AttendanceView() {
       setAttendanceLoading(false);
     }
   }, [currentMonth, currentYear, filterEmployeeId]);
+
+  // ---- Fetch Regularization Requests (admin/hr/manager) ----
+  const fetchRegularizations = useCallback(async () => {
+    setRegularizationsLoading(true);
+    try {
+      const res = await fetch('/api/attendance-regularizations?status=pending');
+      const json = await res.json();
+      setRegularizations(json.data ?? []);
+    } catch {
+      toast.error('Failed to load correction requests');
+    } finally {
+      setRegularizationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (canReviewRegularizations) fetchRegularizations();
+  }, [canReviewRegularizations, fetchRegularizations]);
+
+  const openReview = (id: string, approved: boolean) => {
+    setReviewTarget({ id, approved });
+    setReviewComment('');
+  };
+
+  const handleReview = async () => {
+    if (!reviewTarget) return;
+    setReviewing(true);
+    setReviewingId(reviewTarget.id);
+    try {
+      const res = await fetch(`/api/attendance-regularizations/${reviewTarget.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: reviewTarget.approved, comment: reviewComment.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to review request');
+      toast.success(reviewTarget.approved ? 'Correction approved' : 'Correction rejected');
+      setReviewTarget(null);
+      fetchRegularizations();
+      fetchAttendance();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to review request');
+    } finally {
+      setReviewing(false);
+      setReviewingId(null);
+    }
+  };
 
   // ---- Fetch Today's Punch for Selected Employee ----
   const fetchTodayPunch = useCallback(async (empId: string) => {
@@ -889,6 +956,76 @@ export default function AttendanceView() {
           </Card>
         </motion.div>
       </div>
+
+      {/* ============ CORRECTION REQUESTS ============ */}
+      {canReviewRegularizations && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarClock className="size-4 text-emerald-600" />
+              Pending Correction Requests
+            </CardTitle>
+            <CardDescription>Employee-submitted punch-in/punch-out corrections awaiting your review</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {regularizationsLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : regularizations.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">No pending correction requests.</p>
+            ) : (
+              <div className="divide-y">
+                {regularizations.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between py-3 gap-4">
+                    <div className="text-sm space-y-0.5">
+                      <p className="font-medium">{r.employee.firstName} {r.employee.lastName ?? ''} <span className="text-xs text-muted-foreground font-normal">({r.employee.employeeCode})</span></p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(r.date)} —
+                        {r.requestedPunchIn && <> In: {new Date(r.requestedPunchIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</>}
+                        {r.requestedPunchOut && <> Out: {new Date(r.requestedPunchOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</>}
+                      </p>
+                      <p className="text-xs text-muted-foreground italic">{r.reason}</p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <Button size="sm" variant="outline" className="text-emerald-700 border-emerald-200" disabled={reviewing && reviewingId === r.id} onClick={() => openReview(r.id, true)}>
+                        <CheckCircle2 className="size-4" />Approve
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-red-600 border-red-200" disabled={reviewing && reviewingId === r.id} onClick={() => openReview(r.id, false)}>
+                        <XCircle className="size-4" />Reject
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={!!reviewTarget} onOpenChange={(open) => { if (!open && !reviewing) setReviewTarget(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{reviewTarget?.approved ? 'Approve' : 'Reject'} Correction Request</DialogTitle>
+            <DialogDescription>
+              {reviewTarget?.approved ? 'This will apply the requested time(s) to the employee’s attendance record.' : 'The employee will be able to see this was rejected.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Comment (optional)</Label>
+            <Textarea value={reviewComment} onChange={(e) => setReviewComment(e.target.value)} rows={2} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewTarget(null)} disabled={reviewing}>Cancel</Button>
+            <Button
+              onClick={handleReview}
+              disabled={reviewing}
+              className={reviewTarget?.approved ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}
+            >
+              {reviewing ? <Loader2 className="size-4 animate-spin" /> : null}
+              {reviewTarget?.approved ? 'Approve' : 'Reject'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ============ ATTENDANCE TABLE ============ */}
       <Card>
