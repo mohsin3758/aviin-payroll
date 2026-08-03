@@ -3,9 +3,9 @@ import { db } from "@/lib/db";
 import {
   processEmployeePayroll,
   getDaysInMonth,
-  STANDARD_HOURS_PER_DAY,
   type EmployeePayrollInput,
 } from "@/lib/payroll/engine";
+import { computeMonthlyAttendance } from "@/lib/payroll/attendance-tally";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
@@ -202,29 +202,16 @@ export async function POST(request: NextRequest) {
 
       // 3b. Calculate presentDays and overtime hours, day by day, so company holidays and
       // weekly-off days are auto-paid when the employee has no explicit attendance record.
-      const attendanceByDate = new Map(
-        emp.attendance.map((record) => [record.date.toISOString().slice(0, 10), record])
+      // Shared with the Attendance report (src/app/api/reports/route.ts) so the two can never
+      // disagree on what "present days" means — see src/lib/payroll/attendance-tally.ts.
+      const { presentDays, overtimeHours } = computeMonthlyAttendance(
+        emp.attendance,
+        daysInMonth,
+        month,
+        year,
+        holidayDateKeys,
+        weeklyOffDays
       );
-      let presentDays = 0;
-      let overtimeHours = 0;
-      for (let day = 1; day <= daysInMonth; day++) {
-        const dateObj = new Date(Date.UTC(year, month - 1, day));
-        const dateKey = dateObj.toISOString().slice(0, 10);
-        const record = attendanceByDate.get(dateKey);
-
-        if (record) {
-          if (record.status === "present" || record.status === "holiday" || record.status === "weekly-off") {
-            presentDays += 1;
-          } else if (record.status === "half-day") {
-            presentDays += 0.5;
-          }
-          if (record.totalHours && record.totalHours > STANDARD_HOURS_PER_DAY) {
-            overtimeHours += record.totalHours - STANDARD_HOURS_PER_DAY;
-          }
-        } else if (holidayDateKeys.has(dateKey) || weeklyOffDays.includes(dateObj.getUTCDay())) {
-          presentDays += 1;
-        }
-      }
 
       // 3a. Build the EmployeePayrollInput
       const empInput: EmployeePayrollInput = {

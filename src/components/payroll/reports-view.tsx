@@ -73,10 +73,14 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ] as const;
 
-type ReportType = 'summary' | 'pf' | 'esi' | 'tds' | 'pt' | 'lwf' | 'headcount' | 'attrition';
+type ReportType = 'summary' | 'pf' | 'esi' | 'tds' | 'pt' | 'lwf' | 'headcount' | 'attrition' | 'attendance' | 'leave-balance';
 // The 6 original types are all tied to a payroll run for a single month (or range of months);
-// headcount/attrition are workforce-analytics types with their own date parameters.
+// headcount/attrition/attendance/leave-balance are workforce-analytics types with their own params.
 const STATUTORY_TYPES: ReportType[] = ['summary', 'pf', 'esi', 'tds', 'pt', 'lwf'];
+// Attendance shares the statutory types' single month/year picker (no range support), but
+// isn't itself tied to a payroll run, so it's kept out of STATUTORY_TYPES (which also gates the
+// range-mode checkbox — attendance doesn't support ranges).
+const MONTH_YEAR_TYPES: ReportType[] = [...STATUTORY_TYPES, 'attendance'];
 
 // ─── Mock data types ───────────────────────────────────────────────────────────
 
@@ -210,6 +214,42 @@ interface TrendMonth {
   netPayroll: number;
 }
 
+interface AttendanceRow {
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  department: string;
+  designation: string;
+  presentDays: number;
+  absentDays: number;
+  halfDays: number;
+  attendancePercent: number;
+  overtimeHours: number;
+}
+
+interface AttendanceData {
+  daysInMonth: number;
+  employees: AttendanceRow[];
+  totals: { totalEmployees: number; avgAttendancePercent: number };
+}
+
+interface LeaveBalanceRow {
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  department: string;
+  leaveType: string;
+  totalAllocated: number;
+  carryForwarded: number;
+  used: number;
+  remaining: number;
+}
+
+interface LeaveBalanceData {
+  employees: LeaveBalanceRow[];
+  byLeaveType: { leaveType: string; totalAllocated: number; used: number; remaining: number }[];
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReportsView() {
@@ -234,6 +274,9 @@ export default function ReportsView() {
   const [fromDate, setFromDate] = useState(todayIso.slice(0, 8) + '01');
   const [toDate, setToDate] = useState(todayIso);
 
+  // Leave Balance's own single-year param.
+  const [leaveYear, setLeaveYear] = useState(String(currentYear));
+
   // Report data states
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [pfData, setPfData] = useState<PfData | null>(null);
@@ -243,6 +286,8 @@ export default function ReportsView() {
   const [lwfData, setLwfData] = useState<LwfData | null>(null);
   const [headcountData, setHeadcountData] = useState<HeadcountData | null>(null);
   const [attritionData, setAttritionData] = useState<AttritionData | null>(null);
+  const [attendanceData, setAttendanceData] = useState<AttendanceData | null>(null);
+  const [leaveBalanceData, setLeaveBalanceData] = useState<LeaveBalanceData | null>(null);
 
   // Trends tab
   const [trendMonths, setTrendMonths] = useState<TrendMonth[]>([]);
@@ -257,6 +302,11 @@ export default function ReportsView() {
     } else if (type === 'attrition') {
       params.set('fromDate', fromDate);
       params.set('toDate', toDate);
+    } else if (type === 'leave-balance') {
+      params.set('year', leaveYear);
+    } else if (type === 'attendance') {
+      params.set('month', month);
+      params.set('year', year);
     } else if (isRangeMode) {
       params.set('fromMonth', month);
       params.set('fromYear', year);
@@ -267,7 +317,7 @@ export default function ReportsView() {
       params.set('year', year);
     }
     return params;
-  }, [month, year, isRangeMode, toMonth, toYear, fromDate, toDate]);
+  }, [month, year, isRangeMode, toMonth, toYear, fromDate, toDate, leaveYear]);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -383,21 +433,28 @@ export default function ReportsView() {
         case 'attrition':
           setAttritionData(d as AttritionData);
           break;
+        case 'attendance':
+          setAttendanceData(d as AttendanceData);
+          break;
+        case 'leave-balance':
+          setLeaveBalanceData(d as LeaveBalanceData);
+          break;
       }
 
       const periodLabel = reportType === 'headcount' ? 'as of today'
         : reportType === 'attrition' ? `${fromDate} to ${toDate}`
-          : isRangeMode ? `${MONTHS[Number(month) - 1]} ${year} – ${MONTHS[Number(toMonth) - 1]} ${toYear}`
-            : `${MONTHS[Number(month) - 1]} ${year}`;
+          : reportType === 'leave-balance' ? `Year ${leaveYear}`
+            : isRangeMode ? `${MONTHS[Number(month) - 1]} ${year} – ${MONTHS[Number(toMonth) - 1]} ${toYear}`
+              : `${MONTHS[Number(month) - 1]} ${year}`;
       toast.success(`${periodLabel} ${reportLabel(reportType)} generated`);
     } catch {
       toast.error('Failed to generate report. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [month, year, reportType, buildReportQuery, isRangeMode, toMonth, toYear, fromDate, toDate]);
+  }, [month, year, reportType, buildReportQuery, isRangeMode, toMonth, toYear, fromDate, toDate, leaveYear]);
 
-  const handleExport = useCallback(async (type: ReportType, format: 'csv' | 'xlsx' = 'csv') => {
+  const handleExport = useCallback(async (type: ReportType, format: 'csv' | 'xlsx' | 'pdf' = 'csv') => {
     try {
       const params = buildReportQuery(type);
       params.set('format', format);
@@ -407,7 +464,10 @@ export default function ReportsView() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const suffix = type === 'headcount' ? 'headcount' : type === 'attrition' ? `attrition-${fromDate}-to-${toDate}` : `${type}-${month}-${year}`;
+      const suffix = type === 'headcount' ? 'headcount'
+        : type === 'attrition' ? `attrition-${fromDate}-to-${toDate}`
+          : type === 'leave-balance' ? `leave-balance-${leaveYear}`
+            : `${type}-${month}-${year}`;
       a.download = `${suffix}-report.${format}`;
       document.body.appendChild(a);
       a.click();
@@ -417,7 +477,23 @@ export default function ReportsView() {
     } catch {
       toast.error('Failed to export report');
     }
-  }, [buildReportQuery, month, year, fromDate, toDate]);
+  }, [buildReportQuery, month, year, fromDate, toDate, leaveYear]);
+
+  // A shared 3-button export row (CSV/Excel/PDF) so every report view builds this identically
+  // rather than repeating the same three <Button> blocks per type.
+  const ExportButtons = ({ type }: { type: ReportType }) => (
+    <div className="flex gap-2">
+      <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport(type, 'csv')}>
+        <Download className="h-3.5 w-3.5" /> CSV
+      </Button>
+      <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport(type, 'xlsx')}>
+        <Download className="h-3.5 w-3.5" /> Excel
+      </Button>
+      <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport(type, 'pdf')}>
+        <Download className="h-3.5 w-3.5" /> PDF
+      </Button>
+    </div>
+  );
 
   useEffect(() => {
     if (generated) fetchReport();
@@ -433,6 +509,8 @@ export default function ReportsView() {
       lwf: 'LWF Report',
       headcount: 'Headcount Report',
       attrition: 'Attrition Report',
+      attendance: 'Attendance Report',
+      'leave-balance': 'Leave Balance Report',
     };
     return labels[type];
   };
@@ -466,14 +544,7 @@ export default function ReportsView() {
           <h3 className="text-lg font-semibold text-foreground">
             Payroll Summary — {periodDisplay}
           </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => handleExport('summary')}
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <ExportButtons type="summary" />
         </div>
 
         {/* KPI Cards */}
@@ -529,14 +600,7 @@ export default function ReportsView() {
           <h3 className="text-lg font-semibold text-foreground">
             PF Contribution Report — {periodDisplay}
           </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => handleExport('pf')}
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <ExportButtons type="pf" />
         </div>
 
         {/* Info Banner */}
@@ -619,14 +683,7 @@ export default function ReportsView() {
           <h3 className="text-lg font-semibold text-foreground">
             ESI Contribution Report — {periodDisplay}
           </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => handleExport('esi')}
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <ExportButtons type="esi" />
         </div>
 
         {/* Info Banner */}
@@ -704,14 +761,7 @@ export default function ReportsView() {
           <h3 className="text-lg font-semibold text-foreground">
             TDS Report — {periodDisplay}
           </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => handleExport('tds')}
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <ExportButtons type="tds" />
         </div>
 
         {/* Info Banner */}
@@ -820,14 +870,7 @@ export default function ReportsView() {
           <h3 className="text-lg font-semibold text-foreground">
             Professional Tax Report — {periodDisplay}
           </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => handleExport('pt')}
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <ExportButtons type="pt" />
         </div>
 
         {ptData.states.length === 0 && (
@@ -896,14 +939,7 @@ export default function ReportsView() {
           <h3 className="text-lg font-semibold text-foreground">
             Labour Welfare Fund Report — {periodDisplay}
           </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            onClick={() => handleExport('lwf')}
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <ExportButtons type="lwf" />
         </div>
 
         {lwfData.states.length === 0 && (
@@ -964,14 +1000,7 @@ export default function ReportsView() {
           <h3 className="text-lg font-semibold text-foreground">
             Headcount Report — as of {new Date(headcountData.asOf).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
           </h3>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('headcount', 'csv')}>
-              <Download className="h-3.5 w-3.5" /> CSV
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('headcount', 'xlsx')}>
-              <Download className="h-3.5 w-3.5" /> Excel
-            </Button>
-          </div>
+          <ExportButtons type="headcount" />
         </div>
 
         <Card className="gap-4">
@@ -1026,14 +1055,7 @@ export default function ReportsView() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">Attrition Report — {fromDate} to {toDate}</h3>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('attrition', 'csv')}>
-              <Download className="h-3.5 w-3.5" /> CSV
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('attrition', 'xlsx')}>
-              <Download className="h-3.5 w-3.5" /> Excel
-            </Button>
-          </div>
+          <ExportButtons type="attrition" />
         </div>
 
         <Card className="gap-4">
@@ -1077,6 +1099,152 @@ export default function ReportsView() {
                   ))}
                   {attritionData.employees.length === 0 && (
                     <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">No exits in this period.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // ─── Attendance Report ───────────────────────────────────────────────────────
+
+  const renderAttendanceReport = () => {
+    if (!attendanceData) return null;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">Attendance Report — {MONTHS[Number(month) - 1]} {year}</h3>
+          <ExportButtons type="attendance" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Card className="gap-4">
+            <CardContent className="flex items-center gap-4 pt-0">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                <Users className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Employees</p>
+                <p className="text-lg font-bold">{attendanceData.totals.totalEmployees}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="gap-4">
+            <CardContent className="flex items-center gap-4 pt-0">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Avg. Attendance</p>
+                <p className="text-lg font-bold">{attendanceData.totals.avgAttendancePercent}%</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+                    <TableHead className="w-[100px]">Emp Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead className="text-right">Present</TableHead>
+                    <TableHead className="text-right">Absent</TableHead>
+                    <TableHead className="text-right">Half-Day</TableHead>
+                    <TableHead className="text-right">Overtime (hrs)</TableHead>
+                    <TableHead className="text-right font-semibold">Attendance %</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attendanceData.employees.map((row) => (
+                    <TableRow key={row.employeeId}>
+                      <TableCell className="font-mono text-xs">{row.employeeCode}</TableCell>
+                      <TableCell className="font-medium">{row.employeeName}</TableCell>
+                      <TableCell>{row.department}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.presentDays}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.absentDays}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.halfDays}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.overtimeHours}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{row.attendancePercent}%</TableCell>
+                    </TableRow>
+                  ))}
+                  {attendanceData.employees.length === 0 && (
+                    <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No active employees found.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+          <CardFooter className="flex items-center gap-2 border-t bg-muted/30 px-6 py-3 text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5" />
+            Present days include company holidays and weekly-offs with no explicit attendance record — the same definition payroll pays against.
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  };
+
+  // ─── Leave Balance Report ────────────────────────────────────────────────────
+
+  const renderLeaveBalanceReport = () => {
+    if (!leaveBalanceData) return null;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">Leave Balance Report — Year {leaveYear}</h3>
+          <ExportButtons type="leave-balance" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {leaveBalanceData.byLeaveType.map((lt) => (
+            <Card key={lt.leaveType} className="gap-3 py-4">
+              <CardContent className="pt-0">
+                <p className="text-xs text-muted-foreground">{lt.leaveType}</p>
+                <p className="text-sm">Allocated: <span className="font-semibold tabular-nums">{lt.totalAllocated}</span></p>
+                <p className="text-sm">Used: <span className="font-semibold tabular-nums">{lt.used}</span></p>
+                <p className="text-sm text-emerald-700">Remaining: <span className="font-semibold tabular-nums">{lt.remaining}</span></p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+                    <TableHead className="w-[100px]">Emp Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Leave Type</TableHead>
+                    <TableHead className="text-right">Allocated</TableHead>
+                    <TableHead className="text-right">Carry Fwd</TableHead>
+                    <TableHead className="text-right">Used</TableHead>
+                    <TableHead className="text-right font-semibold">Remaining</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {leaveBalanceData.employees.map((row, i) => (
+                    <TableRow key={`${row.employeeId}-${row.leaveType}-${i}`}>
+                      <TableCell className="font-mono text-xs">{row.employeeCode}</TableCell>
+                      <TableCell className="font-medium">{row.employeeName}</TableCell>
+                      <TableCell>{row.department}</TableCell>
+                      <TableCell>{row.leaveType}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.totalAllocated}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.carryForwarded}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.used}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{row.remaining}</TableCell>
+                    </TableRow>
+                  ))}
+                  {leaveBalanceData.employees.length === 0 && (
+                    <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No leave balances recorded for this year.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -1226,11 +1394,13 @@ export default function ReportsView() {
                       <SelectItem value="lwf">LWF</SelectItem>
                       <SelectItem value="headcount">Headcount</SelectItem>
                       <SelectItem value="attrition">Attrition</SelectItem>
+                      <SelectItem value="attendance">Attendance</SelectItem>
+                      <SelectItem value="leave-balance">Leave Balance</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                {isStatutoryType && !isRangeMode && (
+                {MONTH_YEAR_TYPES.includes(reportType) && !isRangeMode && (
                   <>
                     <div className="space-y-1.5">
                       <Label htmlFor="report-month" className="text-xs font-medium">Month</Label>
@@ -1290,6 +1460,13 @@ export default function ReportsView() {
                   </>
                 )}
 
+                {reportType === 'leave-balance' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="leave-year" className="text-xs font-medium">Year</Label>
+                    <Input id="leave-year" type="number" min={2020} max={2035} value={leaveYear} onChange={(e) => setLeaveYear(e.target.value)} className="w-[100px]" />
+                  </div>
+                )}
+
                 <Button
                   onClick={fetchReport}
                   disabled={loading}
@@ -1345,6 +1522,8 @@ export default function ReportsView() {
               {reportType === 'lwf' && renderLwfReport()}
               {reportType === 'headcount' && renderHeadcountReport()}
               {reportType === 'attrition' && renderAttritionReport()}
+              {reportType === 'attendance' && renderAttendanceReport()}
+              {reportType === 'leave-balance' && renderLeaveBalanceReport()}
             </>
           )}
         </TabsContent>

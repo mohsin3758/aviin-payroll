@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getMonthName } from "@/lib/payroll/engine";
+import { getMonthName, getDaysInMonth } from "@/lib/payroll/engine";
 import { enumerateMonthRange, InvalidRangeError } from "@/lib/payroll/report-range";
+import { computeMonthlyAttendance } from "@/lib/payroll/attendance-tally";
 import Papa from "papaparse";
 import ExcelJS from "exceljs";
+import PDFDocument from "pdfkit";
 import { requireRole } from "@/lib/auth";
-import { apiError, handleApiError, toDate } from "@/lib/api-utils";
+import { apiError, handleApiError, toDate, getDefaultCompanyId } from "@/lib/api-utils";
 import { ACTIVE_EMPLOYEE_WHERE } from "@/lib/employee-scope";
 import { reportQuerySchema, type ReportType, type ReportFormat } from "@/lib/validations/report";
 
@@ -162,6 +164,73 @@ async function buildXlsxResponse(rows: Record<string, unknown>[], sheetName: str
   });
 }
 
+// A plain data table (title, subtitle, header row, data rows, totals-free — totals are already
+// visible in the JSON/CSV/XLSX exports) via pdfkit, a lightweight pure-Node PDF-drawing library
+// — no headless browser needed for a document this simple. Every report type funnels through
+// the same `flattenReportRows`-shaped rows the CSV/XLSX branches already use, so there's one
+// definition of "what a report row looks like," not a fourth parallel one.
+async function buildPdfResponse(rows: Record<string, unknown>[], title: string, subtitle: string, filenameBase: string): Promise<NextResponse> {
+  const doc = new PDFDocument({ margin: 40, size: "A4" });
+  const chunks: Buffer[] = [];
+  doc.on("data", (chunk) => chunks.push(chunk));
+  const finished = new Promise<Buffer>((resolve) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+
+  doc.fontSize(16).font("Helvetica-Bold").text(title);
+  doc.fontSize(10).font("Helvetica").fillColor("#666666").text(subtitle);
+  doc.fillColor("#000000").moveDown(1);
+
+  if (rows.length === 0) {
+    doc.fontSize(10).text("No data available for this period.");
+  } else {
+    const headers = Object.keys(rows[0]);
+    const left = doc.page.margins.left;
+    const pageWidth = doc.page.width - left - doc.page.margins.right;
+    const colWidth = pageWidth / headers.length;
+    const rowHeight = 16;
+    const bottomLimit = doc.page.height - doc.page.margins.bottom;
+
+    const drawHeaderRow = (y: number) => {
+      doc.fontSize(7.5).font("Helvetica-Bold");
+      headers.forEach((h, i) => doc.text(h, left + i * colWidth, y, { width: colWidth - 4, ellipsis: true }));
+      doc.moveTo(left, y + rowHeight - 4).lineTo(left + pageWidth, y + rowHeight - 4).strokeColor("#cccccc").stroke();
+      doc.font("Helvetica").fillColor("#000000");
+    };
+
+    let y = doc.y;
+    drawHeaderRow(y);
+    y += rowHeight;
+
+    for (const row of rows) {
+      if (y + rowHeight > bottomLimit) {
+        doc.addPage();
+        y = doc.page.margins.top;
+        drawHeaderRow(y);
+        y += rowHeight;
+      }
+      doc.fontSize(7.5);
+      headers.forEach((h, i) => {
+        const value = row[h];
+        const text = value === null || value === undefined ? "" : String(value);
+        doc.text(text, left + i * colWidth, y, { width: colWidth - 4, ellipsis: true });
+      });
+      y += rowHeight;
+    }
+  }
+
+  doc.end();
+  const buffer = await finished;
+
+  return new NextResponse(Buffer.from(buffer), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filenameBase}.pdf"`,
+    },
+  });
+}
+
 function exportResponse(type: ReportType, format: ReportFormat, reportData: Record<string, unknown>, filenameBase: string): NextResponse | null {
   if (format === "csv") {
     const csv = Papa.unparse(flattenReportRows(type, reportData));
@@ -195,7 +264,9 @@ async function handleHeadcountReport(format: ReportFormat): Promise<NextResponse
     byEmploymentType: byEmploymentType.map((e) => ({ employmentType: e.employmentType, count: e._count.employmentType })),
   };
 
-  if (format === "xlsx") return buildXlsxResponse(flattenReportRows("headcount", reportData), "Headcount", "headcount-report");
+  const headcountRows = flattenReportRows("headcount", reportData);
+  if (format === "xlsx") return buildXlsxResponse(headcountRows, "Headcount", "headcount-report");
+  if (format === "pdf") return buildPdfResponse(headcountRows, "Headcount Report", `As of ${new Date(reportData.asOf).toLocaleDateString("en-IN")}`, "headcount-report");
   const csvRes = exportResponse("headcount", format, reportData, "headcount-report");
   if (csvRes) return csvRes;
   return NextResponse.json({ data: reportData });
@@ -266,7 +337,126 @@ async function handleAttritionReport(fromDateStr: string, toDateStr: string, for
   const filenameBase = `attrition-report-${fromDateStr}-to-${toDateStr}`;
 
   if (format === "xlsx") return buildXlsxResponse(employees, "Attrition", filenameBase);
+  if (format === "pdf") return buildPdfResponse(employees, "Attrition Report", `${fromDateStr} to ${toDateStr}`, filenameBase);
   const csvRes = exportResponse("attrition", format, reportData, filenameBase);
+  if (csvRes) return csvRes;
+  return NextResponse.json({ data: reportData });
+}
+
+// --- Attendance: per-employee monthly present/absent/half-day summary. Reuses the EXACT same
+// day-by-day tally payroll itself pays against (src/lib/payroll/attendance-tally.ts) so this
+// report can never disagree with what employees are actually paid for.
+async function handleAttendanceReport(month: number, year: number, format: ReportFormat): Promise<NextResponse> {
+  const companyId = await getDefaultCompanyId();
+  const company = await db.company.findUnique({ where: { id: companyId } });
+  if (!company) return apiError("Company not found", 404);
+
+  const daysInMonth = getDaysInMonth(month, year);
+  const monthStart = new Date(Date.UTC(year, month - 1, 1));
+  const monthEnd = new Date(Date.UTC(year, month, 1));
+  const holidays = await db.holiday.findMany({ where: { companyId: company.id, date: { gte: monthStart, lt: monthEnd } } });
+  const holidayDateKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
+  const weeklyOffDays = company.weeklyOffDays
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n) && n >= 0 && n <= 6);
+
+  const employees = await db.employee.findMany({
+    where: { companyId: company.id, ...ACTIVE_EMPLOYEE_WHERE },
+    select: {
+      id: true,
+      employeeCode: true,
+      firstName: true,
+      lastName: true,
+      department: true,
+      designation: true,
+      attendance: { where: { date: { gte: monthStart, lt: monthEnd } } },
+    },
+  });
+
+  const rows = employees.map((emp) => {
+    const { presentDays, absentDays, halfDays, overtimeHours } = computeMonthlyAttendance(
+      emp.attendance,
+      daysInMonth,
+      month,
+      year,
+      holidayDateKeys,
+      weeklyOffDays
+    );
+    return {
+      employeeId: emp.id,
+      employeeCode: emp.employeeCode,
+      employeeName: `${emp.firstName} ${emp.lastName ?? ""}`.trim(),
+      department: emp.department,
+      designation: emp.designation,
+      daysInMonth,
+      presentDays,
+      absentDays,
+      halfDays,
+      attendancePercent: daysInMonth > 0 ? Math.round((presentDays / daysInMonth) * 1000) / 10 : 0,
+      overtimeHours: Math.round(overtimeHours * 10) / 10,
+    };
+  });
+
+  const totals = {
+    totalEmployees: rows.length,
+    avgAttendancePercent: rows.length > 0 ? Math.round((rows.reduce((s, r) => s + r.attendancePercent, 0) / rows.length) * 10) / 10 : 0,
+  };
+
+  const reportData = { month, year, monthName: getMonthName(month), daysInMonth, employees: rows, totals };
+  const filenameBase = `attendance-report-${month}-${year}`;
+
+  if (format === "xlsx") return buildXlsxResponse(rows, "Attendance", filenameBase);
+  if (format === "pdf") return buildPdfResponse(rows, "Attendance Report", `${getMonthName(month)} ${year}`, filenameBase);
+  const csvRes = exportResponse("attendance", format, reportData, filenameBase);
+  if (csvRes) return csvRes;
+  return NextResponse.json({ data: reportData });
+}
+
+// --- Leave Balance: company-wide snapshot of the materialized LeaveBalance table for a given
+// year (defaults to current year) — mirrors GET /api/leaves/balance's own query shape (that
+// route is scoped to one employee; this is the same table across everyone), computing
+// `remaining` the same way the client there already does.
+async function handleLeaveBalanceReport(year: number | undefined, format: ReportFormat): Promise<NextResponse> {
+  const targetYear = year ?? new Date().getFullYear();
+
+  const balances = await db.leaveBalance.findMany({
+    where: { year: targetYear },
+    include: {
+      leaveType: { select: { name: true } },
+      employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: true } },
+    },
+    orderBy: [{ employee: { employeeCode: "asc" } }, { leaveType: { name: "asc" } }],
+  });
+
+  const rows = balances.map((b) => ({
+    employeeId: b.employee.id,
+    employeeCode: b.employee.employeeCode,
+    employeeName: `${b.employee.firstName} ${b.employee.lastName ?? ""}`.trim(),
+    department: b.employee.department,
+    leaveType: b.leaveType.name,
+    totalAllocated: b.totalAllocated,
+    carryForwarded: b.carryForwarded,
+    used: b.used,
+    remaining: b.totalAllocated + b.carryForwarded - b.used,
+  }));
+
+  const byLeaveTypeMap = new Map<string, { totalAllocated: number; used: number; remaining: number }>();
+  for (const r of rows) {
+    const existing = byLeaveTypeMap.get(r.leaveType) ?? { totalAllocated: 0, used: 0, remaining: 0 };
+    existing.totalAllocated += r.totalAllocated;
+    existing.used += r.used;
+    existing.remaining += r.remaining;
+    byLeaveTypeMap.set(r.leaveType, existing);
+  }
+  const byLeaveType = [...byLeaveTypeMap.entries()].map(([leaveType, totals]) => ({ leaveType, ...totals }));
+
+  const reportData = { year: targetYear, employees: rows, byLeaveType };
+  const filenameBase = `leave-balance-report-${targetYear}`;
+
+  if (format === "xlsx") return buildXlsxResponse(rows, "Leave Balance", filenameBase);
+  if (format === "pdf") return buildPdfResponse(rows, "Leave Balance Report", `Year ${targetYear}`, filenameBase);
+  const csvRes = exportResponse("leave-balance", format, reportData, filenameBase);
   if (csvRes) return csvRes;
   return NextResponse.json({ data: reportData });
 }
@@ -294,6 +484,15 @@ export async function GET(request: NextRequest) {
         return apiError("fromDate and toDate (YYYY-MM-DD) are required for the attrition report.", 400);
       }
       return handleAttritionReport(parsed.fromDate, parsed.toDate, format);
+    }
+    if (type === "attendance") {
+      if (parsed.month === undefined || parsed.year === undefined) {
+        return apiError("month and year are required for the attendance report.", 400);
+      }
+      return handleAttendanceReport(parsed.month, parsed.year, format);
+    }
+    if (type === "leave-balance") {
+      return handleLeaveBalanceReport(parsed.year, format);
     }
 
     // Statutory types (pf/esi/tds/pt/lwf/summary): either a single month/year, or a full
@@ -574,7 +773,11 @@ export async function GET(request: NextRequest) {
     }
 
     const filenameBase = `${type}-report-${month}-${year}`;
+    const periodLabel = isRangeResult
+      ? `${getMonthName(monthsIncluded[0].month)} ${monthsIncluded[0].year} – ${getMonthName(month)} ${year}`
+      : `${getMonthName(month)} ${year}`;
     if (format === "xlsx") return await buildXlsxResponse(flattenReportRows(type as ReportType, reportData), type, filenameBase);
+    if (format === "pdf") return await buildPdfResponse(flattenReportRows(type as ReportType, reportData), `${type.toUpperCase()} Report`, periodLabel, filenameBase);
     const csvRes = exportResponse(type as ReportType, format, reportData, filenameBase);
     if (csvRes) return csvRes;
 

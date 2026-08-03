@@ -90,6 +90,8 @@ describe("Reports enhancements (requires live dev server)", () => {
     if (createdEmployeeIds.length) {
       await db.exitRequest.deleteMany({ where: { employeeId: { in: createdEmployeeIds } } });
       await db.salaryStructure.deleteMany({ where: { employeeId: { in: createdEmployeeIds } } });
+      await db.attendance.deleteMany({ where: { employeeId: { in: createdEmployeeIds } } });
+      await db.leaveBalance.deleteMany({ where: { employeeId: { in: createdEmployeeIds } } });
       await db.employee.deleteMany({ where: { id: { in: createdEmployeeIds } } });
     }
     await db.$disconnect();
@@ -266,6 +268,104 @@ describe("Reports enhancements (requires live dev server)", () => {
     it("employee role is blocked", async () => {
       const res = await fetch(`${BASE}/api/reports/trends`, { headers: { Cookie: employeeCookie } });
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("attendance report", () => {
+    it("matches payroll's own presentDays for the same employee/month — the critical regression guard proving the two can never disagree", async () => {
+      const attMonth = 3; // a fresh month within FIXTURE_YEAR, not touched by the multi-month aggregation tests above
+      const dates = [
+        { day: "01", status: "present" },
+        { day: "02", status: "present" },
+        { day: "03", status: "half-day" },
+        { day: "04", status: "absent" },
+      ];
+      for (const { day, status } of dates) {
+        const res = await fetch(`${BASE}/api/attendance`, {
+          method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ employeeId: payrollEmployeeId, date: `${FIXTURE_YEAR}-0${attMonth}-${day}`, status }),
+        });
+        expect(res.status, `attendance POST for day ${day}`).toBe(201);
+      }
+
+      const payrollRes = await fetch(`${BASE}/api/payroll`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ month: attMonth, year: FIXTURE_YEAR }),
+      });
+      expect([200, 409]).toContain(payrollRes.status);
+
+      const runsRes = await fetch(`${BASE}/api/payroll?month=${attMonth}&year=${FIXTURE_YEAR}`, { headers: { Cookie: adminCookie } });
+      const runs = await runsRes.json();
+      const runId = runs[0]?.id;
+      expect(runId).toBeTruthy();
+      const runDetailRes = await fetch(`${BASE}/api/payroll/${runId}`, { headers: { Cookie: adminCookie } });
+      const runDetail = await runDetailRes.json();
+      const payrollRow = runDetail.details.find((d: { employeeId: string }) => d.employeeId === payrollEmployeeId);
+      expect(payrollRow).toBeTruthy();
+
+      const attRes = await fetch(`${BASE}/api/reports?type=attendance&month=${attMonth}&year=${FIXTURE_YEAR}`, { headers: { Cookie: adminCookie } });
+      expect(attRes.status).toBe(200);
+      const attData = (await attRes.json()).data;
+      const attRow = attData.employees.find((e: { employeeId: string }) => e.employeeId === payrollEmployeeId);
+      expect(attRow).toBeTruthy();
+
+      expect(attRow.presentDays).toBe(payrollRow.presentDays);
+      expect(attRow.halfDays).toBe(1);
+    });
+
+    it("month/year are required", async () => {
+      const res = await fetch(`${BASE}/api/reports?type=attendance`, { headers: { Cookie: adminCookie } });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("leave balance report", () => {
+    it("computes remaining as totalAllocated + carryForwarded - used, for a disposable balance row", async () => {
+      const leaveType = await db.leaveType.findFirst();
+      if (!leaveType) throw new Error("Expected at least one seeded LeaveType — is the DB seeded?");
+
+      // No write API exists for LeaveBalance rows (confirmed: only GET /api/leaves/balance
+      // exists) — direct DB insert is the only way, same pattern as this suite already uses
+      // for other no-write-API setup.
+      const balance = await db.leaveBalance.create({
+        data: { employeeId: payrollEmployeeId, leaveTypeId: leaveType.id, year: FIXTURE_YEAR, totalAllocated: 12, used: 3, carryForwarded: 2 },
+      });
+
+      const res = await fetch(`${BASE}/api/reports?type=leave-balance&year=${FIXTURE_YEAR}`, { headers: { Cookie: adminCookie } });
+      expect(res.status).toBe(200);
+      const { data } = await res.json();
+      const row = data.employees.find((e: { employeeId: string; leaveType: string }) => e.employeeId === payrollEmployeeId && e.leaveType === leaveType.name);
+      expect(row).toBeTruthy();
+      expect(row.remaining).toBe(12 + 2 - 3);
+
+      await db.leaveBalance.delete({ where: { id: balance.id } });
+    });
+
+    it("defaults to the current year when no year param is given", async () => {
+      const res = await fetch(`${BASE}/api/reports?type=leave-balance`, { headers: { Cookie: adminCookie } });
+      expect(res.status).toBe(200);
+      const { data } = await res.json();
+      expect(data.year).toBe(new Date().getFullYear());
+    });
+  });
+
+  describe("PDF export", () => {
+    it("returns a real PDF for a statutory report, headcount, attrition, attendance, and leave-balance", async () => {
+      const checks: [string, string][] = [
+        ["summary", `type=summary&month=1&year=${FIXTURE_YEAR}`],
+        ["headcount", "type=headcount"],
+        ["attrition", "type=attrition&fromDate=2020-01-01&toDate=2026-12-31"],
+        ["attendance", `type=attendance&month=1&year=${FIXTURE_YEAR}`],
+        ["leave-balance", `type=leave-balance&year=${FIXTURE_YEAR}`],
+      ];
+      for (const [label, qs] of checks) {
+        const res = await fetch(`${BASE}/api/reports?${qs}&format=pdf`, { headers: { Cookie: adminCookie } });
+        expect(res.status, label).toBe(200);
+        expect(res.headers.get("content-type"), label).toContain("application/pdf");
+        const buffer = Buffer.from(await res.arrayBuffer());
+        expect(buffer.byteLength, label).toBeGreaterThan(200);
+        expect(buffer.subarray(0, 5).toString("latin1"), label).toBe("%PDF-");
+      }
     });
   });
 });
