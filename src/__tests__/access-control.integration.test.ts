@@ -496,6 +496,89 @@ describe("Access control fixes (requires live dev server)", () => {
     });
   });
 
+  // ---- Delete user login ----
+  describe("delete user login", () => {
+    async function createDisposableUser(email: string, role: string = "employee"): Promise<string> {
+      const res = await fetch(`${BASE}/api/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ email, password: "TestDelete@12345", name: "QA Delete Target", role }),
+      });
+      if (res.status === 201) return res.json().then((r) => r.data.id);
+      const listRes = await fetch(`${BASE}/api/users`, { headers: { Cookie: adminCookie } });
+      const { data } = await listRes.json();
+      const existing = data.find((u: { email: string }) => u.email === email);
+      if (!existing) throw new Error(`Expected an existing user for ${email} after a 409, found none`);
+      return existing.id;
+    }
+
+    it("admin can permanently delete another user's login", async () => {
+      const userId = await createDisposableUser("qa.deletetest1@test.local");
+      const res = await fetch(`${BASE}/api/users/${userId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+      expect(res.status).toBe(200);
+
+      const listRes = await fetch(`${BASE}/api/users`, { headers: { Cookie: adminCookie } });
+      const { data } = await listRes.json();
+      expect(data.find((u: { id: string }) => u.id === userId)).toBeUndefined();
+    });
+
+    it("blocks self-deletion", async () => {
+      const sessionRes = await fetch(`${BASE}/api/auth/session`, { headers: { Cookie: adminCookie } });
+      const session = await sessionRes.json();
+      const res = await fetch(`${BASE}/api/users/${session.user.id}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+      expect(res.status).toBe(400);
+    });
+
+    it("blocks deleting the last remaining admin account", async () => {
+      // Session cookies here are stateless signed JWTs (see src/lib/auth.ts's verifySession) —
+      // they're never re-checked against the DB's current `active` value mid-session, so
+      // temporarily deactivating other admins below does not invalidate any cookie in use here,
+      // and the restoration in `finally` is guaranteed to run even if an assertion throws.
+      const disposableAdminEmail = "qa.deletetest.onlyadmin@test.local";
+      const disposableAdminId = await createDisposableUser(disposableAdminEmail, "admin");
+      // PUT /api/users/[id] blocks self-modification, so adminCookie's own owner (the seeded
+      // admin) can't deactivate itself — a second, independent admin session is required to
+      // deactivate every *other* admin down to zero.
+      const disposableAdminCookie = await login(disposableAdminEmail, "TestDelete@12345");
+
+      const listRes = await fetch(`${BASE}/api/users`, { headers: { Cookie: adminCookie } });
+      const { data } = await listRes.json();
+      const otherActiveAdmins = data.filter((u: { id: string; role: string; active: boolean }) => u.role === "admin" && u.active && u.id !== disposableAdminId);
+
+      try {
+        for (const a of otherActiveAdmins) {
+          const deactivateRes = await fetch(`${BASE}/api/users/${a.id}`, { method: "PUT", headers: { "Content-Type": "application/json", Cookie: disposableAdminCookie }, body: JSON.stringify({ active: false }) });
+          expect(deactivateRes.status, `deactivating ${a.id}`).toBe(200);
+        }
+
+        // Deleting via adminCookie (the seeded admin's session, now deactivated but its JWT is
+        // still valid — see the stateless-session note above) rather than disposableAdminCookie,
+        // since deleting via its own session would trip the self-delete guard (400) instead of
+        // the rule this test actually targets.
+        const res = await fetch(`${BASE}/api/users/${disposableAdminId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+        expect(res.status).toBe(409);
+      } finally {
+        // Always restore, no matter what happened above — this must never leave real admin
+        // accounts deactivated just because a test ran.
+        for (const a of otherActiveAdmins) {
+          await fetch(`${BASE}/api/users/${a.id}`, { method: "PUT", headers: { "Content-Type": "application/json", Cookie: disposableAdminCookie }, body: JSON.stringify({ active: true }) });
+        }
+        await fetch(`${BASE}/api/users/${disposableAdminId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+      }
+    });
+
+    it("employee and manager roles cannot delete users", async () => {
+      const userId = await createDisposableUser("qa.deletetest.blocked@test.local");
+      const asEmployee = await fetch(`${BASE}/api/users/${userId}`, { method: "DELETE", headers: { Cookie: employeeCookie } });
+      expect(asEmployee.status).toBe(403);
+      const asManager = await fetch(`${BASE}/api/users/${userId}`, { method: "DELETE", headers: { Cookie: managerCookie } });
+      expect(asManager.status).toBe(403);
+
+      // Cleanup as admin (who is always allowed).
+      await fetch(`${BASE}/api/users/${userId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+    });
+  });
+
   // ---- Geofence (gap 4) ----
   describe("geofence", () => {
     afterAll(async () => {

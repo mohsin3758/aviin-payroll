@@ -965,6 +965,7 @@ export default function SettingsView() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     if (user?.role !== 'admin') return;
@@ -1077,6 +1078,22 @@ export default function SettingsView() {
       toast.error(err instanceof Error ? err.message : 'Failed to update user');
     } finally {
       setTogglingUserId(null);
+    }
+  };
+
+  const handleDeleteUser = async (target: ManagedUser) => {
+    if (!confirm(`Permanently delete the login for ${target.name} (${target.email})? This only removes their portal access — it does not delete any linked employee record. This cannot be undone.`)) return;
+    setDeletingUserId(target.id);
+    try {
+      const res = await fetch(`/api/users/${target.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+      toast.success(`${target.name}'s login has been deleted.`);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -2761,6 +2778,22 @@ export default function SettingsView() {
                                       <Ban className="size-3.5 mr-1" />
                                     )}
                                     {u.active ? 'Deactivate' : 'Reactivate'}
+                                  </Button>
+                                )}
+                                {u.id !== user?.id && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-red-600 hover:text-red-700"
+                                    disabled={deletingUserId === u.id}
+                                    onClick={() => handleDeleteUser(u)}
+                                  >
+                                    {deletingUserId === u.id ? (
+                                      <Loader2 className="size-3.5 mr-1 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="size-3.5 mr-1" />
+                                    )}
+                                    Delete
                                   </Button>
                                 )}
                               </div>

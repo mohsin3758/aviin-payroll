@@ -125,8 +125,13 @@ describe("pending face token", () => {
 
   it("rejects a tampered token", async () => {
     const token = await signPendingFaceToken("user-123");
-    const lastChar = token.at(-1);
-    const tampered = token.slice(0, -1) + (lastChar === "a" ? "b" : "a");
+    // Flip a character in the middle of the signature, not the last one — base64url's final
+    // character group for a 256-bit HMAC signature only encodes 2 significant bits, so some
+    // substitutions there decode to identical bytes and the tamper is silently a no-op. A
+    // middle character is always a full 6-bit group, so this is a real, deterministic tamper.
+    const mid = Math.floor(token.length / 2);
+    const midChar = token[mid];
+    const tampered = token.slice(0, mid) + (midChar === "a" ? "b" : "a") + token.slice(mid + 1);
     expect(await verifyPendingFaceToken(tampered)).toBeNull();
   });
 

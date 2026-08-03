@@ -62,3 +62,41 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return handleApiError(error, "update user");
   }
 }
+
+// DELETE /api/users/[id] — admin only, permanently removes a login account. Self-deletion is
+// blocked (same reasoning as PUT — an admin must never be able to lock themselves out), and
+// deleting the last remaining admin account is blocked too, since that would lock EVERYONE out
+// with no way back in. This only removes the login — a linked Employee record (if any) is
+// completely untouched, so "delete this person's portal access" never means "delete the
+// employee." PasswordResetToken rows are cleaned up first since they FK into User.
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await requireRole(request, ["admin"]);
+    const { id } = await params;
+
+    if (id === session.userId) {
+      return apiError("You cannot delete your own account.", 400);
+    }
+
+    const existing = await db.user.findUnique({ where: { id } });
+    if (!existing) {
+      return apiError("User not found", 404);
+    }
+
+    if (existing.role === "admin") {
+      const otherAdmins = await db.user.count({ where: { role: "admin", active: true, id: { not: id } } });
+      if (otherAdmins === 0) {
+        return apiError("Cannot delete the last remaining admin account.", 409);
+      }
+    }
+
+    await db.passwordResetToken.deleteMany({ where: { userId: id } });
+    await db.user.delete({ where: { id } });
+
+    await logAudit({ session, action: "delete", entity: "User", entityId: id, details: { email: existing.email, name: existing.name, role: existing.role } });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return handleApiError(error, "delete user");
+  }
+}
