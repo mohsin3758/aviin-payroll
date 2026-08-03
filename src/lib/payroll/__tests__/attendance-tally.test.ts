@@ -72,4 +72,30 @@ describe("computeMonthlyAttendance", () => {
     const result = computeMonthlyAttendance([row(day, "absent")], DAYS_IN_MONTH, MONTH, YEAR, new Set([dateKey]), []);
     expect(result.absentDays).toBeGreaterThanOrEqual(1);
   });
+
+  // additionalCreditedDateKeys models an employee's chosen Restricted/Optional holidays (see
+  // src/app/api/ess/optional-holidays/route.ts) — distinct from holidayDateKeys, which is
+  // company-wide mandatory holidays applying to everyone the same way.
+  describe("additionalCreditedDateKeys (Restricted/Optional holiday picks)", () => {
+    it("auto-credits a date in additionalCreditedDateKeys as present when there is no explicit row", () => {
+      const optionalKey = new Date(Date.UTC(YEAR, MONTH - 1, 20)).toISOString().slice(0, 10);
+      const withPick = computeMonthlyAttendance([], DAYS_IN_MONTH, MONTH, YEAR, new Set(), [], new Set([optionalKey]));
+      const withoutPick = computeMonthlyAttendance([], DAYS_IN_MONTH, MONTH, YEAR, new Set(), [], new Set());
+      expect(withPick.presentDays).toBe(withoutPick.presentDays + 1);
+      expect(withPick.absentDays).toBe(withoutPick.absentDays - 1);
+    });
+
+    it("defaults to crediting nothing extra when additionalCreditedDateKeys is omitted", () => {
+      const result = computeMonthlyAttendance([], DAYS_IN_MONTH, MONTH, YEAR, new Set(), []);
+      expect(result.presentDays).toBe(0);
+      expect(result.absentDays).toBe(DAYS_IN_MONTH);
+    });
+
+    it("an explicit absent record still takes precedence over an additionalCreditedDateKeys pick", () => {
+      const day = 20;
+      const dateKey = new Date(Date.UTC(YEAR, MONTH - 1, day)).toISOString().slice(0, 10);
+      const result = computeMonthlyAttendance([row(day, "absent")], DAYS_IN_MONTH, MONTH, YEAR, new Set(), [], new Set([dateKey]));
+      expect(result.absentDays).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

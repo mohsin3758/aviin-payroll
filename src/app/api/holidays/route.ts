@@ -5,17 +5,26 @@ import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { requireAuth, requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
-// GET /api/holidays?year=2026 — visible to every authenticated role (it's the company calendar)
+// GET /api/holidays?year=2026 (calendar year, Jan-Dec) or ?fyStartYear=2026 (Indian financial
+// year, Apr 2026 - Mar 2027) — visible to every authenticated role (it's the company calendar).
+// fyStartYear takes precedence if both are somehow passed.
 export async function GET(request: NextRequest) {
   try {
     await requireAuth(request);
     const { searchParams } = request.nextUrl;
     const yearParam = searchParams.get("year");
+    const fyStartYearParam = searchParams.get("fyStartYear");
 
     const companyId = await getDefaultCompanyId();
     const where: Record<string, unknown> = { companyId };
 
-    if (yearParam) {
+    if (fyStartYearParam) {
+      const fyStartYear = parseInt(fyStartYearParam, 10);
+      where.date = {
+        gte: new Date(Date.UTC(fyStartYear, 3, 1)), // Apr 1
+        lt: new Date(Date.UTC(fyStartYear + 1, 3, 1)), // Apr 1 next year (exclusive)
+      };
+    } else if (yearParam) {
       const year = parseInt(yearParam, 10);
       where.date = {
         gte: new Date(Date.UTC(year, 0, 1)),
@@ -26,6 +35,7 @@ export async function GET(request: NextRequest) {
     const holidays = await db.holiday.findMany({
       where,
       orderBy: { date: "asc" },
+      include: { _count: { select: { optionalPicks: true } } },
     });
 
     return NextResponse.json({ data: holidays });

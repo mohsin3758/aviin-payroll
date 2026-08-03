@@ -119,7 +119,13 @@ export async function POST(request: NextRequest) {
     const holidays = await db.holiday.findMany({
       where: { companyId: company.id, date: { gte: monthStart, lt: monthEnd } },
     });
-    const holidayDateKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
+    // Mandatory holidays (type "holiday") credit every employee, same as always. Optional
+    // (Restricted-Holiday) ones only credit an employee who explicitly chose them via
+    // OptionalHolidayPick — see the batched lookup below, built after `employees` is loaded.
+    const mandatoryHolidays = holidays.filter((h) => h.type !== "optional");
+    const optionalHolidays = holidays.filter((h) => h.type === "optional");
+    const holidayDateKeys = new Set(mandatoryHolidays.map((h) => h.date.toISOString().slice(0, 10)));
+    const optionalHolidayDateById = new Map(optionalHolidays.map((h) => [h.id, h.date.toISOString().slice(0, 10)]));
     const weeklyOffDays = company.weeklyOffDays
       .split(",")
       .map((s) => parseInt(s.trim(), 10))
@@ -146,6 +152,26 @@ export async function POST(request: NextRequest) {
 
     if (employees.length === 0) {
       return apiError("No active employees found for this company", 404);
+    }
+
+    // Batched once for the whole run (not per-employee): which optional holidays has each
+    // employee actually chosen, for the ones falling in this month.
+    const employeeOptionalDateKeys = new Map<string, Set<string>>();
+    if (optionalHolidays.length > 0) {
+      const picks = await db.optionalHolidayPick.findMany({
+        where: {
+          holidayId: { in: optionalHolidays.map((h) => h.id) },
+          employeeId: { in: employees.map((e) => e.id) },
+        },
+      });
+      for (const pick of picks) {
+        const dateKey = optionalHolidayDateById.get(pick.holidayId);
+        if (!dateKey) continue;
+        if (!employeeOptionalDateKeys.has(pick.employeeId)) {
+          employeeOptionalDateKeys.set(pick.employeeId, new Set());
+        }
+        employeeOptionalDateKeys.get(pick.employeeId)!.add(dateKey);
+      }
     }
 
     // 3 & 4. Process each employee and build aggregates
@@ -210,7 +236,8 @@ export async function POST(request: NextRequest) {
         month,
         year,
         holidayDateKeys,
-        weeklyOffDays
+        weeklyOffDays,
+        employeeOptionalDateKeys.get(emp.id)
       );
 
       // 3a. Build the EmployeePayrollInput

@@ -103,6 +103,7 @@ interface CompanySettings {
   payrollMonth: string;
   payrollYear: string;
   weeklyOffDays: number[];
+  optionalHolidayQuota: number;
 }
 
 interface Holiday {
@@ -110,7 +111,22 @@ interface Holiday {
   name: string;
   date: string;
   type: string;
+  category: string;
+  _count?: { optionalPicks: number };
 }
+
+const HOLIDAY_CATEGORY_LABEL: Record<string, string> = {
+  national: 'National',
+  festival: 'Festival',
+  other: 'Other',
+};
+
+const CALENDAR_YEAR_OPTIONS = (() => {
+  const current = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = current - 2; y <= current + 3; y++) years.push(y);
+  return years;
+})();
 
 interface Shift {
   id: string;
@@ -214,6 +230,7 @@ export default function SettingsView() {
     payrollMonth: '',
     payrollYear: '',
     weeklyOffDays: [0],
+    optionalHolidayQuota: 0,
   });
 
   const fetchSettings = useCallback(async () => {
@@ -588,14 +605,19 @@ export default function SettingsView() {
   // ─── Holidays ─────────────────────────────────────────────────────────────
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [holidaysLoading, setHolidaysLoading] = useState(false);
+  const [holidayPeriodMode, setHolidayPeriodMode] = useState<'calendar' | 'fy'>('calendar');
+  const [holidayPeriodYear, setHolidayPeriodYear] = useState(() => new Date().getFullYear());
   const [newHolidayName, setNewHolidayName] = useState('');
   const [newHolidayDate, setNewHolidayDate] = useState('');
+  const [newHolidayType, setNewHolidayType] = useState<'holiday' | 'optional'>('holiday');
+  const [newHolidayCategory, setNewHolidayCategory] = useState<'national' | 'festival' | 'other'>('other');
   const [addingHoliday, setAddingHoliday] = useState(false);
 
   const fetchHolidays = useCallback(async () => {
     setHolidaysLoading(true);
     try {
-      const res = await fetch(`/api/holidays?year=${new Date().getFullYear()}`);
+      const query = holidayPeriodMode === 'fy' ? `fyStartYear=${holidayPeriodYear}` : `year=${holidayPeriodYear}`;
+      const res = await fetch(`/api/holidays?${query}`);
       if (!res.ok) throw new Error('Failed to load holidays');
       const json = await res.json();
       setHolidays(json.data ?? []);
@@ -604,11 +626,21 @@ export default function SettingsView() {
     } finally {
       setHolidaysLoading(false);
     }
-  }, []);
+  }, [holidayPeriodMode, holidayPeriodYear]);
 
   useEffect(() => {
     fetchHolidays();
   }, [fetchHolidays, refreshKey]);
+
+  const holidayTotals = useMemo(() => {
+    const byCategory: Record<string, number> = { national: 0, festival: 0, other: 0 };
+    let optionalCount = 0;
+    for (const h of holidays) {
+      byCategory[h.category] = (byCategory[h.category] ?? 0) + 1;
+      if (h.type === 'optional') optionalCount += 1;
+    }
+    return { total: holidays.length, byCategory, optionalCount };
+  }, [holidays]);
 
   const handleAddHoliday = async () => {
     if (!newHolidayName.trim() || !newHolidayDate) {
@@ -620,13 +652,20 @@ export default function SettingsView() {
       const res = await fetch('/api/holidays', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newHolidayName.trim(), date: newHolidayDate }),
+        body: JSON.stringify({
+          name: newHolidayName.trim(),
+          date: newHolidayDate,
+          type: newHolidayType,
+          category: newHolidayCategory,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to add holiday');
       toast.success(`Holiday "${newHolidayName.trim()}" added — applies to all employees.`);
       setNewHolidayName('');
       setNewHolidayDate('');
+      setNewHolidayType('holiday');
+      setNewHolidayCategory('other');
       fetchHolidays();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add holiday');
@@ -652,12 +691,16 @@ export default function SettingsView() {
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
   const [editHolidayName, setEditHolidayName] = useState('');
   const [editHolidayDate, setEditHolidayDate] = useState('');
+  const [editHolidayType, setEditHolidayType] = useState<'holiday' | 'optional'>('holiday');
+  const [editHolidayCategory, setEditHolidayCategory] = useState<'national' | 'festival' | 'other'>('other');
   const [savingHoliday, setSavingHoliday] = useState(false);
 
   const openEditHoliday = (h: Holiday) => {
     setEditingHoliday(h);
     setEditHolidayName(h.name);
     setEditHolidayDate(h.date.slice(0, 10));
+    setEditHolidayType(h.type === 'optional' ? 'optional' : 'holiday');
+    setEditHolidayCategory((h.category as 'national' | 'festival' | 'other') || 'other');
   };
 
   const handleSaveEditHoliday = async () => {
@@ -666,7 +709,12 @@ export default function SettingsView() {
     try {
       const res = await fetch(`/api/holidays/${editingHoliday.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editHolidayName.trim(), date: editHolidayDate }),
+        body: JSON.stringify({
+          name: editHolidayName.trim(),
+          date: editHolidayDate,
+          type: editHolidayType,
+          category: editHolidayCategory,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update holiday');
@@ -1880,13 +1928,71 @@ export default function SettingsView() {
             <p className="mt-1.5 text-xs text-muted-foreground">Saved along with the rest of Company Settings — click Save below.</p>
           </div>
 
+          {user?.role === 'admin' && (
+            <div className="max-w-xs space-y-1.5">
+              <Label className="text-xs font-medium">Restricted holidays per employee (quota)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={20}
+                value={form.optionalHolidayQuota}
+                onChange={(e) => setForm((prev) => ({ ...prev, optionalHolidayQuota: Math.max(0, parseInt(e.target.value, 10) || 0) }))}
+              />
+              <p className="text-xs text-muted-foreground">
+                How many &quot;Restricted / Optional (RH)&quot; holidays each employee may pick per year. 0 = feature off. Saved along with the rest of Company Settings.
+              </p>
+            </div>
+          )}
+
           <Separator />
 
           {/* Holidays list */}
           <div>
-            <Label className="text-xs font-medium">Holidays ({new Date().getFullYear()})</Label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Holidays</Label>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-md border p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setHolidayPeriodMode('calendar')}
+                    className={`rounded px-2 py-1 text-xs ${holidayPeriodMode === 'calendar' ? 'bg-emerald-600 text-white' : 'text-muted-foreground'}`}
+                  >
+                    Calendar Year
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHolidayPeriodMode('fy')}
+                    className={`rounded px-2 py-1 text-xs ${holidayPeriodMode === 'fy' ? 'bg-emerald-600 text-white' : 'text-muted-foreground'}`}
+                  >
+                    Financial Year
+                  </button>
+                </div>
+                <Select value={String(holidayPeriodYear)} onValueChange={(v) => setHolidayPeriodYear(parseInt(v, 10))}>
+                  <SelectTrigger className="h-8 w-[110px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CALENDAR_YEAR_OPTIONS.map((y) => (
+                      <SelectItem key={y} value={String(y)}>
+                        {holidayPeriodMode === 'fy' ? `FY ${y}-${String((y + 1) % 100).padStart(2, '0')}` : y}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Summary bar */}
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <Badge variant="secondary">Total: {holidayTotals.total}</Badge>
+              <Badge variant="outline">National: {holidayTotals.byCategory.national ?? 0}</Badge>
+              <Badge variant="outline">Festival: {holidayTotals.byCategory.festival ?? 0}</Badge>
+              <Badge variant="outline">Other: {holidayTotals.byCategory.other ?? 0}</Badge>
+              <Badge variant="outline">Restricted/Optional: {holidayTotals.optionalCount}</Badge>
+            </div>
+
             {user?.role !== 'employee' && (
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <Input
                   placeholder="Holiday name (e.g. Diwali)"
                   value={newHolidayName}
@@ -1899,6 +2005,21 @@ export default function SettingsView() {
                   onChange={(e) => setNewHolidayDate(e.target.value)}
                   className="sm:max-w-[180px]"
                 />
+                <Select value={newHolidayCategory} onValueChange={(v) => setNewHolidayCategory(v as 'national' | 'festival' | 'other')}>
+                  <SelectTrigger className="sm:w-[130px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="national">National</SelectItem>
+                    <SelectItem value="festival">Festival</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={newHolidayType} onValueChange={(v) => setNewHolidayType(v as 'holiday' | 'optional')}>
+                  <SelectTrigger className="sm:w-[180px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="holiday">Mandatory</SelectItem>
+                    <SelectItem value="optional">Restricted / Optional (RH)</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button size="sm" onClick={handleAddHoliday} disabled={addingHoliday} className="gap-1.5">
                   <PlusCircle className="h-4 w-4" />
                   Add Holiday
@@ -1910,7 +2031,7 @@ export default function SettingsView() {
               {holidaysLoading ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
               ) : holidays.length === 0 ? (
-                <div className="p-4 text-center text-sm text-muted-foreground">No holidays configured yet.</div>
+                <div className="p-4 text-center text-sm text-muted-foreground">No holidays configured for this period.</div>
               ) : (
                 holidays.map((h) => (
                   <div key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
@@ -1919,7 +2040,12 @@ export default function SettingsView() {
                       <span className="text-muted-foreground">
                         — {new Date(h.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}
                       </span>
-                      {h.type === 'optional' && <Badge variant="outline" className="ml-2 text-[10px]">Optional</Badge>}
+                      <Badge variant="outline" className="ml-2 text-[10px]">{HOLIDAY_CATEGORY_LABEL[h.category] ?? 'Other'}</Badge>
+                      {h.type === 'optional' && (
+                        <Badge variant="outline" className="ml-2 text-[10px]">
+                          Restricted/Optional{h._count ? ` — ${h._count.optionalPicks} picked` : ''}
+                        </Badge>
+                      )}
                     </div>
                     {user?.role !== 'employee' && (
                       <div className="flex items-center gap-1">
@@ -1947,6 +2073,27 @@ export default function SettingsView() {
           <div className="space-y-3">
             <div className="space-y-1.5"><Label>Name</Label><Input value={editHolidayName} onChange={(e) => setEditHolidayName(e.target.value)} /></div>
             <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={editHolidayDate} onChange={(e) => setEditHolidayDate(e.target.value)} /></div>
+            <div className="space-y-1.5">
+              <Label>Category</Label>
+              <Select value={editHolidayCategory} onValueChange={(v) => setEditHolidayCategory(v as 'national' | 'festival' | 'other')}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="national">National</SelectItem>
+                  <SelectItem value="festival">Festival</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <Select value={editHolidayType} onValueChange={(v) => setEditHolidayType(v as 'holiday' | 'optional')}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="holiday">Mandatory</SelectItem>
+                  <SelectItem value="optional">Restricted / Optional (RH)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingHoliday(null)}>Cancel</Button>

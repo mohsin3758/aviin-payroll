@@ -169,13 +169,18 @@ export default function DashboardView() {
   useEffect(() => {
     (async () => {
       try {
-        const [holidaysRes, settingsRes] = await Promise.all([
-          fetch(`/api/holidays?year=${new Date().getFullYear()}`),
+        const currentYear = new Date().getFullYear();
+        // Fetch this year AND next so late-December doesn't lose visibility into January's
+        // holidays — a holiday dated next year is still "upcoming" right now.
+        const [holidaysRes, nextYearHolidaysRes, settingsRes] = await Promise.all([
+          fetch(`/api/holidays?year=${currentYear}`),
+          fetch(`/api/holidays?year=${currentYear + 1}`),
           fetch('/api/settings'),
         ]);
         const holidaysJson = await holidaysRes.json();
+        const nextYearHolidaysJson = await nextYearHolidaysRes.json();
         const today = new Date();
-        const upcoming = (holidaysJson.data ?? [])
+        const upcoming = [...(holidaysJson.data ?? []), ...(nextYearHolidaysJson.data ?? [])]
           .filter((h: { date: string }) => new Date(h.date) >= new Date(today.toDateString()))
           .slice(0, 5);
         setUpcomingHolidays(upcoming);

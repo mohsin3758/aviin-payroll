@@ -8,17 +8,17 @@ datasource db {
 }
 
 model User {
-  id                  String   @id @default(cuid())
-  email               String   @unique
-  passwordHash        String
-  name                String
-  role                String   @default("employee") // "admin", "hr", "manager", "employee"
-  employeeId          String?  @unique
-  active              Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("employee") // "admin", "hr", "manager", "employee"
+  employeeId   String?  @unique
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  employee            Employee? @relation(fields: [employeeId], references: [id])
+  employee            Employee?            @relation(fields: [employeeId], references: [id])
   passwordResetTokens PasswordResetToken[]
 }
 
@@ -28,28 +28,28 @@ model User {
 // direct credential-recovery risk. Single-use: usedAt is set on successful reset rather than
 // deleting the row, so a completed reset stays visible for audit purposes.
 model PasswordResetToken {
-  id          String    @id @default(cuid())
-  userId      String
-  tokenHash   String    @unique
-  expiresAt   DateTime
-  usedAt      DateTime?
-  createdAt   DateTime  @default(now())
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 
-  user        User      @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
 }
 
 model AuditLog {
-  id                  String   @id @default(cuid())
-  userId              String?
-  userEmail           String?
-  action              String   // "create", "update", "delete", "approve", "reject", "process", "login"
-  entity              String   // "Employee", "LeaveApplication", "PayrollRun", etc.
-  entityId            String?
-  details             String?  // JSON string of changed fields / summary
-  ipAddress           String?
-  createdAt           DateTime @default(now())
+  id        String   @id @default(cuid())
+  userId    String?
+  userEmail String?
+  action    String // "create", "update", "delete", "approve", "reject", "process", "login"
+  entity    String // "Employee", "LeaveApplication", "PayrollRun", etc.
+  entityId  String?
+  details   String? // JSON string of changed fields / summary
+  ipAddress String?
+  createdAt DateTime @default(now())
 
   @@index([entity, entityId])
   @@index([userId])
@@ -57,84 +57,105 @@ model AuditLog {
 }
 
 model Company {
-  id                  String   @id @default(cuid())
-  name                String
-  address             String?
-  pan                 String?
-  tan                 String?
-  gstin               String?
-  pfNumber            String?
-  esiNumber           String?
-  state               String   @default("Maharashtra")
-  financialYearStart  String   @default("2025-04-01")
-  payrollMonth        Int      @default(4)
-  payrollYear         Int      @default(2025)
-  defaultNoticePeriodDays Int  @default(30)
+  id                          String   @id @default(cuid())
+  name                        String
+  address                     String?
+  pan                         String?
+  tan                         String?
+  gstin                       String?
+  pfNumber                    String?
+  esiNumber                   String?
+  state                       String   @default("Maharashtra")
+  financialYearStart          String   @default("2025-04-01")
+  payrollMonth                Int      @default(4)
+  payrollYear                 Int      @default(2025)
+  defaultNoticePeriodDays     Int      @default(30)
   // Fixed one-time recruiter payout rates for the Hiring Incentive feature, keyed by the new
   // hire's employmentType at close time ("permanent" -> Fte rate, "contractor" -> Contract
   // rate). Configured from the dedicated Hiring Incentives screen, not the general Settings page.
-  hiringIncentiveFteRate      Float @default(0)
-  hiringIncentiveContractRate Float @default(0)
+  hiringIncentiveFteRate      Float    @default(0)
+  hiringIncentiveContractRate Float    @default(0)
   // Comma-separated day-of-week numbers that are paid non-working days every week: 0=Sunday..6=Saturday.
-  weeklyOffDays       String   @default("0")
+  weeklyOffDays               String   @default("0")
+  // Max number of Holiday rows with type "optional" each employee may choose (via
+  // OptionalHolidayPick) per year. Defaults to 0 — the Restricted/Optional-holiday feature is
+  // inert until an admin deliberately raises this, so existing deployments see no behavior change.
+  optionalHolidayQuota        Int      @default(0)
   // Admin-configured SMTP, set via Settings so a real deployment doesn't require VPS/env-var
   // access to enable email. Falls back to SMTP_* env vars, then to an Ethereal test inbox, if
   // unset. smtpPassword is stored in plaintext (no secrets-manager in this deployment) and is
   // never returned by GET /api/settings — only a smtpPasswordSet boolean is.
-  smtpHost            String?
-  smtpPort            Int?
-  smtpSecure          Boolean  @default(false)
-  smtpUser            String?
-  smtpPassword        String?
-  smtpFrom            String?
+  smtpHost                    String?
+  smtpPort                    Int?
+  smtpSecure                  Boolean  @default(false)
+  smtpUser                    String?
+  smtpPassword                String?
+  smtpFrom                    String?
   // Office geofencing for attendance punches, all optional/opt-in: with no office coordinates
   // set, punches never capture/require location. enforceGeofence defaults false — coordinates
   // and radius can be configured (and location silently logged) without ever blocking a punch
   // until an admin explicitly turns enforcement on.
-  officeLatitude        Float?
-  officeLongitude       Float?
-  geofenceRadiusMeters  Int?
-  enforceGeofence       Boolean  @default(false)
+  officeLatitude              Float?
+  officeLongitude             Float?
+  geofenceRadiusMeters        Int?
+  enforceGeofence             Boolean  @default(false)
   // Auto-marks an employee "present" (punchInMethod: "login") on successful sign-in when true.
   // Defaults false so existing deployments see no behavior change until explicitly enabled.
-  enableLoginAttendance Boolean  @default(false)
+  enableLoginAttendance       Boolean  @default(false)
   // Mirrors enableLoginAttendance for the other end of the day: auto-records a punch-out
   // (method "login") when a session with a linked employee logs out, if they're still
   // punched in for today. Defaults false for the same reason.
-  enableLogoutAttendance Boolean @default(false)
+  enableLogoutAttendance      Boolean  @default(false)
   // Which interactive self-service punch methods are available on the Punch In/Out card
   // (Quick Confirm vs Manual Punch tabs). Both default true — existing behavior unchanged
   // until an admin narrows it down. Never restricts the admin "Mark Attendance" override tool.
-  allowFacePunch      Boolean  @default(true)
-  allowManualPunch    Boolean  @default(true)
+  allowFacePunch              Boolean  @default(true)
+  allowManualPunch            Boolean  @default(true)
   // Company-wide mandatory face verification at login, layered on top of (never instead of)
   // password. Only ever applies to logins linked to an Employee record (see login/route.ts) —
   // a login with no employeeId has no FaceEnrollment to check against, so it's always exempt.
   // Default false: existing logins are completely unaffected until an admin opts in.
-  requireFaceLogin    Boolean  @default(false)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  requireFaceLogin            Boolean  @default(false)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
-  employees           Employee[]
-  payrollRuns         PayrollRun[]
-  holidays            Holiday[]
-  bankFormats         BankFormat[]
-  candidates          Candidate[]
+  employees   Employee[]
+  payrollRuns PayrollRun[]
+  holidays    Holiday[]
+  bankFormats BankFormat[]
+  candidates  Candidate[]
+}
+
+// One employee's choice of one specific "optional" (Restricted-Holiday) Holiday for the year.
+// Existence of a row means "this employee gets this date paid as present" — nothing is ever
+// auto-selected; an employee must explicitly pick it, up to Company.optionalHolidayQuota.
+model OptionalHolidayPick {
+  id         String   @id @default(cuid())
+  employeeId String
+  holidayId  String
+  year       Int
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  holiday  Holiday  @relation(fields: [holidayId], references: [id])
+
+  @@unique([employeeId, holidayId])
+  @@index([employeeId, year])
 }
 
 // A named branch/office location employees can be individually assigned to for geofencing,
 // distinct from Company's own officeLatitude/officeLongitude (the implicit default/"head
 // office" location used for anyone not assigned to a specific branch here).
 model OfficeLocation {
-  id            String   @id @default(cuid())
-  name          String
-  latitude      Float
-  longitude     Float
-  radiusMeters  Int      @default(200)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  latitude     Float
+  longitude    Float
+  radiusMeters Int      @default(200)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  employees     Employee[]
+  employees Employee[]
 }
 
 // Admin-configured column layout for generating a bank-specific salary-transfer Excel file.
@@ -143,10 +164,10 @@ model OfficeLocation {
 model BankFormat {
   id             String   @id @default(cuid())
   companyId      String
-  name           String   // admin-chosen label, e.g. "HDFC", "PNB"
+  name           String // admin-chosen label, e.g. "HDFC", "PNB"
   isDefault      Boolean  @default(false)
-  sampleFileName String?  // original uploaded filename, display only
-  sampleFilePath String?  // stored filename — same convention as EmployeeDocument
+  sampleFileName String? // original uploaded filename, display only
+  sampleFilePath String? // stored filename — same convention as EmployeeDocument
   sampleMimeType String?
   // JSON-encoded ColumnDef[] (order, header, source: "field"|"fixed", field?, fixedValue?) —
   // stored as a string, not Prisma's Json type, matching this schema's existing convention
@@ -155,116 +176,121 @@ model BankFormat {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  company        Company  @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 
   @@unique([companyId, name])
 }
 
 model Holiday {
-  id                  String   @id @default(cuid())
-  companyId           String
-  name                String
-  date                DateTime
-  type                String   @default("holiday") // "holiday" (mandatory, paid) or "optional"
-  createdAt           DateTime @default(now())
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  date      DateTime
+  type      String   @default("holiday") // "holiday" (mandatory, paid) or "optional"
+  // Presentational/reporting dimension, independent of "type" above (which is what actually
+  // drives payroll's paid-present crediting): "national" | "festival" | "other".
+  category  String   @default("other")
+  createdAt DateTime @default(now())
 
-  company             Company  @relation(fields: [companyId], references: [id])
+  company       Company               @relation(fields: [companyId], references: [id])
+  optionalPicks OptionalHolidayPick[]
 
   @@unique([companyId, date])
   @@index([companyId, date])
 }
 
 model Employee {
-  id                  String   @id @default(cuid())
-  companyId           String
-  employeeCode        String   @unique
-  firstName           String
-  lastName            String?
-  email               String
-  phone               String?
-  dateOfJoining       DateTime
-  dateOfExit          DateTime?
-  designation         String
-  department          String
+  id                 String    @id @default(cuid())
+  companyId          String
+  employeeCode       String    @unique
+  firstName          String
+  lastName           String?
+  email              String
+  phone              String?
+  dateOfJoining      DateTime
+  dateOfExit         DateTime?
+  designation        String
+  department         String
   // Client company this employee is placed with, if any (staffing/consulting-style engagements).
-  client              String?
-  state               String   @default("Maharashtra")
-  employmentType      String   @default("permanent") // "permanent" | "contractor" | "daily_wage" | "hourly"
-  panNumber           String?
-  aadhaarNumber       String?
-  bankName            String?
-  bankAccountNumber   String?
-  bankIfsc            String?
-  uanNumber           String?
-  esiNumber           String?
-  pfApplicable        Boolean  @default(true)
-  esiApplicable       Boolean  @default(true)
-  ptApplicable        Boolean  @default(true)
-  lwfApplicable       Boolean  @default(true)
-  taxRegime           String   @default("new") // "new" or "old"
-  gender              String   @default("male")
-  dateOfBirth         DateTime?
-  bloodGroup          String?
-  emergencyContact    String?
-  currentAddress      String?
-  permanentAddress    String?
+  client             String?
+  state              String    @default("Maharashtra")
+  employmentType     String    @default("permanent") // "permanent" | "contractor" | "daily_wage" | "hourly"
+  panNumber          String?
+  aadhaarNumber      String?
+  bankName           String?
+  bankAccountNumber  String?
+  bankIfsc           String?
+  uanNumber          String?
+  esiNumber          String?
+  pfApplicable       Boolean   @default(true)
+  esiApplicable      Boolean   @default(true)
+  ptApplicable       Boolean   @default(true)
+  lwfApplicable      Boolean   @default(true)
+  taxRegime          String    @default("new") // "new" or "old"
+  gender             String    @default("male")
+  dateOfBirth        DateTime?
+  bloodGroup         String?
+  emergencyContact   String?
+  currentAddress     String?
+  permanentAddress   String?
   // Geofence targeting: exemptFromGeofence (Work From Home) skips location checks entirely
   // regardless of Company.enforceGeofence; officeLocationId, if set, checks distance against
   // that branch instead of Company's own officeLatitude/officeLongitude (the implicit default
   // "head office" location). Neither field changes anything for an employee left at defaults.
-  exemptFromGeofence  Boolean  @default(false)
-  officeLocationId    String?
+  exemptFromGeofence Boolean   @default(false)
+  officeLocationId   String?
   // "active" (default, every existing employee) | "onboarding" (self-onboarding invite sent,
   // not yet reviewed/approved by HR — excluded from payroll and Dashboard headcount, but still
   // visible/manageable in the Employees list). Flipped to "active" by admin/hr approving the
   // OnboardingInvite, never by the candidate themselves.
-  onboardingStatus    String   @default("active")
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  onboardingStatus   String    @default("active")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  company             Company  @relation(fields: [companyId], references: [id])
-  officeLocation      OfficeLocation? @relation(fields: [officeLocationId], references: [id])
-  salaryStructure     SalaryStructure?
-  attendance          Attendance[]
-  leaveApplications   LeaveApplication[]
-  leaveBalances       LeaveBalance[]
-  payrollDetails      PayrollDetail[]
-  loans               EmployeeLoan[]
-  arrears             SalaryArrear[]
+  company                Company                           @relation(fields: [companyId], references: [id])
+  officeLocation         OfficeLocation?                   @relation(fields: [officeLocationId], references: [id])
+  salaryStructure        SalaryStructure?
+  attendance             Attendance[]
+  leaveApplications      LeaveApplication[]
+  leaveBalances          LeaveBalance[]
+  optionalHolidayPicks   OptionalHolidayPick[]
+  payrollDetails         PayrollDetail[]
+  loans                  EmployeeLoan[]
+  arrears                SalaryArrear[]
   investmentDeclarations InvestmentDeclaration[]
-  user                User?
-  familyMembers       EmployeeFamilyMember[]
-  education           EmployeeEducation[]
-  experiences         EmployeeExperience[]
-  documents           EmployeeDocument[]
-  assets              EmployeeAsset[]
-  helpDeskTickets     HelpDeskTicket[]
-  onboardingTasks     OnboardingTask[]
-  exitRequest         ExitRequest?
-  finalSettlements    FinalSettlement[]
-  salaryRevisions     SalaryRevision[]
-  expenseClaims       ExpenseClaim[]
-  employeeShifts      EmployeeShift[]
-  hiringIncentives    HiringIncentive[]
-  recruitedCandidates Candidate[]
-  regularizations     AttendanceRegularizationRequest[]
-  faceEnrollment      FaceEnrollment?
-  onboardingInvite    OnboardingInvite?
+  user                   User?
+  familyMembers          EmployeeFamilyMember[]
+  education              EmployeeEducation[]
+  experiences            EmployeeExperience[]
+  documents              EmployeeDocument[]
+  assets                 EmployeeAsset[]
+  helpDeskTickets        HelpDeskTicket[]
+  onboardingTasks        OnboardingTask[]
+  exitRequest            ExitRequest?
+  finalSettlements       FinalSettlement[]
+  salaryRevisions        SalaryRevision[]
+  expenseClaims          ExpenseClaim[]
+  employeeShifts         EmployeeShift[]
+  hiringIncentives       HiringIncentive[]
+  recruitedCandidates    Candidate[]
+  regularizations        AttendanceRegularizationRequest[]
+  faceEnrollment         FaceEnrollment?
+  onboardingInvite       OnboardingInvite?
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
 // 80C/80D deduction instead of only counting PF+ESI toward the 80C cap.
 model InvestmentDeclaration {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  year                Int      // financial year start (matches Company.payrollYear convention)
-  section80C          Float    @default(0) // LIC, PPF, ELSS, etc. — combined with PF+ESI, capped at 1.5L
-  section80D          Float    @default(0) // health insurance premium — capped separately
-  status              String   @default("declared") // "declared" | "verified"
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id         String   @id @default(cuid())
+  employeeId String
+  year       Int // financial year start (matches Company.payrollYear convention)
+  section80C Float    @default(0) // LIC, PPF, ELSS, etc. — combined with PF+ESI, capped at 1.5L
+  section80D Float    @default(0) // health insurance premium — capped separately
+  status     String   @default("declared") // "declared" | "verified"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@unique([employeeId, year])
 }
@@ -273,20 +299,20 @@ model InvestmentDeclaration {
 // payroll: a retroactive salary correction, a leave-encashment payout, an approved expense
 // reimbursement, or a retro-payroll recovery. Not prorated by attendance like regular earnings.
 model SalaryArrear {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  amount              Float
-  type                String   @default("arrear") // "arrear" | "recovery"
-  reason              String?
-  payMonth            Int      // 1-12, the month this should be paid out in
-  payYear             Int
-  status              String   @default("pending") // "pending" | "paid" | "cancelled"
-  paidInRunId         String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id          String   @id @default(cuid())
+  employeeId  String
+  amount      Float
+  type        String   @default("arrear") // "arrear" | "recovery"
+  reason      String?
+  payMonth    Int // 1-12, the month this should be paid out in
+  payYear     Int
+  status      String   @default("pending") // "pending" | "paid" | "cancelled"
+  paidInRunId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  employee            Employee   @relation(fields: [employeeId], references: [id])
-  paidInRun           PayrollRun? @relation(fields: [paidInRunId], references: [id])
+  employee  Employee    @relation(fields: [employeeId], references: [id])
+  paidInRun PayrollRun? @relation(fields: [paidInRunId], references: [id])
 
   @@index([employeeId])
   @@index([payMonth, payYear])
@@ -305,8 +331,8 @@ model Candidate {
   email            String?
   client           String?
   role             String
-  employmentType   String    // "permanent" | "contractor" — same values as Employee.employmentType, for the same rate lookup
-  recruiterId      String?   // Employee who recruited/closed this candidate (for recruiter-wise reporting)
+  employmentType   String // "permanent" | "contractor" — same values as Employee.employmentType, for the same rate lookup
+  recruiterId      String? // Employee who recruited/closed this candidate (for recruiter-wise reporting)
   closingDate      DateTime? // when the candidate was closed/selected — may differ from dateOfJoining
   dateOfJoining    DateTime
   probationEndDate DateTime? // relevant to when full client billing applies
@@ -323,9 +349,9 @@ model Candidate {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  company         Company          @relation(fields: [companyId], references: [id])
-  recruiter       Employee?        @relation(fields: [recruiterId], references: [id])
-  hiringIncentive HiringIncentive?
+  company           Company            @relation(fields: [companyId], references: [id])
+  recruiter         Employee?          @relation(fields: [recruiterId], references: [id])
+  hiringIncentive   HiringIncentive?
   onboardingInvites OnboardingInvite[]
 
   @@index([companyId])
@@ -354,8 +380,8 @@ model OnboardingInvite {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  employee        Employee   @relation(fields: [employeeId], references: [id])
-  candidate       Candidate? @relation(fields: [candidateId], references: [id])
+  employee  Employee   @relation(fields: [employeeId], references: [id])
+  candidate Candidate? @relation(fields: [candidateId], references: [id])
 
   @@index([status])
   @@index([candidateId])
@@ -370,13 +396,13 @@ model OnboardingInvite {
 // not merely delayed, if the candidate's placement ends before the 1-month vesting point.
 model HiringIncentive {
   id              String   @id @default(cuid())
-  recruiterId     String   // Employee who receives the payout
+  recruiterId     String // Employee who receives the payout
   candidateId     String   @unique // Candidate who was placed; one incentive per placement
-  employmentType  String   // snapshot of candidate.employmentType at creation (rate lookup key)
-  amount          Float    // snapshot of the configured rate at creation — later rate changes never alter existing records
+  employmentType  String // snapshot of candidate.employmentType at creation (rate lookup key)
+  amount          Float // snapshot of the configured rate at creation — later rate changes never alter existing records
   joinDate        DateTime // snapshot of candidate.dateOfJoining at creation, for display/audit
   eligibleDate    DateTime // joinDate + 1 calendar month — the vesting cutoff
-  payMonth        Int      // 1-12, the month this pays out in (join month + 1)
+  payMonth        Int // 1-12, the month this pays out in (join month + 1)
   payYear         Int
   // Record-keeping only — entered manually at creation time (the candidate isn't in the payroll
   // system, so there's no Salary Structure to pull from), never used in any calculation.
@@ -389,9 +415,9 @@ model HiringIncentive {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  recruiter       Employee    @relation(fields: [recruiterId], references: [id])
-  candidate       Candidate   @relation(fields: [candidateId], references: [id])
-  paidInRun       PayrollRun? @relation(fields: [paidInRunId], references: [id])
+  recruiter Employee    @relation(fields: [recruiterId], references: [id])
+  candidate Candidate   @relation(fields: [candidateId], references: [id])
+  paidInRun PayrollRun? @relation(fields: [paidInRunId], references: [id])
 
   @@index([recruiterId])
   @@index([candidateId])
@@ -400,21 +426,21 @@ model HiringIncentive {
 }
 
 model EmployeeLoan {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  loanType            String   // "loan" or "advance"
-  principal           Float
-  emiAmount           Float
-  totalMonths         Int
-  startMonth          Int      // 1-12
-  startYear           Int
-  status              String   @default("active") // "active", "closed", "cancelled"
-  reason              String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id          String   @id @default(cuid())
+  employeeId  String
+  loanType    String // "loan" or "advance"
+  principal   Float
+  emiAmount   Float
+  totalMonths Int
+  startMonth  Int // 1-12
+  startYear   Int
+  status      String   @default("active") // "active", "closed", "cancelled"
+  reason      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
-  payments            LoanPayment[]
+  employee Employee      @relation(fields: [employeeId], references: [id])
+  payments LoanPayment[]
 
   @@index([employeeId])
 }
@@ -423,16 +449,16 @@ model EmployeeLoan {
 // rather than a mutable counter, so reprocessing a run (which deletes+recreates its rows) can't
 // double-charge or lose track of how many installments have been collected.
 model LoanPayment {
-  id                  String   @id @default(cuid())
-  loanId              String
-  payrollRunId        String
-  amount              Float
-  month               Int
-  year                Int
-  createdAt           DateTime @default(now())
+  id           String   @id @default(cuid())
+  loanId       String
+  payrollRunId String
+  amount       Float
+  month        Int
+  year         Int
+  createdAt    DateTime @default(now())
 
-  loan                EmployeeLoan @relation(fields: [loanId], references: [id])
-  payrollRun          PayrollRun   @relation(fields: [payrollRunId], references: [id])
+  loan       EmployeeLoan @relation(fields: [loanId], references: [id])
+  payrollRun PayrollRun   @relation(fields: [payrollRunId], references: [id])
 
   @@unique([loanId, payrollRunId])
   @@index([payrollRunId])
@@ -442,7 +468,7 @@ model SalaryStructure {
   id                  String   @id @default(cuid())
   employeeId          String   @unique
   effectiveDate       DateTime @default(now())
-  basic               Float    // monthly
+  basic               Float // monthly
   dearnessAllowance   Float    @default(0)
   houseRentAllowance  Float
   conveyanceAllowance Float    @default(1600)
@@ -454,39 +480,39 @@ model SalaryStructure {
   employerPF          Float    @default(0) // for CTC display
   employerESI         Float    @default(0) // for CTC display
   gratuity            Float    @default(0) // for CTC display
-  dailyRate           Float?   // only used when Employee.employmentType = "daily_wage"
-  hourlyRate          Float?   // only used when Employee.employmentType = "hourly"
+  dailyRate           Float? // only used when Employee.employmentType = "daily_wage"
+  hourlyRate          Float? // only used when Employee.employmentType = "hourly"
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 }
 
 model Attendance {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  date                DateTime
+  id                       String    @id @default(cuid())
+  employeeId               String
+  date                     DateTime
   // punchIn/punchOut/punchInMethod/punchOutMethod mean "first punch-in of the day" / "most
   // recent punch-out of the day" (and their respective methods) — kept for backward
   // compatibility with every existing display/report that reads them directly. The full
   // in/out history for the day (however many sessions) lives in punchSessions.
-  punchIn             DateTime?
-  punchOut            DateTime?
-  punchInMethod       String?  // "face", "manual", "login"
-  punchOutMethod      String?
-  faceVerified        Boolean  @default(false)
-  faceConfidence      Float?
-  status              String   @default("absent") // "present", "absent", "half-day", "holiday", "weekly-off"
+  punchIn                  DateTime?
+  punchOut                 DateTime?
+  punchInMethod            String? // "face", "manual", "login"
+  punchOutMethod           String?
+  faceVerified             Boolean   @default(false)
+  faceConfidence           Float?
+  status                   String    @default("absent") // "present", "absent", "half-day", "holiday", "weekly-off"
   // Sum of every completed session's duration that day (not just the first-in/last-out span) —
   // so a lunch-break-and-back punch cycle counts both halves of the day worked.
-  totalHours          Float?
+  totalHours               Float?
   // JSON-encoded PunchSession[] (see src/lib/attendance-punch.ts) — every punch-in/punch-out
   // pair recorded that day, in order. Null/empty means no interactive punch has happened yet
   // (e.g. a record created entirely through the admin Mark Attendance override).
-  punchSessions       String?
-  notes               String?
-  ipAddress           String?
-  deviceInfo          String?
+  punchSessions            String?
+  notes                    String?
+  ipAddress                String?
+  deviceInfo               String?
   // Real browser/device geolocation captured at punch time (best-effort — never blocks a punch
   // on its own). distanceFromOfficeMeters is computed once, at punch time, against whatever
   // Company.officeLatitude/officeLongitude were set then — it is not recomputed retroactively
@@ -495,10 +521,10 @@ model Attendance {
   longitude                Float?
   locationAccuracy         Float?
   distanceFromOfficeMeters Float?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@unique([employeeId, date])
 }
@@ -507,20 +533,20 @@ model Attendance {
 // (e.g. forgot to punch out) — reviewed by admin/hr/manager, who approve or reject it. Approval
 // applies the requested times to the real Attendance record for that date.
 model AttendanceRegularizationRequest {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  date                DateTime // the day being corrected, IST-calendar-day normalized
-  requestedPunchIn    DateTime?
-  requestedPunchOut   DateTime?
-  reason              String
-  status              String   @default("pending") // "pending" | "approved" | "rejected"
-  reviewedBy          String?
-  reviewedAt          DateTime?
-  reviewComment       String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String    @id @default(cuid())
+  employeeId        String
+  date              DateTime // the day being corrected, IST-calendar-day normalized
+  requestedPunchIn  DateTime?
+  requestedPunchOut DateTime?
+  reason            String
+  status            String    @default("pending") // "pending" | "approved" | "rejected"
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  reviewComment     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([status])
@@ -532,94 +558,94 @@ model AttendanceRegularizationRequest {
 // consentedAt is kept as evidence of consent even across a later re-enrollment (updatedAt would
 // otherwise overwrite that record).
 model FaceEnrollment {
-  id            String   @id @default(cuid())
-  employeeId    String   @unique
-  descriptor    String   // JSON-encoded number[128]
-  consentedAt   DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(cuid())
+  employeeId  String   @unique
+  descriptor  String // JSON-encoded number[128]
+  consentedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  employee      Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 }
 
 model LeaveType {
-  id                  String   @id @default(cuid())
-  name                String   // "Casual Leave", "Sick Leave", "Earned Leave", etc.
-  shortCode           String   // "CL", "SL", "EL"
-  totalDays           Float    // annual entitlement
-  isCarryForward      Boolean  @default(true)
-  maxCarryForward     Float    @default(0)
-  isPaid              Boolean  @default(true)
-  createdAt           DateTime @default(now())
+  id              String   @id @default(cuid())
+  name            String // "Casual Leave", "Sick Leave", "Earned Leave", etc.
+  shortCode       String // "CL", "SL", "EL"
+  totalDays       Float // annual entitlement
+  isCarryForward  Boolean  @default(true)
+  maxCarryForward Float    @default(0)
+  isPaid          Boolean  @default(true)
+  createdAt       DateTime @default(now())
 
-  leaveBalances       LeaveBalance[]
-  leaveApplications   LeaveApplication[]
+  leaveBalances     LeaveBalance[]
+  leaveApplications LeaveApplication[]
 }
 
 model LeaveBalance {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  leaveTypeId         String
-  year                Int
-  totalAllocated      Float
-  used                Float    @default(0)
-  carryForwarded      Float    @default(0)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id             String   @id @default(cuid())
+  employeeId     String
+  leaveTypeId    String
+  year           Int
+  totalAllocated Float
+  used           Float    @default(0)
+  carryForwarded Float    @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
-  leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id])
+  employee  Employee  @relation(fields: [employeeId], references: [id])
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
 
   @@unique([employeeId, leaveTypeId, year])
 }
 
 model LeaveApplication {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  leaveTypeId         String
-  startDate           DateTime
-  endDate             DateTime
-  totalDays           Float
-  reason              String?
-  status              String   @default("pending") // "pending", "approved", "rejected", "cancelled"
-  approvedBy          String?
-  approvedAt          DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id          String    @id @default(cuid())
+  employeeId  String
+  leaveTypeId String
+  startDate   DateTime
+  endDate     DateTime
+  totalDays   Float
+  reason      String?
+  status      String    @default("pending") // "pending", "approved", "rejected", "cancelled"
+  approvedBy  String?
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
-  leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id])
+  employee  Employee  @relation(fields: [employeeId], references: [id])
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
 
   @@index([employeeId])
   @@index([status])
 }
 
 model PayrollRun {
-  id                  String   @id @default(cuid())
-  companyId           String
-  month               Int      // 1-12
-  year                Int
-  runType             String   @default("regular") // "regular" | "off_cycle" — lets an off-cycle run (e.g. bonus-only) coexist with the regular run in the same month
-  status              String   @default("draft") // "draft", "processed", "paid"
-  totalEmployees      Int      @default(0)
-  totalGrossSalary    Float    @default(0)
-  totalDeductions     Float    @default(0)
-  totalNetSalary      Float    @default(0)
-  totalEmployerPF     Float    @default(0)
-  totalEmployerESI    Float    @default(0)
-  totalEmployeePF     Float    @default(0)
-  totalEmployeeESI    Float    @default(0)
-  totalTDS            Float    @default(0)
-  totalPT             Float    @default(0)
-  totalLWF            Float    @default(0)
-  processedAt         DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id               String    @id @default(cuid())
+  companyId        String
+  month            Int // 1-12
+  year             Int
+  runType          String    @default("regular") // "regular" | "off_cycle" — lets an off-cycle run (e.g. bonus-only) coexist with the regular run in the same month
+  status           String    @default("draft") // "draft", "processed", "paid"
+  totalEmployees   Int       @default(0)
+  totalGrossSalary Float     @default(0)
+  totalDeductions  Float     @default(0)
+  totalNetSalary   Float     @default(0)
+  totalEmployerPF  Float     @default(0)
+  totalEmployerESI Float     @default(0)
+  totalEmployeePF  Float     @default(0)
+  totalEmployeeESI Float     @default(0)
+  totalTDS         Float     @default(0)
+  totalPT          Float     @default(0)
+  totalLWF         Float     @default(0)
+  processedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  company             Company  @relation(fields: [companyId], references: [id])
-  details             PayrollDetail[]
-  loanPayments        LoanPayment[]
-  arrearsPaid         SalaryArrear[]
+  company              Company           @relation(fields: [companyId], references: [id])
+  details              PayrollDetail[]
+  loanPayments         LoanPayment[]
+  arrearsPaid          SalaryArrear[]
   hiringIncentivesPaid HiringIncentive[]
 
   @@unique([companyId, month, year, runType])
@@ -664,54 +690,54 @@ model PayrollDetail {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  payrollRun          PayrollRun @relation(fields: [payrollRunId], references: [id])
-  employee            Employee   @relation(fields: [employeeId], references: [id])
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id])
+  employee   Employee   @relation(fields: [employeeId], references: [id])
 
   @@index([payrollRunId])
   @@index([employeeId])
 }
 
 model EmployeeFamilyMember {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  name                String
-  relation            String   // "spouse" | "father" | "mother" | "child" | "other"
-  dateOfBirth         DateTime?
-  occupation          String?
-  isDependent         Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id          String    @id @default(cuid())
+  employeeId  String
+  name        String
+  relation    String // "spouse" | "father" | "mother" | "child" | "other"
+  dateOfBirth DateTime?
+  occupation  String?
+  isDependent Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
 
 model EmployeeEducation {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  degree              String
-  institution         String
-  yearOfPassing       Int
-  grade               String?
-  createdAt           DateTime @default(now())
+  id            String   @id @default(cuid())
+  employeeId    String
+  degree        String
+  institution   String
+  yearOfPassing Int
+  grade         String?
+  createdAt     DateTime @default(now())
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
 
 model EmployeeExperience {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  companyName         String
-  designation         String
-  fromDate            DateTime
-  toDate              DateTime?
-  reasonForLeaving    String?
-  createdAt           DateTime @default(now())
+  id               String    @id @default(cuid())
+  employeeId       String
+  companyName      String
+  designation      String
+  fromDate         DateTime
+  toDate           DateTime?
+  reasonForLeaving String?
+  createdAt        DateTime  @default(now())
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
@@ -721,98 +747,98 @@ model EmployeeExperience {
 // manual HR-attestation flow — there is no real UIDAI/NSDL government verification API wired
 // here (that requires regulated API access this deployment doesn't have).
 model EmployeeDocument {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  docType             String   // "pan" | "aadhaar" | "passport" | "offer_letter" | "appointment_letter" | "experience_letter" | "relieving_letter" | "investment_proof" | "other"
-  fileName            String
-  filePath            String   // relative path under the uploads volume
-  mimeType            String
-  uploadedBy          String?  // User id
-  verifiedStatus      String   @default("pending") // "pending" | "verified" | "rejected"
-  verifiedBy          String?
-  verifiedAt          DateTime?
-  createdAt           DateTime @default(now())
+  id             String    @id @default(cuid())
+  employeeId     String
+  docType        String // "pan" | "aadhaar" | "passport" | "offer_letter" | "appointment_letter" | "experience_letter" | "relieving_letter" | "investment_proof" | "other"
+  fileName       String
+  filePath       String // relative path under the uploads volume
+  mimeType       String
+  uploadedBy     String? // User id
+  verifiedStatus String    @default("pending") // "pending" | "verified" | "rejected"
+  verifiedBy     String?
+  verifiedAt     DateTime?
+  createdAt      DateTime  @default(now())
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([docType])
 }
 
 model EmployeeAsset {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  assetType           String   // "laptop" | "phone" | "id_card" | "other"
-  assetTag            String?  // serial number (laptop/id_card) or IMEI (phone) — label adapts per assetType in the UI
-  brand               String?
-  model               String?
-  allocatedDate       DateTime @default(now())
-  returnedDate        DateTime?
-  condition           String?  // "new" | "good" | "fair" | "damaged"
-  notes               String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id            String    @id @default(cuid())
+  employeeId    String
+  assetType     String // "laptop" | "phone" | "id_card" | "other"
+  assetTag      String? // serial number (laptop/id_card) or IMEI (phone) — label adapts per assetType in the UI
+  brand         String?
+  model         String?
+  allocatedDate DateTime  @default(now())
+  returnedDate  DateTime?
+  condition     String? // "new" | "good" | "fair" | "damaged"
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
 
 model Notification {
-  id                  String   @id @default(cuid())
-  userId              String
-  title               String
-  message             String
-  category            String   @default("general") // "leave" | "payroll" | "exit" | "onboarding" | "helpdesk" | "general"
-  link                String?  // optional deep-link (a ViewType string)
-  isRead              Boolean  @default(false)
-  createdAt           DateTime @default(now())
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  category  String   @default("general") // "leave" | "payroll" | "exit" | "onboarding" | "helpdesk" | "general"
+  link      String? // optional deep-link (a ViewType string)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   @@index([userId, isRead])
   @@index([createdAt])
 }
 
 model HelpDeskTicket {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  subject             String
-  message             String
-  category            String   @default("general") // "payroll" | "leave" | "it" | "hr" | "general"
-  status              String   @default("open") // "open" | "in_progress" | "resolved" | "closed"
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id         String   @id @default(cuid())
+  employeeId String
+  subject    String
+  message    String
+  category   String   @default("general") // "payroll" | "leave" | "it" | "hr" | "general"
+  status     String   @default("open") // "open" | "in_progress" | "resolved" | "closed"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
-  replies             HelpDeskReply[]
+  employee Employee        @relation(fields: [employeeId], references: [id])
+  replies  HelpDeskReply[]
 
   @@index([employeeId])
   @@index([status])
 }
 
 model HelpDeskReply {
-  id                  String   @id @default(cuid())
-  ticketId            String
-  authorUserId        String
-  authorName          String
-  message             String
-  createdAt           DateTime @default(now())
+  id           String   @id @default(cuid())
+  ticketId     String
+  authorUserId String
+  authorName   String
+  message      String
+  createdAt    DateTime @default(now())
 
-  ticket              HelpDeskTicket @relation(fields: [ticketId], references: [id])
+  ticket HelpDeskTicket @relation(fields: [ticketId], references: [id])
 
   @@index([ticketId])
 }
 
 model OnboardingTask {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  taskName            String
-  isCompleted         Boolean  @default(false)
-  completedBy         String?
-  completedAt         DateTime?
-  order               Int      @default(0)
-  createdAt           DateTime @default(now())
+  id          String    @id @default(cuid())
+  employeeId  String
+  taskName    String
+  isCompleted Boolean   @default(false)
+  completedBy String?
+  completedAt DateTime?
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
@@ -821,40 +847,40 @@ model OnboardingTask {
 // HR approves/rejects. lastWorkingDate is computed at creation (resignationDate + notice
 // period) so the checklist/final-settlement flow has a fixed target date to work against.
 model ExitRequest {
-  id                  String   @id @default(cuid())
-  employeeId          String   @unique
-  resignationDate     DateTime
-  noticePeriodDays    Int
-  lastWorkingDate     DateTime
-  reason              String?
-  status              String   @default("pending_manager") // "pending_manager" | "pending_hr" | "approved" | "rejected" | "withdrawn"
-  managerApprovedBy   String?
-  managerApprovedAt   DateTime?
-  managerComment      String?
-  hrApprovedBy        String?
-  hrApprovedAt        DateTime?
-  hrComment           String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String    @id @default(cuid())
+  employeeId        String    @unique
+  resignationDate   DateTime
+  noticePeriodDays  Int
+  lastWorkingDate   DateTime
+  reason            String?
+  status            String    @default("pending_manager") // "pending_manager" | "pending_hr" | "approved" | "rejected" | "withdrawn"
+  managerApprovedBy String?
+  managerApprovedAt DateTime?
+  managerComment    String?
+  hrApprovedBy      String?
+  hrApprovedAt      DateTime?
+  hrComment         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
-  checklistItems      ExitChecklistItem[]
-  finalSettlement     FinalSettlement?
+  employee        Employee            @relation(fields: [employeeId], references: [id])
+  checklistItems  ExitChecklistItem[]
+  finalSettlement FinalSettlement?
 
   @@index([status])
 }
 
 model ExitChecklistItem {
-  id                  String   @id @default(cuid())
-  exitRequestId       String
-  taskName            String
-  isCompleted         Boolean  @default(false)
-  completedBy         String?
-  completedAt         DateTime?
-  order               Int      @default(0)
-  createdAt           DateTime @default(now())
+  id            String    @id @default(cuid())
+  exitRequestId String
+  taskName      String
+  isCompleted   Boolean   @default(false)
+  completedBy   String?
+  completedAt   DateTime?
+  order         Int       @default(0)
+  createdAt     DateTime  @default(now())
 
-  exitRequest         ExitRequest @relation(fields: [exitRequestId], references: [id])
+  exitRequest ExitRequest @relation(fields: [exitRequestId], references: [id])
 
   @@index([exitRequestId])
 }
@@ -864,86 +890,86 @@ model ExitChecklistItem {
 // route), pending arrears, and gratuity (5-year vesting per the Payment of Gratuity Act),
 // minus outstanding loan recovery and any notice-period shortfall.
 model FinalSettlement {
-  id                    String   @id @default(cuid())
-  exitRequestId         String   @unique
+  id                    String    @id @default(cuid())
+  exitRequestId         String    @unique
   employeeId            String
-  leaveEncashmentAmount Float    @default(0)
-  pendingArrearsAmount  Float    @default(0)
-  gratuityAmount        Float    @default(0)
-  loanRecoveryAmount    Float    @default(0)
-  noticeShortfallAmount Float    @default(0)
+  leaveEncashmentAmount Float     @default(0)
+  pendingArrearsAmount  Float     @default(0)
+  gratuityAmount        Float     @default(0)
+  loanRecoveryAmount    Float     @default(0)
+  noticeShortfallAmount Float     @default(0)
   netSettlementAmount   Float
-  status                String   @default("draft") // "draft" | "finalized" | "paid"
+  status                String    @default("draft") // "draft" | "finalized" | "paid"
   finalizedBy           String?
   finalizedAt           DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  exitRequest           ExitRequest @relation(fields: [exitRequestId], references: [id])
-  employee              Employee    @relation(fields: [employeeId], references: [id])
+  exitRequest ExitRequest @relation(fields: [exitRequestId], references: [id])
+  employee    Employee    @relation(fields: [employeeId], references: [id])
 }
 
 // Append-only audit trail of salary changes (increment/promotion/correction). SalaryStructure
 // itself stays a simple mutable 1:1 row (unchanged) to avoid touching the several existing
 // read sites that assume that shape — this model is purely additive history alongside it.
 model SalaryRevision {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  effectiveDate       DateTime
-  reason              String   // "increment" | "promotion" | "correction" | "other"
-  previousBasic       Float
-  newBasic            Float
-  previousGross       Float
-  newGross            Float
-  approvedBy          String?
-  notes               String?
-  createdAt           DateTime @default(now())
+  id            String   @id @default(cuid())
+  employeeId    String
+  effectiveDate DateTime
+  reason        String // "increment" | "promotion" | "correction" | "other"
+  previousBasic Float
+  newBasic      Float
+  previousGross Float
+  newGross      Float
+  approvedBy    String?
+  notes         String?
+  createdAt     DateTime @default(now())
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
 
 model ExpenseClaim {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  category            String   // "travel" | "food" | "accommodation" | "medical" | "other"
-  amount              Float
-  description         String?
-  expenseDate         DateTime
-  status              String   @default("pending") // "pending" | "approved" | "rejected" | "paid"
-  approvedBy          String?
-  approvedAt          DateTime?
-  paidInRunId         String?  // SalaryArrear.id created once approved+paid
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id          String    @id @default(cuid())
+  employeeId  String
+  category    String // "travel" | "food" | "accommodation" | "medical" | "other"
+  amount      Float
+  description String?
+  expenseDate DateTime
+  status      String    @default("pending") // "pending" | "approved" | "rejected" | "paid"
+  approvedBy  String?
+  approvedAt  DateTime?
+  paidInRunId String? // SalaryArrear.id created once approved+paid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([status])
 }
 
 model Shift {
-  id                  String   @id @default(cuid())
-  name                String
-  startTime           String   // "09:00"
-  endTime             String   // "18:00"
-  gracePeriodMinutes  Int      @default(15)
-  createdAt           DateTime @default(now())
+  id                 String   @id @default(cuid())
+  name               String
+  startTime          String // "09:00"
+  endTime            String // "18:00"
+  gracePeriodMinutes Int      @default(15)
+  createdAt          DateTime @default(now())
 
-  employeeShifts      EmployeeShift[]
+  employeeShifts EmployeeShift[]
 }
 
 model EmployeeShift {
-  id                  String   @id @default(cuid())
-  employeeId          String
-  shiftId             String
-  effectiveFrom       DateTime @default(now())
-  createdAt           DateTime @default(now())
+  id            String   @id @default(cuid())
+  employeeId    String
+  shiftId       String
+  effectiveFrom DateTime @default(now())
+  createdAt     DateTime @default(now())
 
-  employee            Employee @relation(fields: [employeeId], references: [id])
-  shift               Shift    @relation(fields: [shiftId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+  shift    Shift    @relation(fields: [shiftId], references: [id])
 
   @@index([employeeId])
 }

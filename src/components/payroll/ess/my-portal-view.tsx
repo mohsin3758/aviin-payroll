@@ -30,6 +30,14 @@ import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-cl
 const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const HOLIDAY_CATEGORY_LABEL: Record<string, string> = { national: 'National', festival: 'Festival', other: 'Other' };
+const HOLIDAY_YEAR_OPTIONS = (() => {
+  const current = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = current - 1; y <= current + 2; y++) years.push(y);
+  return years;
+})();
 
 const STATUS_BADGE: Record<string, string> = {
   present: 'bg-emerald-100 text-emerald-700 border-emerald-200',
@@ -111,6 +119,7 @@ export default function MyPortalView() {
             <TabsTrigger value="documents">Documents</TabsTrigger>
             <TabsTrigger value="attendance">Attendance</TabsTrigger>
             <TabsTrigger value="leaves">Leaves</TabsTrigger>
+            <TabsTrigger value="holidays">Holidays</TabsTrigger>
             <TabsTrigger value="payslip">Payslips</TabsTrigger>
             <TabsTrigger value="form16">Form 16</TabsTrigger>
             <TabsTrigger value="loans">Loans</TabsTrigger>
@@ -125,6 +134,7 @@ export default function MyPortalView() {
           <TabsContent value="documents" className="space-y-6"><DocumentsTab employeeId={profile.id} /></TabsContent>
           <TabsContent value="attendance" className="space-y-6"><AttendanceTab /></TabsContent>
           <TabsContent value="leaves" className="space-y-6"><LeavesTab /></TabsContent>
+          <TabsContent value="holidays" className="space-y-6"><HolidaysTab /></TabsContent>
           <TabsContent value="payslip" className="space-y-6"><PayslipTab /></TabsContent>
           <TabsContent value="form16" className="space-y-6"><Form16Tab /></TabsContent>
           <TabsContent value="loans" className="space-y-6"><LoansTab /></TabsContent>
@@ -1252,6 +1262,175 @@ function LeavesTab() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Holidays Tab                                                       */
+/* ------------------------------------------------------------------ */
+
+interface HolidayRow {
+  id: string;
+  name: string;
+  date: string;
+  type: string;
+  category: string;
+  chosenByMe?: boolean;
+}
+
+function HolidaysTab() {
+  const [holidays, setHolidays] = useState<HolidayRow[]>([]);
+  const [quota, setQuota] = useState(0);
+  const [chosenCount, setChosenCount] = useState(0);
+  const [weeklyOffLabel, setWeeklyOffLabel] = useState('');
+  const [periodMode, setPeriodMode] = useState<'calendar' | 'fy'>('calendar');
+  const [periodYear, setPeriodYear] = useState(() => new Date().getFullYear());
+  const [loading, setLoading] = useState(true);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const query = periodMode === 'fy' ? `fyStartYear=${periodYear}` : `year=${periodYear}`;
+      const [holidaysRes, optionalRes, settingsRes] = await Promise.all([
+        fetch(`/api/holidays?${query}`),
+        fetch(`/api/ess/optional-holidays?${query}`),
+        fetch('/api/settings'),
+      ]);
+      const holidaysJson = await holidaysRes.json();
+      const optionalJson = await optionalRes.json();
+      const chosenIds = new Set((optionalJson.data ?? []).filter((h: HolidayRow) => h.chosenByMe).map((h: HolidayRow) => h.id));
+      setHolidays((holidaysJson.data ?? []).map((h: HolidayRow) => ({ ...h, chosenByMe: chosenIds.has(h.id) })));
+      setQuota(optionalJson.quota ?? 0);
+      setChosenCount(optionalJson.chosenCount ?? 0);
+
+      const settingsJson = await settingsRes.json();
+      const days: number[] = settingsJson.data?.weeklyOffDays ?? [];
+      setWeeklyOffLabel(days.map((d) => WEEKDAY_LABELS[d]).join(', '));
+    } catch {
+      toast.error('Failed to load holidays');
+    } finally {
+      setLoading(false);
+    }
+  }, [periodMode, periodYear]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const handleTogglePick = async (holiday: HolidayRow) => {
+    const choose = !holiday.chosenByMe;
+    setTogglingId(holiday.id);
+    try {
+      const res = await fetch('/api/ess/optional-holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ holidayId: holiday.id, choose }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update your choice');
+      toast.success(choose ? `You've chosen ${holiday.name}` : `Removed ${holiday.name} from your picks`);
+      fetchAll();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update your choice');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  if (loading) return <Skeleton className="h-64 w-full" />;
+
+  const mandatoryHolidays = holidays.filter((h) => h.type !== 'optional');
+  const optionalHolidays = holidays.filter((h) => h.type === 'optional');
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <div>
+            <CardTitle className="text-base">Company Holiday Calendar</CardTitle>
+            {weeklyOffLabel && <CardDescription>Your weekly off: {weeklyOffLabel}</CardDescription>}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-md border p-0.5">
+              <button
+                type="button"
+                onClick={() => setPeriodMode('calendar')}
+                className={`rounded px-2 py-1 text-xs ${periodMode === 'calendar' ? 'bg-emerald-600 text-white' : 'text-muted-foreground'}`}
+              >
+                Calendar Year
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('fy')}
+                className={`rounded px-2 py-1 text-xs ${periodMode === 'fy' ? 'bg-emerald-600 text-white' : 'text-muted-foreground'}`}
+              >
+                Financial Year
+              </button>
+            </div>
+            <Select value={String(periodYear)} onValueChange={(v) => setPeriodYear(parseInt(v, 10))}>
+              <SelectTrigger className="h-8 w-[110px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {HOLIDAY_YEAR_OPTIONS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {periodMode === 'fy' ? `FY ${y}-${String((y + 1) % 100).padStart(2, '0')}` : y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-2">Mandatory Holidays ({mandatoryHolidays.length})</p>
+            {mandatoryHolidays.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2">No mandatory holidays configured for this period.</p>
+            ) : (
+              <div className="divide-y rounded-lg border">
+                {mandatoryHolidays.map((h) => (
+                  <div key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                    <span className="font-medium">{h.name}</span>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <span>{fmtDate(h.date)}</span>
+                      <Badge variant="outline" className="text-[10px]">{HOLIDAY_CATEGORY_LABEL[h.category] ?? 'Other'}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {quota > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-muted-foreground">Restricted / Optional Holidays</p>
+                <Badge variant="secondary">{chosenCount} of {quota} chosen</Badge>
+              </div>
+              {optionalHolidays.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-2">No restricted holidays configured for this period.</p>
+              ) : (
+                <div className="divide-y rounded-lg border">
+                  {optionalHolidays.map((h) => (
+                    <label key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm cursor-pointer">
+                      <div className="flex items-center gap-3">
+                        <Checkbox
+                          checked={!!h.chosenByMe}
+                          disabled={togglingId === h.id || (!h.chosenByMe && chosenCount >= quota)}
+                          onCheckedChange={() => handleTogglePick(h)}
+                        />
+                        <span className="font-medium">{h.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <span>{fmtDate(h.date)}</span>
+                        <Badge variant="outline" className="text-[10px]">{HOLIDAY_CATEGORY_LABEL[h.category] ?? 'Other'}</Badge>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </CardContent>
