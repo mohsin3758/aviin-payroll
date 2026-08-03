@@ -19,6 +19,25 @@ model User {
   updatedAt           DateTime @updatedAt
 
   employee            Employee? @relation(fields: [employeeId], references: [id])
+  passwordResetTokens PasswordResetToken[]
+}
+
+// A self-service password-reset link, mirroring OnboardingInvite's token-hash pattern (see
+// src/lib/onboarding-invite.ts) — only the hash is ever persisted, the raw token lives solely
+// in the URL/email. Much shorter expiry (60 min, not 14 days) since a leaked reset link is a
+// direct credential-recovery risk. Single-use: usedAt is set on successful reset rather than
+// deleting the row, so a completed reset stays visible for audit purposes.
+model PasswordResetToken {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 model AuditLog {

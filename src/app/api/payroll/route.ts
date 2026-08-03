@@ -10,6 +10,7 @@ import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
+import { ACTIVE_EMPLOYEE_WHERE } from "@/lib/employee-scope";
 
 // GET /api/payroll - List payroll runs with optional filters
 export async function GET(request: NextRequest) {
@@ -128,8 +129,7 @@ export async function POST(request: NextRequest) {
     const employees = await db.employee.findMany({
       where: {
         companyId: company.id,
-        dateOfExit: null,
-        onboardingStatus: "active",
+        ...ACTIVE_EMPLOYEE_WHERE,
       },
       include: {
         salaryStructure: true,

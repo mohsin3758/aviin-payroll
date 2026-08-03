@@ -30,6 +30,8 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   FileText,
   Users,
@@ -47,7 +49,18 @@ import {
   Receipt,
   Landmark,
   Info,
+  UserMinus,
+  LineChart as LineChartIcon,
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
 
@@ -60,7 +73,10 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ] as const;
 
-type ReportType = 'summary' | 'pf' | 'esi' | 'tds' | 'pt' | 'lwf';
+type ReportType = 'summary' | 'pf' | 'esi' | 'tds' | 'pt' | 'lwf' | 'headcount' | 'attrition';
+// The 6 original types are all tied to a payroll run for a single month (or range of months);
+// headcount/attrition are workforce-analytics types with their own date parameters.
+const STATUTORY_TYPES: ReportType[] = ['summary', 'pf', 'esi', 'tds', 'pt', 'lwf'];
 
 // ─── Mock data types ───────────────────────────────────────────────────────────
 
@@ -159,6 +175,41 @@ interface LwfData {
   states: LwfStateGroup[];
 }
 
+interface HeadcountData {
+  asOf: string;
+  totalActiveEmployees: number;
+  byDepartment: { department: string; count: number }[];
+  byState: { state: string; count: number }[];
+  byEmploymentType: { employmentType: string; count: number }[];
+}
+
+interface AttritionRow {
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  department: string;
+  designation: string;
+  state: string;
+  dateOfJoining: string;
+  dateOfExit: string;
+  tenureYears: number;
+  exitReason: string | null;
+}
+
+interface AttritionData {
+  totalExits: number;
+  employees: AttritionRow[];
+  byDepartment: { department: string; count: number }[];
+}
+
+interface TrendMonth {
+  month: number;
+  year: number;
+  exits: number;
+  grossPayroll: number;
+  netPayroll: number;
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReportsView() {
@@ -173,6 +224,16 @@ export default function ReportsView() {
   const [loading, setLoading] = useState(false);
   const [generated, setGenerated] = useState(false);
 
+  // Multi-month range mode (statutory types only) — month/year above serve as the range start.
+  const [isRangeMode, setIsRangeMode] = useState(false);
+  const [toMonth, setToMonth] = useState(String(currentMonth));
+  const [toYear, setToYear] = useState(String(currentYear));
+
+  // Attrition report's own date-range params (distinct from the statutory month/year above).
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [fromDate, setFromDate] = useState(todayIso.slice(0, 8) + '01');
+  const [toDate, setToDate] = useState(todayIso);
+
   // Report data states
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [pfData, setPfData] = useState<PfData | null>(null);
@@ -180,14 +241,40 @@ export default function ReportsView() {
   const [tdsData, setTdsData] = useState<TdsData | null>(null);
   const [ptData, setPtData] = useState<PtData | null>(null);
   const [lwfData, setLwfData] = useState<LwfData | null>(null);
+  const [headcountData, setHeadcountData] = useState<HeadcountData | null>(null);
+  const [attritionData, setAttritionData] = useState<AttritionData | null>(null);
+
+  // Trends tab
+  const [trendMonths, setTrendMonths] = useState<TrendMonth[]>([]);
+  const [trendsLoading, setTrendsLoading] = useState(false);
+
+  // Shared by fetchReport and handleExport so the two can never build different query strings
+  // for the same report configuration.
+  const buildReportQuery = useCallback((type: ReportType) => {
+    const params = new URLSearchParams({ type });
+    if (type === 'headcount') {
+      // no date params needed — always "right now"
+    } else if (type === 'attrition') {
+      params.set('fromDate', fromDate);
+      params.set('toDate', toDate);
+    } else if (isRangeMode) {
+      params.set('fromMonth', month);
+      params.set('fromYear', year);
+      params.set('toMonth', toMonth);
+      params.set('toYear', toYear);
+    } else {
+      params.set('month', month);
+      params.set('year', year);
+    }
+    return params;
+  }, [month, year, isRangeMode, toMonth, toYear, fromDate, toDate]);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
     setGenerated(true);
     try {
-      const res = await fetch(
-        `/api/reports?month=${month}&year=${year}&type=${reportType}`
-      );
+      const params = buildReportQuery(reportType);
+      const res = await fetch(`/api/reports?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch report');
       const json = await res.json();
       const d = json.data;
@@ -290,25 +377,38 @@ export default function ReportsView() {
             })),
           });
           break;
+        case 'headcount':
+          setHeadcountData(d as HeadcountData);
+          break;
+        case 'attrition':
+          setAttritionData(d as AttritionData);
+          break;
       }
 
-      toast.success(`${MONTHS[Number(month) - 1]} ${year} ${reportLabel(reportType)} generated`);
+      const periodLabel = reportType === 'headcount' ? 'as of today'
+        : reportType === 'attrition' ? `${fromDate} to ${toDate}`
+          : isRangeMode ? `${MONTHS[Number(month) - 1]} ${year} – ${MONTHS[Number(toMonth) - 1]} ${toYear}`
+            : `${MONTHS[Number(month) - 1]} ${year}`;
+      toast.success(`${periodLabel} ${reportLabel(reportType)} generated`);
     } catch {
       toast.error('Failed to generate report. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [month, year, reportType]);
+  }, [month, year, reportType, buildReportQuery, isRangeMode, toMonth, toYear, fromDate, toDate]);
 
-  const handleExport = useCallback(async (type: ReportType) => {
+  const handleExport = useCallback(async (type: ReportType, format: 'csv' | 'xlsx' = 'csv') => {
     try {
-      const res = await fetch(`/api/reports?month=${month}&year=${year}&type=${type}&format=csv`);
+      const params = buildReportQuery(type);
+      params.set('format', format);
+      const res = await fetch(`/api/reports?${params.toString()}`);
       if (!res.ok) throw new Error('Export failed');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${type}-report-${month}-${year}.csv`;
+      const suffix = type === 'headcount' ? 'headcount' : type === 'attrition' ? `attrition-${fromDate}-to-${toDate}` : `${type}-${month}-${year}`;
+      a.download = `${suffix}-report.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -317,7 +417,7 @@ export default function ReportsView() {
     } catch {
       toast.error('Failed to export report');
     }
-  }, [month, year]);
+  }, [buildReportQuery, month, year, fromDate, toDate]);
 
   useEffect(() => {
     if (generated) fetchReport();
@@ -331,6 +431,8 @@ export default function ReportsView() {
       tds: 'TDS Report',
       pt: 'Professional Tax Report',
       lwf: 'LWF Report',
+      headcount: 'Headcount Report',
+      attrition: 'Attrition Report',
     };
     return labels[type];
   };
@@ -362,7 +464,7 @@ export default function ReportsView() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">
-            Payroll Summary — {MONTHS[Number(month) - 1]} {year}
+            Payroll Summary — {periodDisplay}
           </h3>
           <Button
             variant="outline"
@@ -425,7 +527,7 @@ export default function ReportsView() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">
-            PF Contribution Report — {MONTHS[Number(month) - 1]} {year}
+            PF Contribution Report — {periodDisplay}
           </h3>
           <Button
             variant="outline"
@@ -515,7 +617,7 @@ export default function ReportsView() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">
-            ESI Contribution Report — {MONTHS[Number(month) - 1]} {year}
+            ESI Contribution Report — {periodDisplay}
           </h3>
           <Button
             variant="outline"
@@ -600,7 +702,7 @@ export default function ReportsView() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">
-            TDS Report — {MONTHS[Number(month) - 1]} {year}
+            TDS Report — {periodDisplay}
           </h3>
           <Button
             variant="outline"
@@ -714,9 +816,19 @@ export default function ReportsView() {
 
     return (
       <div className="space-y-6">
-        <h3 className="text-lg font-semibold text-foreground">
-          Professional Tax Report — {MONTHS[Number(month) - 1]} {year}
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">
+            Professional Tax Report — {periodDisplay}
+          </h3>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => handleExport('pt')}
+          >
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+        </div>
 
         {ptData.states.length === 0 && (
           <Card>
@@ -780,9 +892,19 @@ export default function ReportsView() {
 
     return (
       <div className="space-y-6">
-        <h3 className="text-lg font-semibold text-foreground">
-          Labour Welfare Fund Report — {MONTHS[Number(month) - 1]} {year}
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">
+            Labour Welfare Fund Report — {periodDisplay}
+          </h3>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => handleExport('lwf')}
+          >
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+        </div>
 
         {lwfData.states.length === 0 && (
           <Card>
@@ -832,7 +954,231 @@ export default function ReportsView() {
     );
   };
 
+  // ─── Headcount Report ────────────────────────────────────────────────────────
+
+  const renderHeadcountReport = () => {
+    if (!headcountData) return null;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">
+            Headcount Report — as of {new Date(headcountData.asOf).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </h3>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('headcount', 'csv')}>
+              <Download className="h-3.5 w-3.5" /> CSV
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('headcount', 'xlsx')}>
+              <Download className="h-3.5 w-3.5" /> Excel
+            </Button>
+          </div>
+        </div>
+
+        <Card className="gap-4">
+          <CardContent className="flex items-center gap-4 pt-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+              <Users className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total Active Employees</p>
+              <p className="text-lg font-bold">{headcountData.totalActiveEmployees}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Building2 className="h-4 w-4 text-emerald-600" />By Department</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader><TableRow><TableHead>Department</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {headcountData.byDepartment.map((d) => (
+                    <TableRow key={d.department}><TableCell>{d.department}</TableCell><TableCell className="text-right tabular-nums">{d.count}</TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Landmark className="h-4 w-4 text-rose-500" />By State</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader><TableRow><TableHead>State</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {headcountData.byState.map((s) => (
+                    <TableRow key={s.state}><TableCell>{s.state}</TableCell><TableCell className="text-right tabular-nums">{s.count}</TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  };
+
+  // ─── Attrition Report ────────────────────────────────────────────────────────
+
+  const renderAttritionReport = () => {
+    if (!attritionData) return null;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">Attrition Report — {fromDate} to {toDate}</h3>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('attrition', 'csv')}>
+              <Download className="h-3.5 w-3.5" /> CSV
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => handleExport('attrition', 'xlsx')}>
+              <Download className="h-3.5 w-3.5" /> Excel
+            </Button>
+          </div>
+        </div>
+
+        <Card className="gap-4">
+          <CardContent className="flex items-center gap-4 pt-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-600">
+              <UserMinus className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total Exits</p>
+              <p className="text-lg font-bold">{attritionData.totalExits}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-rose-50/60 hover:bg-rose-50/60">
+                    <TableHead>Emp Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Designation</TableHead>
+                    <TableHead>Date of Exit</TableHead>
+                    <TableHead className="text-right">Tenure (yrs)</TableHead>
+                    <TableHead>Reason</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attritionData.employees.map((e) => (
+                    <TableRow key={e.employeeId}>
+                      <TableCell className="font-mono text-xs">{e.employeeCode}</TableCell>
+                      <TableCell className="font-medium">{e.employeeName}</TableCell>
+                      <TableCell>{e.department}</TableCell>
+                      <TableCell>{e.designation}</TableCell>
+                      <TableCell>{new Date(e.dateOfExit).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</TableCell>
+                      <TableCell className="text-right tabular-nums">{e.tenureYears}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{e.exitReason ?? '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                  {attritionData.employees.length === 0 && (
+                    <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">No exits in this period.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // ─── Trends Tab ──────────────────────────────────────────────────────────────
+
+  const fetchTrends = useCallback(async () => {
+    setTrendsLoading(true);
+    try {
+      const res = await fetch('/api/reports/trends?months=6');
+      if (!res.ok) throw new Error('Failed to load trends');
+      const json = await res.json();
+      setTrendMonths(json.data.months ?? []);
+    } catch {
+      toast.error('Failed to load trends');
+    } finally {
+      setTrendsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchTrends(); }, [fetchTrends, refreshKey]);
+
+  const trendChartData = trendMonths.map((m) => ({
+    name: `${MONTHS[m.month - 1].slice(0, 3)} ${String(m.year).slice(2)}`,
+    Gross: m.grossPayroll,
+    Net: m.netPayroll,
+    Exits: m.exits,
+  }));
+
+  const renderTrends = () => (
+    <div className="space-y-6">
+      {trendsLoading ? (
+        <Card className="py-16">
+          <CardContent className="flex flex-col items-center justify-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><IndianRupee className="h-4 w-4 text-emerald-600" />Payroll Cost Trend</CardTitle></CardHeader>
+            <CardContent className="pb-6">
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={trendChartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                    <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis
+                      tick={{ fontSize: 12 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => {
+                        const abs = Math.abs(v);
+                        if (abs >= 100000) return `₹${(abs / 100000).toFixed(1)}L`;
+                        if (abs >= 1000) return `₹${(abs / 1000).toFixed(0)}K`;
+                        return `₹${abs}`;
+                      }}
+                    />
+                    <Tooltip formatter={(value: number) => fmt(value)} contentStyle={{ borderRadius: '0.75rem', border: '1px solid var(--border)' }} />
+                    <Legend verticalAlign="bottom" iconType="circle" iconSize={8} />
+                    <Bar dataKey="Gross" name="Gross" radius={[6, 6, 0, 0]} fill="#10b981" />
+                    <Bar dataKey="Net" name="Net" radius={[6, 6, 0, 0]} fill="#14b8a6" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><UserMinus className="h-4 w-4 text-rose-500" />Attrition Trend</CardTitle></CardHeader>
+            <CardContent className="pb-6">
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={trendChartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                    <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid var(--border)' }} />
+                    <Bar dataKey="Exits" name="Exits" radius={[6, 6, 0, 0]} fill="#f43f5e" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+        <Info className="h-3.5 w-3.5" />
+        Headcount isn&apos;t shown here since past values can&apos;t be reconstructed accurately — only exits and payroll cost have real historical figures.
+      </p>
+    </div>
+  );
+
   // ─── Render ──────────────────────────────────────────────────────────────────
+
+  const isStatutoryType = STATUTORY_TYPES.includes(reportType);
+  const periodDisplay = isRangeMode
+    ? `${MONTHS[Number(month) - 1]} ${year} – ${MONTHS[Number(toMonth) - 1]} ${toYear}`
+    : `${MONTHS[Number(month) - 1]} ${year}`;
 
   return (
     <div className="space-y-6">
@@ -843,117 +1189,170 @@ export default function ReportsView() {
             <FileText className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Compliance Reports</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Reports</h1>
             <p className="text-sm text-muted-foreground">
-              Generate and view statutory compliance reports
+              Statutory compliance, workforce analytics, and trend charts
             </p>
           </div>
         </div>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-end">
-          <div className="space-y-1.5">
-            <Label htmlFor="report-month" className="text-xs font-medium">Month</Label>
-            <Select value={month} onValueChange={setMonth}>
-              <SelectTrigger id="report-month" className="w-[160px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MONTHS.map((m, i) => (
-                  <SelectItem key={i} value={String(i + 1)}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      <Tabs defaultValue="reports">
+        <TabsList>
+          <TabsTrigger value="reports">Compliance &amp; Workforce Reports</TabsTrigger>
+          <TabsTrigger value="trends" className="gap-1.5"><LineChartIcon className="h-3.5 w-3.5" />Trends</TabsTrigger>
+        </TabsList>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="report-year" className="text-xs font-medium">Year</Label>
-            <Input
-              id="report-year"
-              type="number"
-              min={2020}
-              max={2035}
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-              className="w-[100px]"
-            />
-          </div>
+        <TabsContent value="reports" className="space-y-6 mt-4">
+          {/* Filters */}
+          <Card>
+            <CardContent className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:flex-wrap">
+                <div className="space-y-1.5">
+                  <Label htmlFor="report-type" className="text-xs font-medium">Report Type</Label>
+                  <Select
+                    value={reportType}
+                    onValueChange={(v) => setReportType(v as ReportType)}
+                  >
+                    <SelectTrigger id="report-type" className="w-[200px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="summary">Summary</SelectItem>
+                      <SelectItem value="pf">PF</SelectItem>
+                      <SelectItem value="esi">ESI</SelectItem>
+                      <SelectItem value="tds">TDS</SelectItem>
+                      <SelectItem value="pt">Professional Tax</SelectItem>
+                      <SelectItem value="lwf">LWF</SelectItem>
+                      <SelectItem value="headcount">Headcount</SelectItem>
+                      <SelectItem value="attrition">Attrition</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="report-type" className="text-xs font-medium">Report Type</Label>
-            <Select
-              value={reportType}
-              onValueChange={(v) => setReportType(v as ReportType)}
-            >
-              <SelectTrigger id="report-type" className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="summary">Summary</SelectItem>
-                <SelectItem value="pf">PF</SelectItem>
-                <SelectItem value="esi">ESI</SelectItem>
-                <SelectItem value="tds">TDS</SelectItem>
-                <SelectItem value="pt">Professional Tax</SelectItem>
-                <SelectItem value="lwf">LWF</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+                {isStatutoryType && !isRangeMode && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="report-month" className="text-xs font-medium">Month</Label>
+                      <Select value={month} onValueChange={setMonth}>
+                        <SelectTrigger id="report-month" className="w-[160px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {MONTHS.map((m, i) => (
+                            <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="report-year" className="text-xs font-medium">Year</Label>
+                      <Input id="report-year" type="number" min={2020} max={2035} value={year} onChange={(e) => setYear(e.target.value)} className="w-[100px]" />
+                    </div>
+                  </>
+                )}
 
-          <Button
-            onClick={fetchReport}
-            disabled={loading}
-            className="bg-emerald-600 text-white hover:bg-emerald-700 gap-2"
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <FileText className="h-4 w-4" />
-            )}
-            Generate Report
-          </Button>
-        </CardContent>
-      </Card>
+                {isStatutoryType && isRangeMode && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">From</Label>
+                      <div className="flex gap-1.5">
+                        <Select value={month} onValueChange={setMonth}>
+                          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>{MONTHS.map((m, i) => (<SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>))}</SelectContent>
+                        </Select>
+                        <Input type="number" min={2020} max={2035} value={year} onChange={(e) => setYear(e.target.value)} className="w-[90px]" />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">To</Label>
+                      <div className="flex gap-1.5">
+                        <Select value={toMonth} onValueChange={setToMonth}>
+                          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>{MONTHS.map((m, i) => (<SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>))}</SelectContent>
+                        </Select>
+                        <Input type="number" min={2020} max={2035} value={toYear} onChange={(e) => setToYear(e.target.value)} className="w-[90px]" />
+                      </div>
+                    </div>
+                  </>
+                )}
 
-      {/* Report Content */}
-      {!generated && (
-        <Card className="py-16">
-          <CardContent className="flex flex-col items-center justify-center gap-3 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-400">
-              <IndianRupee className="h-8 w-8" />
-            </div>
-            <div>
-              <p className="font-medium text-foreground">No report generated</p>
-              <p className="text-sm text-muted-foreground">
-                Select the period and report type, then click &quot;Generate Report&quot;
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                {reportType === 'attrition' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="from-date" className="text-xs font-medium">From Date</Label>
+                      <Input id="from-date" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-[160px]" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="to-date" className="text-xs font-medium">To Date</Label>
+                      <Input id="to-date" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-[160px]" />
+                    </div>
+                  </>
+                )}
 
-      {generated && loading && (
-        <Card className="py-16">
-          <CardContent className="flex flex-col items-center justify-center gap-3">
-            <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-            <p className="text-sm text-muted-foreground">Generating report...</p>
-          </CardContent>
-        </Card>
-      )}
+                <Button
+                  onClick={fetchReport}
+                  disabled={loading}
+                  className="bg-emerald-600 text-white hover:bg-emerald-700 gap-2"
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                  Generate Report
+                </Button>
+              </div>
 
-      {generated && !loading && (
-        <>
-          {reportType === 'summary' && renderSummary()}
-          {reportType === 'pf' && renderPfReport()}
-          {reportType === 'esi' && renderEsiReport()}
-          {reportType === 'tds' && renderTdsReport()}
-          {reportType === 'pt' && renderPtReport()}
-          {reportType === 'lwf' && renderLwfReport()}
-        </>
-      )}
+              {isStatutoryType && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
+                  <Checkbox checked={isRangeMode} onCheckedChange={(v) => setIsRangeMode(!!v)} />
+                  Multi-month date range (spans several payroll runs, summed per employee)
+                </label>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Report Content */}
+          {!generated && (
+            <Card className="py-16">
+              <CardContent className="flex flex-col items-center justify-center gap-3 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-400">
+                  <IndianRupee className="h-8 w-8" />
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">No report generated</p>
+                  <p className="text-sm text-muted-foreground">
+                    Select the period and report type, then click &quot;Generate Report&quot;
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {generated && loading && (
+            <Card className="py-16">
+              <CardContent className="flex flex-col items-center justify-center gap-3">
+                <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+                <p className="text-sm text-muted-foreground">Generating report...</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {generated && !loading && (
+            <>
+              {reportType === 'summary' && renderSummary()}
+              {reportType === 'pf' && renderPfReport()}
+              {reportType === 'esi' && renderEsiReport()}
+              {reportType === 'tds' && renderTdsReport()}
+              {reportType === 'pt' && renderPtReport()}
+              {reportType === 'lwf' && renderLwfReport()}
+              {reportType === 'headcount' && renderHeadcountReport()}
+              {reportType === 'attrition' && renderAttritionReport()}
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="trends" className="mt-4">
+          {renderTrends()}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

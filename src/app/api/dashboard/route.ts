@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-utils";
 import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
 import { istDateOnly } from "@/lib/date-ist";
+import { ACTIVE_EMPLOYEE_WHERE } from "@/lib/employee-scope";
 
 export async function GET(request: NextRequest) {
   try {
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       // 1. Total active employees (excludes anyone still mid-self-onboarding, not yet reviewed)
       db.employee.count({
-        where: { dateOfExit: null, onboardingStatus: "active" },
+        where: ACTIVE_EMPLOYEE_WHERE,
       }),
 
       // 2. Present today
@@ -92,7 +93,7 @@ export async function GET(request: NextRequest) {
       // 6. Department-wise employee count
       !isElevated ? Promise.resolve([]) : db.employee.groupBy({
         by: ["department"],
-        where: { dateOfExit: null, onboardingStatus: "active" },
+        where: ACTIVE_EMPLOYEE_WHERE,
         _count: { department: true },
         orderBy: { _count: { department: "desc" } },
       }),
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest) {
       // 7. State-wise employee count
       !isElevated ? Promise.resolve([]) : db.employee.groupBy({
         by: ["state"],
-        where: { dateOfExit: null, onboardingStatus: "active" },
+        where: ACTIVE_EMPLOYEE_WHERE,
         _count: { state: true },
         orderBy: { _count: { state: "desc" } },
       }),

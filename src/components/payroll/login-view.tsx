@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from 'sonner'
 import { Loader2, ShieldCheck } from 'lucide-react'
 import FaceLoginStep from '@/components/payroll/face-login-step'
+import ForgotPasswordStep from '@/components/payroll/forgot-password-step'
 
 interface PendingFace {
   pendingToken: string
@@ -19,6 +20,7 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [pendingFace, setPendingFace] = useState<PendingFace | null>(null)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,7 +61,9 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
             <ShieldCheck className="size-5" />
           </div>
           <CardTitle className="text-xl">PayrollPro</CardTitle>
-          <CardDescription>{pendingFace ? 'One more step to finish signing in' : 'Sign in to continue'}</CardDescription>
+          <CardDescription>
+            {pendingFace ? 'One more step to finish signing in' : showForgotPassword ? 'Reset your password' : 'Sign in to continue'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {pendingFace ? (
@@ -69,6 +73,8 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
               onSuccess={handleFaceSuccess}
               onBack={() => setPendingFace(null)}
             />
+          ) : showForgotPassword ? (
+            <ForgotPasswordStep onBack={() => setShowForgotPassword(false)} />
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
@@ -84,7 +90,16 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(true)}
+                    className="text-xs text-muted-foreground hover:text-emerald-600 hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
                 <Input
                   id="password"
                   type="password"
