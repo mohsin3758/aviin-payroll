@@ -328,6 +328,7 @@ export default function SettingsView() {
   const [enableLogoutAttendance, setEnableLogoutAttendance] = useState(false);
   const [allowFacePunch, setAllowFacePunch] = useState(true);
   const [allowManualPunch, setAllowManualPunch] = useState(true);
+  const [requireFaceLogin, setRequireFaceLogin] = useState(false);
   const [savingGeofence, setSavingGeofence] = useState(false);
 
   const fetchGeofenceSettings = useCallback(async () => {
@@ -343,6 +344,7 @@ export default function SettingsView() {
       setEnableLogoutAttendance(!!json.data.enableLogoutAttendance);
       setAllowFacePunch(json.data.allowFacePunch !== false);
       setAllowManualPunch(json.data.allowManualPunch !== false);
+      setRequireFaceLogin(!!json.data.requireFaceLogin);
     } catch {
       // non-critical; the main fetchSettings() call already surfaces a toast on failure
     }
@@ -373,6 +375,7 @@ export default function SettingsView() {
           enableLogoutAttendance,
           allowFacePunch,
           allowManualPunch,
+          requireFaceLogin,
         }),
       });
       const data = await res.json();
@@ -2161,6 +2164,14 @@ export default function SettingsView() {
               <Switch id="allow-manual-punch" checked={allowManualPunch} onCheckedChange={setAllowManualPunch} />
               <Label htmlFor="allow-manual-punch" className="cursor-pointer">
                 Allow Manual Punch on the Attendance screen <span className="text-xs font-normal text-muted-foreground">(admin's separate Mark Attendance override is never affected by this)</span>
+              </Label>
+            </div>
+            <Separator />
+            <p className="text-sm font-medium">Login Security</p>
+            <div className="flex items-center gap-2">
+              <Switch id="require-face-login" checked={requireFaceLogin} onCheckedChange={setRequireFaceLogin} />
+              <Label htmlFor="require-face-login" className="cursor-pointer">
+                Require face verification to sign in, after password <span className="text-xs font-normal text-muted-foreground">(applies only to logins linked to an employee record — an employee not yet enrolled is walked through a one-time enrollment on their next login; reuses the same face reference as Quick Confirm punch)</span>
               </Label>
             </div>
             <Button onClick={handleSaveGeofence} disabled={savingGeofence} className="bg-emerald-600 hover:bg-emerald-700 text-white">

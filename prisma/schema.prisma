@@ -88,6 +88,11 @@ model Company {
   // until an admin narrows it down. Never restricts the admin "Mark Attendance" override tool.
   allowFacePunch      Boolean  @default(true)
   allowManualPunch    Boolean  @default(true)
+  // Company-wide mandatory face verification at login, layered on top of (never instead of)
+  // password. Only ever applies to logins linked to an Employee record (see login/route.ts) —
+  // a login with no employeeId has no FaceEnrollment to check against, so it's always exempt.
+  // Default false: existing logins are completely unaffected until an admin opts in.
+  requireFaceLogin    Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

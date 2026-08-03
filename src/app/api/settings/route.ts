@@ -26,6 +26,7 @@ const DEFAULT_COMPANY = {
   enableLogoutAttendance: false,
   allowFacePunch: true,
   allowManualPunch: true,
+  requireFaceLogin: false,
 };
 
 function parseWeeklyOffDays(value: string): number[] {
@@ -104,6 +105,7 @@ export async function PUT(request: NextRequest) {
           ...(body.enableLogoutAttendance !== undefined && { enableLogoutAttendance: body.enableLogoutAttendance }),
           ...(body.allowFacePunch !== undefined && { allowFacePunch: body.allowFacePunch }),
           ...(body.allowManualPunch !== undefined && { allowManualPunch: body.allowManualPunch }),
+          ...(body.requireFaceLogin !== undefined && { requireFaceLogin: body.requireFaceLogin }),
         },
       });
     } else {
@@ -136,6 +138,7 @@ export async function PUT(request: NextRequest) {
           enableLogoutAttendance: body.enableLogoutAttendance ?? false,
           allowFacePunch: body.allowFacePunch ?? true,
           allowManualPunch: body.allowManualPunch ?? true,
+          requireFaceLogin: body.requireFaceLogin ?? false,
         },
       });
     }

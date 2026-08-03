@@ -45,4 +45,5 @@ export const updateSettingsSchema = z.object({
   enableLogoutAttendance: z.boolean().optional(),
   allowFacePunch: z.boolean().optional(),
   allowManualPunch: z.boolean().optional(),
+  requireFaceLogin: z.boolean().optional(),
 });

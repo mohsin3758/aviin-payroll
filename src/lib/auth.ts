@@ -49,6 +49,34 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
 export const SESSION_COOKIE_NAME = SESSION_COOKIE;
 export const SESSION_MAX_AGE = SESSION_TTL_SECONDS;
 
+// A short-lived, single-purpose token issued only after a password has already verified
+// successfully, when the company requires a face check to finish logging in. Deliberately NOT
+// a session — it's never set as a cookie, carries only a userId + a `purpose` tag it's checked
+// against, and is only ever accepted by the two face-login routes. It cannot be used to reach
+// any other authenticated route, and expires quickly so an abandoned login can't be resumed later.
+const PENDING_FACE_TTL_SECONDS = 60 * 5; // 5 minutes
+const PENDING_FACE_PURPOSE = "face-login";
+
+export async function signPendingFaceToken(userId: string): Promise<string> {
+  return new SignJWT({ userId, purpose: PENDING_FACE_PURPOSE })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${PENDING_FACE_TTL_SECONDS}s`)
+    .sign(JWT_SECRET);
+}
+
+export async function verifyPendingFaceToken(token: string): Promise<{ userId: string } | null> {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    if (payload.purpose !== PENDING_FACE_PURPOSE || typeof payload.userId !== "string") {
+      return null;
+    }
+    return { userId: payload.userId };
+  } catch {
+    return null;
+  }
+}
+
 /** Reads and verifies the session from an incoming request's cookies. Returns null if absent/invalid. */
 export async function getSession(request: NextRequest): Promise<SessionPayload | null> {
   const token = request.cookies.get(SESSION_COOKIE)?.value;

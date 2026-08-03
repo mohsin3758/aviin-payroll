@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { euclideanDistance, matchFaceDescriptors, isValidDescriptor, FACE_DESCRIPTOR_LENGTH, FACE_MATCH_THRESHOLD } from "@/lib/face-match";
+import { euclideanDistance, matchFaceDescriptors, isValidDescriptor, FACE_DESCRIPTOR_LENGTH, FACE_MATCH_THRESHOLD, FACE_LOGIN_MATCH_THRESHOLD } from "@/lib/face-match";
 
 function makeDescriptor(fill: number): number[] {
   return new Array(FACE_DESCRIPTOR_LENGTH).fill(fill);
@@ -61,5 +61,39 @@ describe("matchFaceDescriptors", () => {
     const result = matchFaceDescriptors(a, b);
     expect(result.distance).toBeCloseTo(FACE_MATCH_THRESHOLD, 10);
     expect(result.matched).toBe(true); // <= threshold counts as a match
+  });
+
+  it("login threshold is stricter than the attendance default", () => {
+    expect(FACE_LOGIN_MATCH_THRESHOLD).toBeLessThan(FACE_MATCH_THRESHOLD);
+  });
+
+  it("a distance that passes attendance's looser threshold can still fail the stricter login threshold", () => {
+    const a = makeDescriptor(0);
+    const b = makeDescriptor(0);
+    // Halfway between the two thresholds: passes attendance's 0.6, fails login's 0.42.
+    b[0] = (FACE_MATCH_THRESHOLD + FACE_LOGIN_MATCH_THRESHOLD) / 2;
+    expect(matchFaceDescriptors(a, b).matched).toBe(true);
+    expect(matchFaceDescriptors(a, b, FACE_LOGIN_MATCH_THRESHOLD).matched).toBe(false);
+  });
+
+  it("is a boundary match exactly at the login threshold when passed explicitly", () => {
+    const a = makeDescriptor(0);
+    const b = makeDescriptor(0);
+    b[0] = FACE_LOGIN_MATCH_THRESHOLD;
+    const result = matchFaceDescriptors(a, b, FACE_LOGIN_MATCH_THRESHOLD);
+    expect(result.distance).toBeCloseTo(FACE_LOGIN_MATCH_THRESHOLD, 10);
+    expect(result.matched).toBe(true);
+    expect(result.confidence).toBe(0);
+  });
+
+  it("confidence is reported relative to whichever threshold was actually applied", () => {
+    const a = makeDescriptor(0);
+    const b = makeDescriptor(0);
+    b[0] = FACE_LOGIN_MATCH_THRESHOLD / 2; // halfway to the login threshold
+    const atLoginThreshold = matchFaceDescriptors(a, b, FACE_LOGIN_MATCH_THRESHOLD);
+    expect(atLoginThreshold.confidence).toBe(50);
+    // Same distance, but relative to the looser default threshold, confidence reads higher.
+    const atDefaultThreshold = matchFaceDescriptors(a, b);
+    expect(atDefaultThreshold.confidence).toBeGreaterThan(50);
   });
 });

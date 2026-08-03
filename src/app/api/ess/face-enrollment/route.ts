@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireOwnEmployeeId } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { enrollFaceSchema } from "@/lib/validations/face-enrollment";
+import { upsertFaceEnrollment } from "@/lib/face-enrollment";
 import { logAudit } from "@/lib/audit";
 
 // GET /api/ess/face-enrollment — your own enrollment status. Never returns the descriptor
@@ -29,16 +30,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { descriptor } = enrollFaceSchema.parse(body);
 
-    const existing = await db.faceEnrollment.findUnique({ where: { employeeId } });
-    const enrollment = await db.faceEnrollment.upsert({
-      where: { employeeId },
-      create: { employeeId, descriptor: JSON.stringify(descriptor), consentedAt: new Date() },
-      update: { descriptor: JSON.stringify(descriptor), consentedAt: new Date() },
-    });
+    const { enrollment, wasExisting } = await upsertFaceEnrollment(employeeId, descriptor);
 
-    await logAudit({ session, action: existing ? "update" : "create", entity: "FaceEnrollment", entityId: enrollment.id });
+    await logAudit({ session, action: wasExisting ? "update" : "create", entity: "FaceEnrollment", entityId: enrollment.id });
 
-    return NextResponse.json({ data: { enrolled: true, enrolledAt: enrollment.createdAt, consentedAt: enrollment.consentedAt } }, { status: existing ? 200 : 201 });
+    return NextResponse.json({ data: { enrolled: true, enrolledAt: enrollment.createdAt, consentedAt: enrollment.consentedAt } }, { status: wasExisting ? 200 : 201 });
   } catch (error) {
     return handleApiError(error, "enroll face");
   }

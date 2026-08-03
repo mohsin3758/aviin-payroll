@@ -7,11 +7,18 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { Loader2, ShieldCheck } from 'lucide-react'
+import FaceLoginStep from '@/components/payroll/face-login-step'
+
+interface PendingFace {
+  pendingToken: string
+  enrolled: boolean
+}
 
 export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [pendingFace, setPendingFace] = useState<PendingFace | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,6 +33,10 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
       if (!res.ok) {
         throw new Error(json.error || 'Login failed')
       }
+      if (json.requiresFaceVerification) {
+        setPendingFace({ pendingToken: json.pendingToken, enrolled: json.enrolled })
+        return
+      }
       toast.success(`Welcome, ${json.user.name}`)
       onLoggedIn()
     } catch (err) {
@@ -33,6 +44,11 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleFaceSuccess = (user: { name: string }) => {
+    toast.success(`Welcome, ${user.name}`)
+    onLoggedIn()
   }
 
   return (
@@ -43,38 +59,47 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
             <ShieldCheck className="size-5" />
           </div>
           <CardTitle className="text-xl">PayrollPro</CardTitle>
-          <CardDescription>Sign in to continue</CardDescription>
+          <CardDescription>{pendingFace ? 'One more step to finish signing in' : 'Sign in to continue'}</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                placeholder="admin@payrollpro.local"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting && <Loader2 className="mr-2 size-4 animate-spin" />}
-              Sign in
-            </Button>
-          </form>
+          {pendingFace ? (
+            <FaceLoginStep
+              pendingToken={pendingFace.pendingToken}
+              enrolled={pendingFace.enrolled}
+              onSuccess={handleFaceSuccess}
+              onBack={() => setPendingFace(null)}
+            />
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  placeholder="admin@payrollpro.local"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting && <Loader2 className="mr-2 size-4 animate-spin" />}
+                Sign in
+              </Button>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>

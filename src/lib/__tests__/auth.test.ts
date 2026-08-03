@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import {
   signSession,
@@ -9,6 +9,8 @@ import {
   requireOwnEmployeeId,
   scopeToOwnEmployeeIfSelf,
   requireSelfOrRole,
+  signPendingFaceToken,
+  verifyPendingFaceToken,
   type SessionPayload,
 } from "../auth";
 
@@ -111,5 +113,40 @@ describe("AuthError", () => {
   it("defaults to status 401", () => {
     const err = new AuthError("nope");
     expect(err.status).toBe(401);
+  });
+});
+
+describe("pending face token", () => {
+  it("round-trips a valid token", async () => {
+    const token = await signPendingFaceToken("user-123");
+    const result = await verifyPendingFaceToken(token);
+    expect(result).toEqual({ userId: "user-123" });
+  });
+
+  it("rejects a tampered token", async () => {
+    const token = await signPendingFaceToken("user-123");
+    const lastChar = token.at(-1);
+    const tampered = token.slice(0, -1) + (lastChar === "a" ? "b" : "a");
+    expect(await verifyPendingFaceToken(tampered)).toBeNull();
+  });
+
+  it("rejects garbage input", async () => {
+    expect(await verifyPendingFaceToken("not-a-jwt")).toBeNull();
+  });
+
+  it("rejects a token with the wrong purpose (e.g. a real session token, same secret)", async () => {
+    const sessionToken = await signSession(admin);
+    expect(await verifyPendingFaceToken(sessionToken)).toBeNull();
+  });
+
+  it("rejects an expired token", async () => {
+    vi.useFakeTimers();
+    try {
+      const token = await signPendingFaceToken("user-123");
+      vi.setSystemTime(Date.now() + 6 * 60 * 1000); // 6 minutes later, past the 5-minute TTL
+      expect(await verifyPendingFaceToken(token)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
