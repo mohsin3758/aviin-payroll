@@ -2,13 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import {
-  saveUploadedFile,
-  ALLOWED_DOC_TYPES,
-  ALLOWED_MIME_TYPES,
-  MAX_UPLOAD_SIZE_BYTES,
-  type DocType,
-} from "@/lib/documents";
+import { saveDocumentForEmployee, DocumentUploadError, ALLOWED_DOC_TYPES } from "@/lib/documents";
 import { logAudit } from "@/lib/audit";
 
 // GET /api/documents?employeeId=xxx&verifiedStatus=pending — list an employee's documents.
@@ -59,7 +53,7 @@ export async function POST(request: NextRequest) {
     if (!(file instanceof File)) {
       return apiError("file is required", 400);
     }
-    if (typeof docType !== "string" || !ALLOWED_DOC_TYPES.includes(docType as DocType)) {
+    if (typeof docType !== "string") {
       return apiError(`docType must be one of: ${ALLOWED_DOC_TYPES.join(", ")}`, 400);
     }
 
@@ -72,36 +66,21 @@ export async function POST(request: NextRequest) {
       return apiError("employeeId is required", 400);
     }
 
-    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-      return apiError("File exceeds the 10MB upload limit.", 400);
-    }
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      return apiError(`File type "${file.type}" is not allowed. Use JPEG, PNG, or PDF.`, 400);
-    }
-
-    const employee = await db.employee.findUnique({ where: { id: employeeId as string } });
-    if (!employee) {
-      return apiError("Employee not found", 404);
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const { filePath } = await saveUploadedFile(buffer, file.name);
-
-    const doc = await db.employeeDocument.create({
-      data: {
-        employeeId: employeeId as string,
-        docType,
-        fileName: file.name,
-        filePath,
-        mimeType: file.type,
-        uploadedBy: session.userId,
-      },
+    const doc = await saveDocumentForEmployee({
+      employeeId: employeeId as string,
+      file,
+      docType,
+      uploadedBy: session.userId,
+      allowedDocTypes: ALLOWED_DOC_TYPES,
     });
 
     await logAudit({ session, action: "create", entity: "EmployeeDocument", entityId: doc.id, details: { docType } });
 
     return NextResponse.json({ data: doc }, { status: 201 });
   } catch (error) {
+    if (error instanceof DocumentUploadError) {
+      return apiError(error.message, error.status);
+    }
     return handleApiError(error, "upload document");
   }
 }

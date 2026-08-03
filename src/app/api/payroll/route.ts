@@ -124,11 +124,12 @@ export async function POST(request: NextRequest) {
       .map((s) => parseInt(s.trim(), 10))
       .filter((n) => !isNaN(n) && n >= 0 && n <= 6);
 
-    // 2. Get all active employees (no dateOfExit) for that company
+    // 2. Get all active employees (no dateOfExit, not mid-self-onboarding) for that company
     const employees = await db.employee.findMany({
       where: {
         companyId: company.id,
         dateOfExit: null,
+        onboardingStatus: "active",
       },
       include: {
         salaryStructure: true,

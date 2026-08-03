@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 
-// Routes reachable without a session: login/logout/session-check itself, and the
-// bootstrap seed endpoint (which enforces its own confirm-token + admin/first-run check).
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/seed"];
+// Routes reachable without a session: login/logout/session-check itself, the bootstrap seed
+// endpoint (which enforces its own confirm-token + admin/first-run check), and the
+// self-onboarding token routes (which verify the token themselves — see
+// src/lib/onboarding-invite.ts). The trailing slash on the onboarding-invite prefix is
+// load-bearing: it must NOT also match the plural admin-only "/api/onboarding-invites" list —
+// startsWith requires an exact character match, and "s" != "/" at that position, so the admin
+// routes stay behind the normal session check below.
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/seed", "/api/onboarding-invite/"];
 // Root health check has no sensitive data.
 const PUBLIC_EXACT = ["/api"];
 

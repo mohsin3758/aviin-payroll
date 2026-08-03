@@ -144,6 +144,7 @@ interface Employee {
   client: string | null
   state: string
   employmentType: string
+  onboardingStatus: string
   panNumber: string | null
   aadhaarNumber: string | null
   bankName: string | null
@@ -290,6 +291,7 @@ export default function EmployeesView() {
   const [deptFilter, setDeptFilter] = useState('all')
   const [stateFilter, setStateFilter] = useState('all')
   const [workLocationFilter, setWorkLocationFilter] = useState('all')
+  const [onboardingStatusFilter, setOnboardingStatusFilter] = useState('all')
   const [officeLocations, setOfficeLocations] = useState<{ id: string; name: string }[]>([])
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -378,6 +380,7 @@ export default function EmployeesView() {
       if (deptFilter && deptFilter !== 'all') params.set('department', deptFilter)
       if (stateFilter && stateFilter !== 'all') params.set('state', stateFilter)
       if (workLocationFilter && workLocationFilter !== 'all') params.set('workLocation', workLocationFilter)
+      if (onboardingStatusFilter && onboardingStatusFilter !== 'all') params.set('onboardingStatus', onboardingStatusFilter)
       params.set('page', String(page))
       params.set('limit', String(pageSize))
 
@@ -392,7 +395,7 @@ export default function EmployeesView() {
     } finally {
       setLoading(false)
     }
-  }, [search, deptFilter, stateFilter, workLocationFilter, page])
+  }, [search, deptFilter, stateFilter, workLocationFilter, onboardingStatusFilter, page])
 
   useEffect(() => {
     fetch('/api/office-locations').then((r) => r.json()).then((j) => setOfficeLocations(j.data ?? [])).catch(() => {})
@@ -400,7 +403,7 @@ export default function EmployeesView() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, deptFilter, stateFilter, workLocationFilter])
+  }, [search, deptFilter, stateFilter, workLocationFilter, onboardingStatusFilter])
 
   useEffect(() => {
     fetchEmployees()
@@ -702,6 +705,16 @@ export default function EmployeesView() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={onboardingStatusFilter} onValueChange={setOnboardingStatusFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All Employees" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employees</SelectItem>
+            <SelectItem value="active">Active Only</SelectItem>
+            <SelectItem value="onboarding">Onboarding Only</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Table (desktop) */}
@@ -742,7 +755,14 @@ export default function EmployeesView() {
                           </AvatarFallback>
                         </Avatar>
                         <div>
-                          <div className="font-medium">{getFullName(emp)}</div>
+                          <div className="font-medium flex items-center gap-1.5">
+                            {getFullName(emp)}
+                            {emp.onboardingStatus === 'onboarding' && (
+                              <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-transparent text-[10px] px-1.5 py-0">
+                                Onboarding
+                              </Badge>
+                            )}
+                          </div>
                           <div className="text-muted-foreground text-xs">{emp.email}</div>
                         </div>
                       </div>

@@ -4,6 +4,7 @@ import { createEmployeeSchema } from "@/lib/validations/employee";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { requireRole, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
+import { generateNextEmployeeCode } from "@/lib/employee-code";
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
     // "wfh" -> exemptFromGeofence employees; "default" -> no branch assigned, not WFH (head
     // office); any other value -> assigned to that specific OfficeLocation id.
     const workLocation = searchParams.get("workLocation");
+    const onboardingStatus = searchParams.get("onboardingStatus");
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10) || 20));
 
@@ -54,6 +56,10 @@ export async function GET(request: NextRequest) {
       } else if (workLocation) {
         where.officeLocationId = workLocation;
       }
+
+      if (onboardingStatus) {
+        where.onboardingStatus = onboardingStatus;
+      }
     }
 
     const [employees, total] = await Promise.all([
@@ -87,17 +93,7 @@ export async function POST(request: NextRequest) {
     const { salaryStructure: salaryStructureData, employeeCode, ...employeeData } = parsed;
 
     // Generate employeeCode if not provided
-    let code = employeeCode;
-    if (!code) {
-      const lastEmployee = await db.employee.findFirst({
-        orderBy: { createdAt: "desc" },
-        select: { employeeCode: true },
-      });
-      const lastNumber = lastEmployee
-        ? parseInt(lastEmployee.employeeCode.replace("EMP", ""), 10) || 0
-        : 0;
-      code = `EMP${String(lastNumber + 1).padStart(4, "0")}`;
-    }
+    const code = employeeCode || (await generateNextEmployeeCode());
 
     const companyId = await getDefaultCompanyId();
 

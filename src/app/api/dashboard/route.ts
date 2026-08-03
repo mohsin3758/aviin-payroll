@@ -53,9 +53,9 @@ export async function GET(request: NextRequest) {
       eligibleIncentives,
       probationEndingSoon,
     ] = await Promise.all([
-      // 1. Total active employees
+      // 1. Total active employees (excludes anyone still mid-self-onboarding, not yet reviewed)
       db.employee.count({
-        where: { dateOfExit: null },
+        where: { dateOfExit: null, onboardingStatus: "active" },
       }),
 
       // 2. Present today
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
       // 6. Department-wise employee count
       !isElevated ? Promise.resolve([]) : db.employee.groupBy({
         by: ["department"],
-        where: { dateOfExit: null },
+        where: { dateOfExit: null, onboardingStatus: "active" },
         _count: { department: true },
         orderBy: { _count: { department: "desc" } },
       }),
@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
       // 7. State-wise employee count
       !isElevated ? Promise.resolve([]) : db.employee.groupBy({
         by: ["state"],
-        where: { dateOfExit: null },
+        where: { dateOfExit: null, onboardingStatus: "active" },
         _count: { state: true },
         orderBy: { _count: { state: "desc" } },
       }),

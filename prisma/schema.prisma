@@ -190,6 +190,11 @@ model Employee {
   // "head office" location). Neither field changes anything for an employee left at defaults.
   exemptFromGeofence  Boolean  @default(false)
   officeLocationId    String?
+  // "active" (default, every existing employee) | "onboarding" (self-onboarding invite sent,
+  // not yet reviewed/approved by HR — excluded from payroll and Dashboard headcount, but still
+  // visible/manageable in the Employees list). Flipped to "active" by admin/hr approving the
+  // OnboardingInvite, never by the candidate themselves.
+  onboardingStatus    String   @default("active")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -220,6 +225,7 @@ model Employee {
   recruitedCandidates Candidate[]
   regularizations     AttendanceRegularizationRequest[]
   faceEnrollment      FaceEnrollment?
+  onboardingInvite    OnboardingInvite?
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
@@ -296,9 +302,39 @@ model Candidate {
   company         Company          @relation(fields: [companyId], references: [id])
   recruiter       Employee?        @relation(fields: [recruiterId], references: [id])
   hiringIncentive HiringIncentive?
+  onboardingInvites OnboardingInvite[]
 
   @@index([companyId])
   @@index([recruiterId])
+}
+
+// A self-service onboarding link sent to a new joiner. The Employee row it points to is
+// created immediately when the invite is sent (Employee.onboardingStatus starts "onboarding")
+// — this is the new joiner filling in and editing their own already-created profile, not a
+// standalone pre-employee record. The raw token is never persisted, only its hash; see
+// src/lib/onboarding-invite.ts.
+model OnboardingInvite {
+  id              String    @id @default(cuid())
+  employeeId      String    @unique
+  candidateId     String?
+  tokenHash       String    @unique
+  status          String    @default("sent") // sent|in_progress|submitted|approved|rejected|revoked
+  expiresAt       DateTime
+  sentAt          DateTime  @default(now())
+  resentAt        DateTime?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  employee        Employee   @relation(fields: [employeeId], references: [id])
+  candidate       Candidate? @relation(fields: [candidateId], references: [id])
+
+  @@index([status])
+  @@index([candidateId])
 }
 
 // A one-time cash payout to the recruiting employee for closing (placing) a candidate,
