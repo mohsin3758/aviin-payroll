@@ -7,6 +7,9 @@ import {
   CheckCircle2,
   FilterIcon,
   Leaf,
+  ListChecks,
+  Loader2,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
@@ -64,6 +67,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useSessionContext } from '@/hooks/session-context';
 
 // ---------- Types ----------
 
@@ -78,7 +83,12 @@ interface Employee {
 interface LeaveType {
   id: string;
   name: string;
-  code: string;
+  shortCode: string;
+  totalDays: number;
+  isCarryForward: boolean;
+  maxCarryForward: number;
+  isPaid: boolean;
+  active: boolean;
   [key: string]: unknown;
 }
 
@@ -103,12 +113,17 @@ interface LeaveBalance {
   employeeId: string;
   leaveTypeId: string;
   year: number;
-  allocated: number;
+  totalAllocated: number;
   used: number;
-  available: number;
-  carryForward: number;
+  carryForwarded: number;
   leaveType: LeaveType;
   [key: string]: unknown;
+}
+
+// GET /api/leaves/balance returns raw totalAllocated/carryForwarded/used — "available" isn't a
+// stored field anywhere, it's always derived at read time.
+function availableDays(b: LeaveBalance): number {
+  return b.totalAllocated + b.carryForwarded - b.used;
 }
 
 // ---------- Helpers ----------
@@ -184,6 +199,8 @@ const statusConfig: Record<
 
 export default function LeavesView() {
   const { refreshKey, selectedEmployeeId } = usePayrollStore();
+  const { user } = useSessionContext();
+  const canManageLeavePolicy = user?.role === 'admin' || user?.role === 'hr';
 
   // ---- Data state ----
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -191,6 +208,37 @@ export default function LeavesView() {
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [allBalances, setAllBalances] = useState<LeaveBalance[]>([]);
+
+  // ---- Leave Types management (admin/hr) ----
+  const [adminLeaveTypes, setAdminLeaveTypes] = useState<LeaveType[]>([]);
+  const [loadingAdminLeaveTypes, setLoadingAdminLeaveTypes] = useState(true);
+  const [editingLeaveType, setEditingLeaveType] = useState<LeaveType | null>(null);
+  const [leaveTypeDialogOpen, setLeaveTypeDialogOpen] = useState(false);
+  const [ltName, setLtName] = useState('');
+  const [ltShortCode, setLtShortCode] = useState('');
+  const [ltTotalDays, setLtTotalDays] = useState('');
+  const [ltIsPaid, setLtIsPaid] = useState(true);
+  const [ltIsCarryForward, setLtIsCarryForward] = useState(true);
+  const [ltMaxCarryForward, setLtMaxCarryForward] = useState('');
+  const [ltActive, setLtActive] = useState(true);
+  const [savingLeaveType, setSavingLeaveType] = useState(false);
+
+  const [allocatingLeaveType, setAllocatingLeaveType] = useState<LeaveType | null>(null);
+  const [allocateYear, setAllocateYear] = useState(String(new Date().getFullYear()));
+  const [allocating, setAllocating] = useState(false);
+
+  // ---- Leave Balance manual management (admin/hr) ----
+  const [balanceDialogOpen, setBalanceDialogOpen] = useState(false);
+  const [editingBalance, setEditingBalance] = useState<LeaveBalance | null>(null);
+  const [balEmployeeId, setBalEmployeeId] = useState('');
+  const [balLeaveTypeId, setBalLeaveTypeId] = useState('');
+  const [balYear, setBalYear] = useState(String(new Date().getFullYear()));
+  const [balTotalAllocated, setBalTotalAllocated] = useState('');
+  const [balCarryForwarded, setBalCarryForwarded] = useState('');
+  const [balUsed, setBalUsed] = useState('');
+  const [balReason, setBalReason] = useState('');
+  const [savingBalance, setSavingBalance] = useState(false);
+  const [deletingBalanceId, setDeletingBalanceId] = useState<string | null>(null);
 
   // ---- Loading state ----
   const [loadingEmployees, setLoadingEmployees] = useState(true);
@@ -351,6 +399,210 @@ export default function LeavesView() {
       fetchAllBalances();
     }
   }, [employees, fetchAllBalances, refreshKey]);
+
+  // ---- Leave Types management (admin/hr) ----
+  const fetchAdminLeaveTypes = useCallback(async () => {
+    setLoadingAdminLeaveTypes(true);
+    try {
+      const res = await fetch('/api/leave-types?includeInactive=1');
+      if (!res.ok) throw new Error('Failed to fetch leave types');
+      const json = await res.json();
+      setAdminLeaveTypes(json.data ?? []);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to load leave types');
+    } finally {
+      setLoadingAdminLeaveTypes(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdminLeaveTypes();
+  }, [fetchAdminLeaveTypes, refreshKey]);
+
+  const resetLeaveTypeForm = useCallback(() => {
+    setLtName('');
+    setLtShortCode('');
+    setLtTotalDays('');
+    setLtIsPaid(true);
+    setLtIsCarryForward(true);
+    setLtMaxCarryForward('');
+    setLtActive(true);
+  }, []);
+
+  const openAddLeaveType = () => {
+    setEditingLeaveType(null);
+    resetLeaveTypeForm();
+    setLeaveTypeDialogOpen(true);
+  };
+
+  const openEditLeaveType = (lt: LeaveType) => {
+    setEditingLeaveType(lt);
+    setLtName(lt.name);
+    setLtShortCode(lt.shortCode);
+    setLtTotalDays(String(lt.totalDays));
+    setLtIsPaid(lt.isPaid);
+    setLtIsCarryForward(lt.isCarryForward);
+    setLtMaxCarryForward(String(lt.maxCarryForward));
+    setLtActive(lt.active);
+    setLeaveTypeDialogOpen(true);
+  };
+
+  const handleSaveLeaveType = async () => {
+    if (!ltName.trim() || !ltShortCode.trim() || !ltTotalDays) {
+      toast.error('Name, short code, and annual days are required.');
+      return;
+    }
+    setSavingLeaveType(true);
+    try {
+      const payload = {
+        name: ltName.trim(),
+        shortCode: ltShortCode.trim().toUpperCase(),
+        totalDays: Number(ltTotalDays),
+        isPaid: ltIsPaid,
+        isCarryForward: ltIsCarryForward,
+        maxCarryForward: ltIsCarryForward ? Number(ltMaxCarryForward) || 0 : 0,
+        ...(editingLeaveType ? { active: ltActive } : {}),
+      };
+      const res = await fetch(
+        editingLeaveType ? `/api/leave-types/${editingLeaveType.id}` : '/api/leave-types',
+        {
+          method: editingLeaveType ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save leave type');
+      toast.success(editingLeaveType ? 'Leave type updated' : `Leave type "${payload.name}" created`);
+      setLeaveTypeDialogOpen(false);
+      fetchAdminLeaveTypes();
+      fetchLeaveTypes();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save leave type');
+    } finally {
+      setSavingLeaveType(false);
+    }
+  };
+
+  const handleAllocate = async () => {
+    if (!allocatingLeaveType) return;
+    setAllocating(true);
+    try {
+      const res = await fetch(`/api/leave-types/${allocatingLeaveType.id}/allocate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: Number(allocateYear) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to allocate balances');
+      toast.success(
+        `${data.allocated} allocated, ${data.skipped} already existed${data.failed ? `, ${data.failed} failed` : ''} for ${allocatingLeaveType.name} — ${allocateYear}.`
+      );
+      setAllocatingLeaveType(null);
+      fetchAllBalances();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to allocate balances');
+    } finally {
+      setAllocating(false);
+    }
+  };
+
+  // ---- Leave Balance manual management (admin/hr) ----
+  const resetBalanceForm = useCallback(() => {
+    setBalEmployeeId('');
+    setBalLeaveTypeId('');
+    setBalYear(String(new Date().getFullYear()));
+    setBalTotalAllocated('');
+    setBalCarryForwarded('');
+    setBalUsed('');
+    setBalReason('');
+  }, []);
+
+  const openAddBalance = () => {
+    setEditingBalance(null);
+    resetBalanceForm();
+    setBalanceDialogOpen(true);
+  };
+
+  const openEditBalance = (b: LeaveBalance) => {
+    setEditingBalance(b);
+    setBalTotalAllocated(String(b.totalAllocated));
+    setBalCarryForwarded(String(b.carryForwarded));
+    setBalUsed(String(b.used));
+    setBalReason('');
+    setBalanceDialogOpen(true);
+  };
+
+  const handleSaveBalance = async () => {
+    setSavingBalance(true);
+    try {
+      if (editingBalance) {
+        if (!balReason.trim()) {
+          toast.error('A reason is required when adjusting a balance.');
+          setSavingBalance(false);
+          return;
+        }
+        const res = await fetch(`/api/leave-balances/${editingBalance.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            totalAllocated: Number(balTotalAllocated),
+            carryForwarded: Number(balCarryForwarded),
+            used: Number(balUsed),
+            reason: balReason.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update balance');
+        toast.success('Balance updated');
+      } else {
+        if (!balEmployeeId || !balLeaveTypeId || !balTotalAllocated) {
+          toast.error('Employee, leave type, and total allocated are required.');
+          setSavingBalance(false);
+          return;
+        }
+        const res = await fetch('/api/leave-balances', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employeeId: balEmployeeId,
+            leaveTypeId: balLeaveTypeId,
+            year: Number(balYear),
+            totalAllocated: Number(balTotalAllocated),
+            carryForwarded: Number(balCarryForwarded) || 0,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to create balance');
+        toast.success('Balance created');
+      }
+      setBalanceDialogOpen(false);
+      fetchAllBalances();
+      fetchBalances();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save balance');
+    } finally {
+      setSavingBalance(false);
+    }
+  };
+
+  const handleDeleteBalance = async (b: LeaveBalance) => {
+    if (!confirm(`Delete this ${b.leaveType.name} balance? This cannot be undone.`)) return;
+    setDeletingBalanceId(b.id);
+    try {
+      const res = await fetch(`/api/leave-balances/${b.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete balance');
+      toast.success('Balance deleted');
+      fetchAllBalances();
+      fetchBalances();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete balance');
+    } finally {
+      setDeletingBalanceId(null);
+    }
+  };
 
   // ---- Form reset ----
   const resetForm = useCallback(() => {
@@ -555,14 +807,15 @@ export default function LeavesView() {
           ) : balances.length > 0 ? (
             <div className="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:overflow-x-visible">
               {balances.map((b) => {
+                const available = availableDays(b);
                 const pct =
-                  b.allocated > 0
-                    ? Math.round((b.available / b.allocated) * 100)
+                  b.totalAllocated > 0
+                    ? Math.round((available / b.totalAllocated) * 100)
                     : 0;
                 return (
                   <Card
                     key={b.id}
-                    className={`min-w-[200px] flex-shrink-0 border-l-4 ${getBalanceBorderColor(b.available, b.allocated)}`}
+                    className={`min-w-[200px] flex-shrink-0 border-l-4 ${getBalanceBorderColor(available, b.totalAllocated)}`}
                   >
                     <CardHeader className="pb-0 pt-4 px-4">
                       <div className="flex items-center justify-between">
@@ -570,27 +823,27 @@ export default function LeavesView() {
                           {b.leaveType.name}
                         </CardTitle>
                         <Badge variant="outline" className="text-[10px] font-mono">
-                          {b.leaveType.code}
+                          {b.leaveType.shortCode}
                         </Badge>
                       </div>
                     </CardHeader>
                     <CardContent className="px-4 pb-4 pt-2">
                       <div className="mb-2 flex items-baseline justify-between">
-                        <span className={`text-2xl font-bold ${getBalanceColor(b.available, b.allocated)}`}>
-                          {b.available}
+                        <span className={`text-2xl font-bold ${getBalanceColor(available, b.totalAllocated)}`}>
+                          {available}
                         </span>
                         <span className="text-xs text-muted-foreground">
-                          of {b.allocated} days
+                          of {b.totalAllocated} days
                         </span>
                       </div>
                       <Progress
                         value={pct}
-                        className={`h-2 mb-2 ${getProgressColor(b.available, b.allocated)}`}
+                        className={`h-2 mb-2 ${getProgressColor(available, b.totalAllocated)}`}
                       />
                       <div className="flex justify-between text-xs text-muted-foreground">
                         <span>Used: {b.used}</span>
-                        {b.carryForward > 0 && (
-                          <span>Carry Fwd: {b.carryForward}</span>
+                        {b.carryForwarded > 0 && (
+                          <span>Carry Fwd: {b.carryForwarded}</span>
                         )}
                       </div>
                     </CardContent>
@@ -620,6 +873,12 @@ export default function LeavesView() {
             <Search className="mr-1.5 size-4" />
             Employee Balances
           </TabsTrigger>
+          {canManageLeavePolicy && (
+            <TabsTrigger value="types">
+              <ListChecks className="mr-1.5 size-4" />
+              Leave Types
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ---- Applications Tab ---- */}
@@ -681,7 +940,7 @@ export default function LeavesView() {
                                 variant="outline"
                                 className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800"
                               >
-                                {app.leaveType.code}
+                                {app.leaveType.shortCode}
                               </Badge>
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-sm">
@@ -752,13 +1011,21 @@ export default function LeavesView() {
         {/* ---- Employee Balances Tab ---- */}
         <TabsContent value="balances">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                Leave Balances — All Employees
-              </CardTitle>
-              <CardDescription>
-                Year {currentYear} leave balance overview
-              </CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-base">
+                  Leave Balances — All Employees
+                </CardTitle>
+                <CardDescription>
+                  Year {currentYear} leave balance overview
+                </CardDescription>
+              </div>
+              {canManageLeavePolicy && (
+                <Button size="sm" className="gap-1.5" onClick={openAddBalance}>
+                  <Plus className="size-4" />
+                  Add Balance
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
               {loadingAllBalances ? (
@@ -783,35 +1050,58 @@ export default function LeavesView() {
                         <TableHead className="font-semibold text-right">Used</TableHead>
                         <TableHead className="font-semibold text-right">Available</TableHead>
                         <TableHead className="font-semibold text-right">Carry Forward</TableHead>
+                        {canManageLeavePolicy && <TableHead className="font-semibold text-right">Actions</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {allBalances.map((b) => (
-                        <TableRow key={b.id}>
-                          <TableCell className="font-medium whitespace-nowrap">
-                            {getEmployeeName(b.employeeId)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800">
-                              {b.leaveType.code}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {b.allocated}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">
-                            {b.used}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums font-medium">
-                            <span className={getBalanceColor(b.available, b.allocated)}>
-                              {b.available}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {b.carryForward > 0 ? b.carryForward : '—'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {allBalances.map((b) => {
+                        const available = availableDays(b);
+                        return (
+                          <TableRow key={b.id}>
+                            <TableCell className="font-medium whitespace-nowrap">
+                              {getEmployeeName(b.employeeId)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800">
+                                {b.leaveType.shortCode}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {b.totalAllocated}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {b.used}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums font-medium">
+                              <span className={getBalanceColor(available, b.totalAllocated)}>
+                                {available}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {b.carryForwarded > 0 ? b.carryForwarded : '—'}
+                            </TableCell>
+                            {canManageLeavePolicy && (
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditBalance(b)}>
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-red-500 hover:text-red-700 disabled:opacity-30"
+                                    disabled={b.used > 0 || deletingBalanceId === b.id}
+                                    title={b.used > 0 ? 'Cannot delete — leave has already been used against this balance' : 'Delete'}
+                                    onClick={() => handleDeleteBalance(b)}
+                                  >
+                                    {deletingBalanceId === b.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -819,7 +1109,241 @@ export default function LeavesView() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* ---- Leave Types Tab (admin/hr only) ---- */}
+        {canManageLeavePolicy && (
+          <TabsContent value="types">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base">Leave Types</CardTitle>
+                  <CardDescription>
+                    Configure the leave policies employees can apply against — annual entitlement, paid/unpaid, and carry-forward rules.
+                  </CardDescription>
+                </div>
+                <Button size="sm" className="gap-1.5" onClick={openAddLeaveType}>
+                  <Plus className="size-4" />
+                  Add Leave Type
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {loadingAdminLeaveTypes ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-12 w-full" />
+                    ))}
+                  </div>
+                ) : adminLeaveTypes.length === 0 ? (
+                  <div className="py-12 text-center text-muted-foreground">
+                    <ListChecks className="mx-auto mb-2 size-10 opacity-40" />
+                    <p className="text-sm">No leave types configured yet.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/50">
+                          <TableHead className="font-semibold">Name</TableHead>
+                          <TableHead className="font-semibold">Code</TableHead>
+                          <TableHead className="font-semibold text-right">Annual Days</TableHead>
+                          <TableHead className="font-semibold">Carry Forward</TableHead>
+                          <TableHead className="font-semibold">Paid</TableHead>
+                          <TableHead className="font-semibold">Status</TableHead>
+                          <TableHead className="font-semibold text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {adminLeaveTypes.map((lt) => (
+                          <TableRow key={lt.id} className={!lt.active ? 'opacity-50' : ''}>
+                            <TableCell className="font-medium">{lt.name}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="font-mono text-[10px]">{lt.shortCode}</Badge>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{lt.totalDays}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {lt.isCarryForward ? `Up to ${lt.maxCarryForward}` : 'No'}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{lt.isPaid ? 'Paid' : 'Unpaid'}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={lt.active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600 border-gray-200'}>
+                                {lt.active ? 'Active' : 'Inactive'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => setAllocatingLeaveType(lt)}>
+                                  Allocate
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditLeaveType(lt)}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
+
+      {/* ========== ADD/EDIT LEAVE TYPE DIALOG ========== */}
+      <Dialog open={leaveTypeDialogOpen} onOpenChange={(open) => { if (!open) setLeaveTypeDialogOpen(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingLeaveType ? 'Edit Leave Type' : 'Add Leave Type'}</DialogTitle>
+            <DialogDescription>
+              {editingLeaveType
+                ? 'Changes here only affect future allocations — existing employee balances are untouched.'
+                : 'Add a new leave policy (e.g. Sick Leave, Earned Leave). Employees will need a balance allocated before they can apply.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Name</Label>
+                <Input value={ltName} onChange={(e) => setLtName(e.target.value)} placeholder="e.g. Earned Leave" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Short Code</Label>
+                <Input value={ltShortCode} onChange={(e) => setLtShortCode(e.target.value)} placeholder="e.g. EL" maxLength={10} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Annual Entitlement (days)</Label>
+              <Input type="number" min={0} step={0.5} value={ltTotalDays} onChange={(e) => setLtTotalDays(e.target.value)} />
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={ltIsPaid} onCheckedChange={(v) => setLtIsPaid(!!v)} />
+              Paid leave
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={ltIsCarryForward} onCheckedChange={(v) => setLtIsCarryForward(!!v)} />
+              Allow carry-forward to next year
+            </label>
+            {ltIsCarryForward && (
+              <div className="space-y-1.5">
+                <Label>Max Carry-Forward (days)</Label>
+                <Input type="number" min={0} step={0.5} value={ltMaxCarryForward} onChange={(e) => setLtMaxCarryForward(e.target.value)} />
+              </div>
+            )}
+            {editingLeaveType && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox checked={ltActive} onCheckedChange={(v) => setLtActive(!!v)} />
+                Active (visible for new applications/allocations)
+              </label>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLeaveTypeDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveLeaveType} disabled={savingLeaveType} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingLeaveType ? <Loader2 className="size-4 animate-spin" /> : null}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========== ALLOCATE DIALOG ========== */}
+      <Dialog open={!!allocatingLeaveType} onOpenChange={(open) => { if (!open) setAllocatingLeaveType(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Allocate {allocatingLeaveType?.name}</DialogTitle>
+            <DialogDescription>
+              Creates a balance for every active employee who doesn&apos;t already have one for the chosen year — pro-rated for anyone who joined mid-year, with carry-forward rolled in from the prior year automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Year</Label>
+            <Input type="number" value={allocateYear} onChange={(e) => setAllocateYear(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAllocatingLeaveType(null)}>Cancel</Button>
+            <Button onClick={handleAllocate} disabled={allocating} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {allocating ? <Loader2 className="size-4 animate-spin" /> : null}Allocate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========== ADD/EDIT BALANCE DIALOG ========== */}
+      <Dialog open={balanceDialogOpen} onOpenChange={(open) => { if (!open) setBalanceDialogOpen(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingBalance ? 'Adjust Leave Balance' : 'Add Leave Balance'}</DialogTitle>
+            <DialogDescription>
+              {editingBalance
+                ? `${getEmployeeName(editingBalance.employeeId)} — ${editingBalance.leaveType.name} (${editingBalance.year})`
+                : 'Manually create a balance for one employee — for new joiners or one-off corrections outside a bulk allocation.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {!editingBalance && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Employee</Label>
+                  <Select value={balEmployeeId} onValueChange={setBalEmployeeId}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Select employee…" /></SelectTrigger>
+                    <SelectContent>
+                      {employees.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>{e.firstName} {e.lastName} ({e.employeeCode})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Leave Type</Label>
+                    <Select value={balLeaveTypeId} onValueChange={setBalLeaveTypeId}>
+                      <SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectContent>
+                        {leaveTypes.map((lt) => (
+                          <SelectItem key={lt.id} value={lt.id}>{lt.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Year</Label>
+                    <Input type="number" value={balYear} onChange={(e) => setBalYear(e.target.value)} />
+                  </div>
+                </div>
+              </>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Total Allocated</Label>
+                <Input type="number" min={0} step={0.5} value={balTotalAllocated} onChange={(e) => setBalTotalAllocated(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Carry Forwarded</Label>
+                <Input type="number" min={0} step={0.5} value={balCarryForwarded} onChange={(e) => setBalCarryForwarded(e.target.value)} />
+              </div>
+            </div>
+            {editingBalance && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Used</Label>
+                  <Input type="number" min={0} step={0.5} value={balUsed} onChange={(e) => setBalUsed(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Reason for adjustment <span className="text-red-500">*</span></Label>
+                  <Textarea value={balReason} onChange={(e) => setBalReason(e.target.value)} rows={2} placeholder="e.g. correcting a leave cancelled outside the system" />
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBalanceDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveBalance} disabled={savingBalance} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingBalance ? <Loader2 className="size-4 animate-spin" /> : null}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ========== APPLY FOR LEAVE DIALOG ========== */}
       <Dialog open={applyOpen} onOpenChange={(open) => {
@@ -869,7 +1393,7 @@ export default function LeavesView() {
                 <SelectContent>
                   {leaveTypes.map((lt) => (
                     <SelectItem key={lt.id} value={lt.id}>
-                      {lt.name} ({lt.code})
+                      {lt.name} ({lt.shortCode})
                     </SelectItem>
                   ))}
                 </SelectContent>

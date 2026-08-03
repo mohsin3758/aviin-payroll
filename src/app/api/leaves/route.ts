@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
     // employee-specific — fine for every authenticated role, including employee).
     if (searchParams.has("types")) {
       const leaveTypes = await db.leaveType.findMany({
+        where: { active: true },
         orderBy: { name: "asc" },
       });
       return NextResponse.json(leaveTypes);

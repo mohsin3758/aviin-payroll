@@ -572,10 +572,14 @@ model LeaveType {
   id              String   @id @default(cuid())
   name            String // "Casual Leave", "Sick Leave", "Earned Leave", etc.
   shortCode       String // "CL", "SL", "EL"
-  totalDays       Float // annual entitlement
+  totalDays       Float // annual entitlement (policy default — allocated LeaveBalance rows are independent ledger entries, not derived live from this)
   isCarryForward  Boolean  @default(true)
   maxCarryForward Float    @default(0)
   isPaid          Boolean  @default(true)
+  // Soft-delete only — LeaveType has real leave history (LeaveBalance/LeaveApplication) that
+  // must never disappear, so "removing" a leave type always means deactivating it, never a hard
+  // delete. Defaults true so every existing seeded row is unaffected.
+  active          Boolean  @default(true)
   createdAt       DateTime @default(now())
 
   leaveBalances     LeaveBalance[]
