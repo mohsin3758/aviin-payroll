@@ -103,7 +103,6 @@ interface CompanySettings {
   payrollMonth: string;
   payrollYear: string;
   weeklyOffDays: number[];
-  optionalHolidayQuota: number;
 }
 
 interface Holiday {
@@ -112,7 +111,6 @@ interface Holiday {
   date: string;
   type: string;
   category: string;
-  _count?: { optionalPicks: number };
 }
 
 const HOLIDAY_CATEGORY_LABEL: Record<string, string> = {
@@ -230,7 +228,6 @@ export default function SettingsView() {
     payrollMonth: '',
     payrollYear: '',
     weeklyOffDays: [0],
-    optionalHolidayQuota: 0,
   });
 
   const fetchSettings = useCallback(async () => {
@@ -1928,22 +1925,6 @@ export default function SettingsView() {
             <p className="mt-1.5 text-xs text-muted-foreground">Saved along with the rest of Company Settings — click Save below.</p>
           </div>
 
-          {user?.role === 'admin' && (
-            <div className="max-w-xs space-y-1.5">
-              <Label className="text-xs font-medium">Restricted holidays per employee (quota)</Label>
-              <Input
-                type="number"
-                min={0}
-                max={20}
-                value={form.optionalHolidayQuota}
-                onChange={(e) => setForm((prev) => ({ ...prev, optionalHolidayQuota: Math.max(0, parseInt(e.target.value, 10) || 0) }))}
-              />
-              <p className="text-xs text-muted-foreground">
-                How many &quot;Restricted / Optional (RH)&quot; holidays each employee may pick per year. 0 = feature off. Saved along with the rest of Company Settings.
-              </p>
-            </div>
-          )}
-
           <Separator />
 
           {/* Holidays list */}
@@ -1988,7 +1969,7 @@ export default function SettingsView() {
               <Badge variant="outline">National: {holidayTotals.byCategory.national ?? 0}</Badge>
               <Badge variant="outline">Festival: {holidayTotals.byCategory.festival ?? 0}</Badge>
               <Badge variant="outline">Other: {holidayTotals.byCategory.other ?? 0}</Badge>
-              <Badge variant="outline">Restricted/Optional: {holidayTotals.optionalCount}</Badge>
+              <Badge variant="outline">Optional (apply as leave): {holidayTotals.optionalCount}</Badge>
             </div>
 
             {user?.role !== 'employee' && (
@@ -2017,7 +1998,7 @@ export default function SettingsView() {
                   <SelectTrigger className="sm:w-[180px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="holiday">Mandatory</SelectItem>
-                    <SelectItem value="optional">Restricted / Optional (RH)</SelectItem>
+                    <SelectItem value="optional">Optional (employee applies as leave if taken)</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button size="sm" onClick={handleAddHoliday} disabled={addingHoliday} className="gap-1.5">
@@ -2042,9 +2023,7 @@ export default function SettingsView() {
                       </span>
                       <Badge variant="outline" className="ml-2 text-[10px]">{HOLIDAY_CATEGORY_LABEL[h.category] ?? 'Other'}</Badge>
                       {h.type === 'optional' && (
-                        <Badge variant="outline" className="ml-2 text-[10px]">
-                          Restricted/Optional{h._count ? ` — ${h._count.optionalPicks} picked` : ''}
-                        </Badge>
+                        <Badge variant="outline" className="ml-2 text-[10px]">Optional</Badge>
                       )}
                     </div>
                     {user?.role !== 'employee' && (
@@ -2090,7 +2069,7 @@ export default function SettingsView() {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="holiday">Mandatory</SelectItem>
-                  <SelectItem value="optional">Restricted / Optional (RH)</SelectItem>
+                  <SelectItem value="optional">Optional (employee applies as leave if taken)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

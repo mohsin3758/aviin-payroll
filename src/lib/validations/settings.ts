@@ -29,8 +29,6 @@ export const updateSettingsSchema = z.object({
   payrollYear: z.coerce.number().int().min(2000).max(2100).optional(),
   // Array of day-of-week numbers (0=Sunday..6=Saturday) that are paid non-working days every week.
   weeklyOffDays: z.array(z.coerce.number().int().min(0).max(6)).max(7).optional(),
-  // Max Restricted/Optional holidays each employee may choose per year (0 = feature off).
-  optionalHolidayQuota: z.coerce.number().int().min(0).max(20).optional(),
   smtpHost: z.string().trim().max(200).nullable().optional(),
   smtpPort: z.coerce.number().int().min(1).max(65535).nullable().optional(),
   smtpSecure: z.boolean().optional(),

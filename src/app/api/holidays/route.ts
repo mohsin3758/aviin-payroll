@@ -35,7 +35,6 @@ export async function GET(request: NextRequest) {
     const holidays = await db.holiday.findMany({
       where,
       orderBy: { date: "asc" },
-      include: { _count: { select: { optionalPicks: true } } },
     });
 
     return NextResponse.json({ data: holidays });

@@ -77,6 +77,10 @@ export default function MyPortalView() {
   const { refreshKey } = usePayrollStore();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
+  const [activeTab, setActiveTab] = useState('profile');
+  // Set by HolidaysTab's "Apply as Leave" button, consumed once by LeavesTab to pre-open its
+  // Apply dialog with that date — a one-shot handoff between two independent sibling tabs.
+  const [leavePrefillDate, setLeavePrefillDate] = useState<string | null>(null);
 
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
@@ -113,7 +117,7 @@ export default function MyPortalView() {
       ) : !profile ? (
         <Card><CardContent className="py-16 text-center text-muted-foreground">Could not load your profile.</CardContent></Card>
       ) : (
-        <Tabs defaultValue="profile">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="flex flex-wrap h-auto">
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="documents">Documents</TabsTrigger>
@@ -133,8 +137,12 @@ export default function MyPortalView() {
           <TabsContent value="profile" className="space-y-6"><ProfileTab profile={profile} onSaved={fetchProfile} /></TabsContent>
           <TabsContent value="documents" className="space-y-6"><DocumentsTab employeeId={profile.id} /></TabsContent>
           <TabsContent value="attendance" className="space-y-6"><AttendanceTab /></TabsContent>
-          <TabsContent value="leaves" className="space-y-6"><LeavesTab /></TabsContent>
-          <TabsContent value="holidays" className="space-y-6"><HolidaysTab /></TabsContent>
+          <TabsContent value="leaves" className="space-y-6">
+            <LeavesTab prefillDate={leavePrefillDate} onPrefillConsumed={() => setLeavePrefillDate(null)} />
+          </TabsContent>
+          <TabsContent value="holidays" className="space-y-6">
+            <HolidaysTab onApplyAsLeave={(date) => { setLeavePrefillDate(date); setActiveTab('leaves'); }} />
+          </TabsContent>
           <TabsContent value="payslip" className="space-y-6"><PayslipTab /></TabsContent>
           <TabsContent value="form16" className="space-y-6"><Form16Tab /></TabsContent>
           <TabsContent value="loans" className="space-y-6"><LoansTab /></TabsContent>
@@ -1145,7 +1153,7 @@ function FaceEnrollmentCard() {
 interface LeaveBalanceRow { id: string; leaveType: { id: string; name: string; shortCode: string }; totalAllocated: number; used: number; carryForwarded: number; }
 interface LeaveAppRow { id: string; leaveType: { name: string }; startDate: string; endDate: string; totalDays: number; status: string; reason: string | null; }
 
-function LeavesTab() {
+function LeavesTab({ prefillDate, onPrefillConsumed }: { prefillDate?: string | null; onPrefillConsumed?: () => void } = {}) {
   const [balances, setBalances] = useState<LeaveBalanceRow[]>([]);
   const [applications, setApplications] = useState<LeaveAppRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1155,6 +1163,16 @@ function LeavesTab() {
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
   const [applying, setApplying] = useState(false);
+
+  // Arrived from Holidays tab's "Apply as Leave" — open the dialog pre-filled with that date,
+  // then hand back control so a later visit here doesn't keep re-triggering it.
+  useEffect(() => {
+    if (!prefillDate) return;
+    setStartDate(prefillDate);
+    setEndDate(prefillDate);
+    setApplyOpen(true);
+    onPrefillConsumed?.();
+  }, [prefillDate, onPrefillConsumed]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -1280,34 +1298,25 @@ interface HolidayRow {
   date: string;
   type: string;
   category: string;
-  chosenByMe?: boolean;
 }
 
-function HolidaysTab() {
+function HolidaysTab({ onApplyAsLeave }: { onApplyAsLeave?: (date: string) => void } = {}) {
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
-  const [quota, setQuota] = useState(0);
-  const [chosenCount, setChosenCount] = useState(0);
   const [weeklyOffLabel, setWeeklyOffLabel] = useState('');
   const [periodMode, setPeriodMode] = useState<'calendar' | 'fy'>('calendar');
   const [periodYear, setPeriodYear] = useState(() => new Date().getFullYear());
   const [loading, setLoading] = useState(true);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const query = periodMode === 'fy' ? `fyStartYear=${periodYear}` : `year=${periodYear}`;
-      const [holidaysRes, optionalRes, settingsRes] = await Promise.all([
+      const [holidaysRes, settingsRes] = await Promise.all([
         fetch(`/api/holidays?${query}`),
-        fetch(`/api/ess/optional-holidays?${query}`),
         fetch('/api/settings'),
       ]);
       const holidaysJson = await holidaysRes.json();
-      const optionalJson = await optionalRes.json();
-      const chosenIds = new Set((optionalJson.data ?? []).filter((h: HolidayRow) => h.chosenByMe).map((h: HolidayRow) => h.id));
-      setHolidays((holidaysJson.data ?? []).map((h: HolidayRow) => ({ ...h, chosenByMe: chosenIds.has(h.id) })));
-      setQuota(optionalJson.quota ?? 0);
-      setChosenCount(optionalJson.chosenCount ?? 0);
+      setHolidays(holidaysJson.data ?? []);
 
       const settingsJson = await settingsRes.json();
       const days: number[] = settingsJson.data?.weeklyOffDays ?? [];
@@ -1320,26 +1329,6 @@ function HolidaysTab() {
   }, [periodMode, periodYear]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
-
-  const handleTogglePick = async (holiday: HolidayRow) => {
-    const choose = !holiday.chosenByMe;
-    setTogglingId(holiday.id);
-    try {
-      const res = await fetch('/api/ess/optional-holidays', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ holidayId: holiday.id, choose }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update your choice');
-      toast.success(choose ? `You've chosen ${holiday.name}` : `Removed ${holiday.name} from your picks`);
-      fetchAll();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update your choice');
-    } finally {
-      setTogglingId(null);
-    }
-  };
 
   if (loading) return <Skeleton className="h-64 w-full" />;
 
@@ -1386,6 +1375,7 @@ function HolidaysTab() {
         <CardContent className="space-y-6">
           <div>
             <p className="text-xs font-medium text-muted-foreground mb-2">Mandatory Holidays ({mandatoryHolidays.length})</p>
+            <p className="text-xs text-muted-foreground mb-2">Paid company-wide — no application needed.</p>
             {mandatoryHolidays.length === 0 ? (
               <p className="text-sm text-muted-foreground py-2">No mandatory holidays configured for this period.</p>
             ) : (
@@ -1403,36 +1393,37 @@ function HolidaysTab() {
             )}
           </div>
 
-          {quota > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-medium text-muted-foreground">Restricted / Optional Holidays</p>
-                <Badge variant="secondary">{chosenCount} of {quota} chosen</Badge>
-              </div>
-              {optionalHolidays.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-2">No restricted holidays configured for this period.</p>
-              ) : (
-                <div className="divide-y rounded-lg border">
-                  {optionalHolidays.map((h) => (
-                    <label key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm cursor-pointer">
-                      <div className="flex items-center gap-3">
-                        <Checkbox
-                          checked={!!h.chosenByMe}
-                          disabled={togglingId === h.id || (!h.chosenByMe && chosenCount >= quota)}
-                          onCheckedChange={() => handleTogglePick(h)}
-                        />
-                        <span className="font-medium">{h.name}</span>
-                      </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-2">Optional / Festival Holidays ({optionalHolidays.length})</p>
+            <p className="text-xs text-muted-foreground mb-2">
+              Not automatically paid — if you want one of these days off, apply it as leave against your own Earned, Casual, or Sick Leave balance.
+            </p>
+            {optionalHolidays.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2">No optional holidays configured for this period.</p>
+            ) : (
+              <div className="divide-y rounded-lg border">
+                {optionalHolidays.map((h) => (
+                  <div key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                    <span className="font-medium">{h.name}</span>
+                    <div className="flex items-center gap-3">
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <span>{fmtDate(h.date)}</span>
                         <Badge variant="outline" className="text-[10px]">{HOLIDAY_CATEGORY_LABEL[h.category] ?? 'Other'}</Badge>
                       </div>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => onApplyAsLeave?.(h.date.slice(0, 10))}
+                      >
+                        Apply as Leave
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </>

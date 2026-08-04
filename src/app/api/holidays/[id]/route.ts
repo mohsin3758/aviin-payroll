@@ -54,7 +54,6 @@ export async function DELETE(
       return apiError("Holiday not found", 404);
     }
 
-    await db.optionalHolidayPick.deleteMany({ where: { holidayId: id } });
     await db.holiday.delete({ where: { id } });
 
     await logAudit({

@@ -354,13 +354,10 @@ async function handleAttendanceReport(month: number, year: number, format: Repor
   const daysInMonth = getDaysInMonth(month, year);
   const monthStart = new Date(Date.UTC(year, month - 1, 1));
   const monthEnd = new Date(Date.UTC(year, month, 1));
-  const holidays = await db.holiday.findMany({ where: { companyId: company.id, date: { gte: monthStart, lt: monthEnd } } });
-  // Same mandatory/optional split as payroll (src/app/api/payroll/route.ts) so this report can
-  // never disagree with what employees are actually paid for.
-  const mandatoryHolidays = holidays.filter((h) => h.type !== "optional");
-  const optionalHolidays = holidays.filter((h) => h.type === "optional");
-  const holidayDateKeys = new Set(mandatoryHolidays.map((h) => h.date.toISOString().slice(0, 10)));
-  const optionalHolidayDateById = new Map(optionalHolidays.map((h) => [h.id, h.date.toISOString().slice(0, 10)]));
+  // Only mandatory holidays auto-credit — same rule as payroll (src/app/api/payroll/route.ts)
+  // so this report can never disagree with what employees are actually paid for.
+  const holidays = await db.holiday.findMany({ where: { companyId: company.id, date: { gte: monthStart, lt: monthEnd }, type: { not: "optional" } } });
+  const holidayDateKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
   const weeklyOffDays = company.weeklyOffDays
     .split(",")
     .map((s) => parseInt(s.trim(), 10))
@@ -379,24 +376,6 @@ async function handleAttendanceReport(month: number, year: number, format: Repor
     },
   });
 
-  const employeeOptionalDateKeys = new Map<string, Set<string>>();
-  if (optionalHolidays.length > 0) {
-    const picks = await db.optionalHolidayPick.findMany({
-      where: {
-        holidayId: { in: optionalHolidays.map((h) => h.id) },
-        employeeId: { in: employees.map((e) => e.id) },
-      },
-    });
-    for (const pick of picks) {
-      const dateKey = optionalHolidayDateById.get(pick.holidayId);
-      if (!dateKey) continue;
-      if (!employeeOptionalDateKeys.has(pick.employeeId)) {
-        employeeOptionalDateKeys.set(pick.employeeId, new Set());
-      }
-      employeeOptionalDateKeys.get(pick.employeeId)!.add(dateKey);
-    }
-  }
-
   const rows = employees.map((emp) => {
     const { presentDays, absentDays, halfDays, overtimeHours } = computeMonthlyAttendance(
       emp.attendance,
@@ -404,8 +383,7 @@ async function handleAttendanceReport(month: number, year: number, format: Repor
       month,
       year,
       holidayDateKeys,
-      weeklyOffDays,
-      employeeOptionalDateKeys.get(emp.id)
+      weeklyOffDays
     );
     return {
       employeeId: emp.id,

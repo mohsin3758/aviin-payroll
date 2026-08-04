@@ -77,10 +77,6 @@ model Company {
   hiringIncentiveContractRate Float    @default(0)
   // Comma-separated day-of-week numbers that are paid non-working days every week: 0=Sunday..6=Saturday.
   weeklyOffDays               String   @default("0")
-  // Max number of Holiday rows with type "optional" each employee may choose (via
-  // OptionalHolidayPick) per year. Defaults to 0 — the Restricted/Optional-holiday feature is
-  // inert until an admin deliberately raises this, so existing deployments see no behavior change.
-  optionalHolidayQuota        Int      @default(0)
   // Admin-configured SMTP, set via Settings so a real deployment doesn't require VPS/env-var
   // access to enable email. Falls back to SMTP_* env vars, then to an Ethereal test inbox, if
   // unset. smtpPassword is stored in plaintext (no secrets-manager in this deployment) and is
@@ -124,23 +120,6 @@ model Company {
   holidays    Holiday[]
   bankFormats BankFormat[]
   candidates  Candidate[]
-}
-
-// One employee's choice of one specific "optional" (Restricted-Holiday) Holiday for the year.
-// Existence of a row means "this employee gets this date paid as present" — nothing is ever
-// auto-selected; an employee must explicitly pick it, up to Company.optionalHolidayQuota.
-model OptionalHolidayPick {
-  id         String   @id @default(cuid())
-  employeeId String
-  holidayId  String
-  year       Int
-  createdAt  DateTime @default(now())
-
-  employee Employee @relation(fields: [employeeId], references: [id])
-  holiday  Holiday  @relation(fields: [holidayId], references: [id])
-
-  @@unique([employeeId, holidayId])
-  @@index([employeeId, year])
 }
 
 // A named branch/office location employees can be individually assigned to for geofencing,
@@ -192,8 +171,7 @@ model Holiday {
   category  String   @default("other")
   createdAt DateTime @default(now())
 
-  company       Company               @relation(fields: [companyId], references: [id])
-  optionalPicks OptionalHolidayPick[]
+  company Company @relation(fields: [companyId], references: [id])
 
   @@unique([companyId, date])
   @@index([companyId, date])
@@ -253,7 +231,6 @@ model Employee {
   attendance             Attendance[]
   leaveApplications      LeaveApplication[]
   leaveBalances          LeaveBalance[]
-  optionalHolidayPicks   OptionalHolidayPick[]
   payrollDetails         PayrollDetail[]
   loans                  EmployeeLoan[]
   arrears                SalaryArrear[]

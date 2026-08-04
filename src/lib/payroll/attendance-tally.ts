@@ -27,12 +27,7 @@ export function computeMonthlyAttendance(
   month: number,
   year: number,
   holidayDateKeys: Set<string>,
-  weeklyOffDays: number[],
-  // Dates this specific employee gets auto-credited beyond the company-wide holiday/weekly-off
-  // set — used for Restricted/Optional holidays the employee has explicitly chosen via
-  // OptionalHolidayPick (see src/app/api/ess/optional-holidays/route.ts). Mandatory holidays
-  // stay in holidayDateKeys and apply to everyone the same as before.
-  additionalCreditedDateKeys: Set<string> = new Set()
+  weeklyOffDays: number[]
 ): MonthlyAttendanceResult {
   const attendanceByDate = new Map(attendanceRows.map((record) => [record.date.toISOString().slice(0, 10), record]));
 
@@ -58,7 +53,7 @@ export function computeMonthlyAttendance(
       if (record.totalHours && record.totalHours > STANDARD_HOURS_PER_DAY) {
         overtimeHours += record.totalHours - STANDARD_HOURS_PER_DAY;
       }
-    } else if (holidayDateKeys.has(dateKey) || weeklyOffDays.includes(dateObj.getUTCDay()) || additionalCreditedDateKeys.has(dateKey)) {
+    } else if (holidayDateKeys.has(dateKey) || weeklyOffDays.includes(dateObj.getUTCDay())) {
       presentDays += 1;
     } else {
       absentDays += 1;
