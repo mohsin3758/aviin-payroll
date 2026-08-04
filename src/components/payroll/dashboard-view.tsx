@@ -162,7 +162,8 @@ export default function DashboardView() {
     return () => { cancelled = true; };
   }, []);
 
-  const [upcomingHolidays, setUpcomingHolidays] = useState<{ id: string; name: string; date: string }[]>([]);
+  const [upcomingHolidays, setUpcomingHolidays] = useState<{ id: string; name: string; date: string; category?: string }[]>([]);
+  const [totalHolidaysThisYear, setTotalHolidaysThisYear] = useState(0);
   const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const [weeklyOffLabel, setWeeklyOffLabel] = useState('');
 
@@ -179,6 +180,7 @@ export default function DashboardView() {
         ]);
         const holidaysJson = await holidaysRes.json();
         const nextYearHolidaysJson = await nextYearHolidaysRes.json();
+        setTotalHolidaysThisYear((holidaysJson.data ?? []).length);
         const today = new Date();
         const upcoming = [...(holidaysJson.data ?? []), ...(nextYearHolidaysJson.data ?? [])]
           .filter((h: { date: string }) => new Date(h.date) >= new Date(today.toDateString()))
@@ -192,8 +194,32 @@ export default function DashboardView() {
         /* non-critical widget, fail silently */
       }
     })();
-     
+
   }, []);
+
+  // ---- My Leave Balance (only for sessions linked to an Employee record) ----
+  interface MyLeaveBalanceRow {
+    id: string;
+    totalAllocated: number;
+    used: number;
+    carryForwarded: number;
+    leaveType: { id: string; name: string; shortCode: string };
+  }
+  const [myLeaveBalances, setMyLeaveBalances] = useState<MyLeaveBalanceRow[]>([]);
+
+  useEffect(() => {
+    if (!user?.employeeId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/ess/leaves/balance?year=${new Date().getFullYear()}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        setMyLeaveBalances(json.data ?? []);
+      } catch {
+        /* non-critical widget, fail silently */
+      }
+    })();
+  }, [user?.employeeId]);
 
   /* ---- Derived ---- */
 
@@ -354,36 +380,88 @@ export default function DashboardView() {
       )}
 
       {/* ============================================================ */}
-      {/*  1b. Company Calendar — visible to every role                */}
+      {/*  1b. Company Calendar + My Leave Balance — visible to every role,   */}
+      {/*      leave balance only for sessions linked to an Employee record  */}
       {/* ============================================================ */}
-      {(upcomingHolidays.length > 0 || weeklyOffLabel) && (
-        <Card className="bg-white rounded-xl border shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CalendarDays className="size-4 text-emerald-600" />
-              Company Calendar
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pb-6">
-            {weeklyOffLabel && (
-              <p className="mb-3 text-sm text-muted-foreground">
-                Weekly off: <span className="font-medium text-foreground">{weeklyOffLabel}</span>
-              </p>
-            )}
-            {upcomingHolidays.length > 0 && (
-              <div className="flex flex-wrap gap-3">
-                {upcomingHolidays.map((h) => (
-                  <div key={h.id} className="rounded-lg border bg-emerald-50/50 px-3 py-2 text-sm">
-                    <span className="font-medium">{h.name}</span>{' '}
-                    <span className="text-muted-foreground">
-                      — {new Date(h.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' })}
-                    </span>
+      {(upcomingHolidays.length > 0 || weeklyOffLabel || myLeaveBalances.length > 0) && (
+        <div className={`grid grid-cols-1 gap-6 ${user?.employeeId ? 'lg:grid-cols-2' : ''}`}>
+          {(upcomingHolidays.length > 0 || weeklyOffLabel) && (
+            <Card className="bg-white rounded-xl border shadow-sm">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CalendarDays className="size-4 text-emerald-600" />
+                  Company Calendar
+                </CardTitle>
+                {totalHolidaysThisYear > 0 && (
+                  <Badge variant="outline" className="text-xs">
+                    {totalHolidaysThisYear} holiday{totalHolidaysThisYear === 1 ? '' : 's'} this year
+                  </Badge>
+                )}
+              </CardHeader>
+              <CardContent className="pb-6">
+                {weeklyOffLabel && (
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Weekly off: <span className="font-medium text-foreground">{weeklyOffLabel}</span>
+                  </p>
+                )}
+                {upcomingHolidays.length > 0 && (
+                  <div className="flex flex-wrap gap-3">
+                    {upcomingHolidays.map((h) => (
+                      <div key={h.id} className="rounded-lg border bg-emerald-50/50 px-3 py-2 text-sm">
+                        <span className="font-medium">{h.name}</span>{' '}
+                        <span className="text-muted-foreground">
+                          — {new Date(h.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' })}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                )}
+                {user?.employeeId && (
+                  <Button variant="link" size="sm" className="mt-2 h-auto p-0 text-emerald-700" onClick={() => setActiveView('my-portal')}>
+                    See full holiday calendar & restricted-day picks →
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {user?.employeeId && myLeaveBalances.length > 0 && (
+            <Card className="bg-white rounded-xl border shadow-sm">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CalendarOff className="size-4 text-amber-600" />
+                  My Leave Balance
+                </CardTitle>
+                <Badge variant="outline" className="text-xs">
+                  {myLeaveBalances.reduce((sum, b) => sum + (b.totalAllocated + b.carryForwarded - b.used), 0)} day(s) available
+                </Badge>
+              </CardHeader>
+              <CardContent className="pb-6">
+                <div className="space-y-2">
+                  {myLeaveBalances.map((b) => {
+                    const available = b.totalAllocated + b.carryForwarded - b.used;
+                    return (
+                      <div key={b.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
+                        <div>
+                          <span className="font-medium">{b.leaveType.name}</span>{' '}
+                          <span className="text-muted-foreground font-mono text-xs">({b.leaveType.shortCode})</span>
+                        </div>
+                        <div className="text-right text-muted-foreground">
+                          <span className="font-semibold text-foreground">{available}</span> available of {b.totalAllocated + b.carryForwarded}
+                          {' · '}Used {b.used}
+                          {b.carryForwarded > 0 && <> · Carry Fwd {b.carryForwarded}</>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Button variant="link" size="sm" className="mt-2 h-auto p-0 text-emerald-700" onClick={() => setActiveView('my-portal')}>
+                  Apply for leave / see full history →
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* ============================================================ */}
