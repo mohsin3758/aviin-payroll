@@ -1163,6 +1163,8 @@ function LeavesTab({ prefillDate, onPrefillConsumed }: { prefillDate?: string | 
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
   const [applying, setApplying] = useState(false);
+  const [filterYear, setFilterYear] = useState(() => new Date().getFullYear());
+  const [filterStatus, setFilterStatus] = useState('all');
 
   // Arrived from Holidays tab's "Apply as Leave" — open the dialog pre-filled with that date,
   // then hand back control so a later visit here doesn't keep re-triggering it.
@@ -1177,16 +1179,18 @@ function LeavesTab({ prefillDate, onPrefillConsumed }: { prefillDate?: string | 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      const appParams = new URLSearchParams({ year: String(filterYear) });
+      if (filterStatus !== 'all') appParams.set('status', filterStatus);
       const [balRes, appRes] = await Promise.all([
-        fetch(`/api/ess/leaves/balance?year=${new Date().getFullYear()}`),
-        fetch('/api/ess/leaves'),
+        fetch(`/api/ess/leaves/balance?year=${filterYear}`),
+        fetch(`/api/ess/leaves?${appParams.toString()}`),
       ]);
       const balData = await balRes.json();
       const appData = await appRes.json();
       setBalances(balData.data ?? []);
       setApplications(appData.data ?? []);
     } catch { toast.error('Failed to load leave data'); } finally { setLoading(false); }
-  }, []);
+  }, [filterYear, filterStatus]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -1233,8 +1237,34 @@ function LeavesTab({ prefillDate, onPrefillConsumed }: { prefillDate?: string | 
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base">My Leave Applications</CardTitle>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Status</Label>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Year</Label>
+              <Select value={String(filterYear)} onValueChange={(v) => setFilterYear(parseInt(v, 10))}>
+                <SelectTrigger className="h-8 w-[100px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {HOLIDAY_YEAR_OPTIONS.map((y) => (
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <Dialog open={applyOpen} onOpenChange={setApplyOpen}>
             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setApplyOpen(true)}><Plus className="size-4" />Apply for Leave</Button>
             <DialogContent>
@@ -1262,7 +1292,7 @@ function LeavesTab({ prefillDate, onPrefillConsumed }: { prefillDate?: string | 
         </CardHeader>
         <CardContent>
           {applications.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">No leave applications yet.</p>
+            <p className="text-sm text-muted-foreground py-4 text-center">No leave applications match these filters.</p>
           ) : (
             <div className="divide-y">
               {applications.map((a) => (
@@ -1305,6 +1335,7 @@ function HolidaysTab({ onApplyAsLeave }: { onApplyAsLeave?: (date: string) => vo
   const [weeklyOffLabel, setWeeklyOffLabel] = useState('');
   const [periodMode, setPeriodMode] = useState<'calendar' | 'fy'>('calendar');
   const [periodYear, setPeriodYear] = useState(() => new Date().getFullYear());
+  const [filterCategory, setFilterCategory] = useState<'all' | 'national' | 'festival' | 'other'>('all');
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
@@ -1332,8 +1363,9 @@ function HolidaysTab({ onApplyAsLeave }: { onApplyAsLeave?: (date: string) => vo
 
   if (loading) return <Skeleton className="h-64 w-full" />;
 
-  const mandatoryHolidays = holidays.filter((h) => h.type !== 'optional');
-  const optionalHolidays = holidays.filter((h) => h.type === 'optional');
+  const categoryFiltered = filterCategory === 'all' ? holidays : holidays.filter((h) => h.category === filterCategory);
+  const mandatoryHolidays = categoryFiltered.filter((h) => h.type !== 'optional');
+  const optionalHolidays = categoryFiltered.filter((h) => h.type === 'optional');
 
   return (
     <>
@@ -1368,6 +1400,15 @@ function HolidaysTab({ onApplyAsLeave }: { onApplyAsLeave?: (date: string) => vo
                     {periodMode === 'fy' ? `FY ${y}-${String((y + 1) % 100).padStart(2, '0')}` : y}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterCategory} onValueChange={(v) => setFilterCategory(v as typeof filterCategory)}>
+              <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="national">National</SelectItem>
+                <SelectItem value="festival">Festival</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>
           </div>

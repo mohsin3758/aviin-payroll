@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
     // Otherwise return leave applications with optional filters
     const employeeId = searchParams.get("employeeId");
     const status = searchParams.get("status");
+    const leaveTypeId = searchParams.get("leaveTypeId");
     const yearParam = searchParams.get("year");
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10) || 50));
@@ -48,6 +49,10 @@ export async function GET(request: NextRequest) {
 
     if (status) {
       where.status = status;
+    }
+
+    if (leaveTypeId) {
+      where.leaveTypeId = leaveTypeId;
     }
 
     if (yearParam) {

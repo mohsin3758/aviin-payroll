@@ -323,4 +323,56 @@ describe("Leave Types & Leave Balance management (requires live dev server)", ()
       expect(row.used).toBe(1);
     });
   });
+
+  describe("leaveTypeId / status filtering on GET /api/leaves and GET /api/ess/leaves", () => {
+    it("narrows results to the matching leave type on both the admin and ESS list endpoints, and status further narrows ESS results", async () => {
+      const typeA = await createLeaveType(adminCookie, {
+        name: "QA Filter Type A", shortCode: "QFTA", totalDays: 5, isCarryForward: false, maxCarryForward: 0, isPaid: true,
+      });
+      const typeB = await createLeaveType(adminCookie, {
+        name: "QA Filter Type B", shortCode: "QFTB", totalDays: 5, isCarryForward: false, maxCarryForward: 0, isPaid: true,
+      });
+      createdLeaveTypeIds.push(typeA.id, typeB.id);
+
+      await db.leaveBalance.create({ data: { employeeId, leaveTypeId: typeA.id, year: FIXTURE_YEAR, totalAllocated: 5, carryForwarded: 0 } });
+      await db.leaveBalance.create({ data: { employeeId, leaveTypeId: typeB.id, year: FIXTURE_YEAR, totalAllocated: 5, carryForwarded: 0 } });
+
+      const applyA = await fetch(`${BASE}/api/ess/leaves`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: employeeCookie },
+        body: JSON.stringify({ leaveTypeId: typeA.id, startDate: `${FIXTURE_YEAR}-04-10`, endDate: `${FIXTURE_YEAR}-04-10`, reason: "QA filter A" }),
+      });
+      expect(applyA.status).toBe(201);
+      const applyB = await fetch(`${BASE}/api/ess/leaves`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: employeeCookie },
+        body: JSON.stringify({ leaveTypeId: typeB.id, startDate: `${FIXTURE_YEAR}-04-11`, endDate: `${FIXTURE_YEAR}-04-11`, reason: "QA filter B" }),
+      });
+      expect(applyB.status).toBe(201);
+      const appB = (await applyB.json()).data;
+
+      // Approve only B, so status filtering has something real to distinguish.
+      const approveB = await fetch(`${BASE}/api/leaves/${appB.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ status: "approved" }),
+      });
+      expect(approveB.status).toBe(200);
+
+      // Admin list, filtered to type A only.
+      const adminFilteredRes = await fetch(`${BASE}/api/leaves?employeeId=${employeeId}&leaveTypeId=${typeA.id}&year=${FIXTURE_YEAR}`, { headers: { Cookie: adminCookie } });
+      const adminFiltered = (await adminFilteredRes.json()).data;
+      expect(adminFiltered.length).toBeGreaterThanOrEqual(1);
+      expect(adminFiltered.every((a: { leaveTypeId: string }) => a.leaveTypeId === typeA.id)).toBe(true);
+
+      // ESS list, filtered to type B only.
+      const essTypeBRes = await fetch(`${BASE}/api/ess/leaves?leaveTypeId=${typeB.id}&year=${FIXTURE_YEAR}`, { headers: { Cookie: employeeCookie } });
+      const essTypeB = (await essTypeBRes.json()).data;
+      expect(essTypeB.length).toBeGreaterThanOrEqual(1);
+      expect(essTypeB.every((a: { leaveTypeId: string }) => a.leaveTypeId === typeB.id)).toBe(true);
+
+      // ESS list, filtered by status=pending — must exclude the now-approved type B application.
+      const essPendingRes = await fetch(`${BASE}/api/ess/leaves?status=pending&year=${FIXTURE_YEAR}`, { headers: { Cookie: employeeCookie } });
+      const essPending = (await essPendingRes.json()).data;
+      expect(essPending.some((a: { id: string }) => a.id === appB.id)).toBe(false);
+      expect(essPending.every((a: { status: string }) => a.status === "pending")).toBe(true);
+    });
+  });
 });

@@ -609,6 +609,8 @@ export default function SettingsView() {
   const [newHolidayType, setNewHolidayType] = useState<'holiday' | 'optional'>('holiday');
   const [newHolidayCategory, setNewHolidayCategory] = useState<'national' | 'festival' | 'other'>('other');
   const [addingHoliday, setAddingHoliday] = useState(false);
+  const [holidayFilterCategory, setHolidayFilterCategory] = useState<'all' | 'national' | 'festival' | 'other'>('all');
+  const [holidayFilterType, setHolidayFilterType] = useState<'all' | 'holiday' | 'optional'>('all');
 
   const fetchHolidays = useCallback(async () => {
     setHolidaysLoading(true);
@@ -638,6 +640,16 @@ export default function SettingsView() {
     }
     return { total: holidays.length, byCategory, optionalCount };
   }, [holidays]);
+
+  // holidayTotals above always reflects the full period regardless of these filters — only the
+  // list below narrows, matching the "badge shows the whole count, list shows the subset" pattern.
+  const filteredHolidays = useMemo(() => {
+    return holidays.filter((h) => {
+      if (holidayFilterCategory !== 'all' && h.category !== holidayFilterCategory) return false;
+      if (holidayFilterType !== 'all' && h.type !== holidayFilterType) return false;
+      return true;
+    });
+  }, [holidays, holidayFilterCategory, holidayFilterType]);
 
   const handleAddHoliday = async () => {
     if (!newHolidayName.trim() || !newHolidayDate) {
@@ -2002,13 +2014,34 @@ export default function SettingsView() {
               </div>
             </div>
 
-            {/* Summary bar */}
+            {/* Summary bar — always reflects the full selected period, independent of the filters below */}
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
               <Badge variant="secondary">Total: {holidayTotals.total}</Badge>
               <Badge variant="outline">National: {holidayTotals.byCategory.national ?? 0}</Badge>
               <Badge variant="outline">Festival: {holidayTotals.byCategory.festival ?? 0}</Badge>
               <Badge variant="outline">Other: {holidayTotals.byCategory.other ?? 0}</Badge>
               <Badge variant="outline">Optional (apply as leave): {holidayTotals.optionalCount}</Badge>
+            </div>
+
+            {/* Filter the list below (badges above stay unaffected) */}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Select value={holidayFilterCategory} onValueChange={(v) => setHolidayFilterCategory(v as typeof holidayFilterCategory)}>
+                <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="national">National</SelectItem>
+                  <SelectItem value="festival">Festival</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={holidayFilterType} onValueChange={(v) => setHolidayFilterType(v as typeof holidayFilterType)}>
+                <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="holiday">Mandatory only</SelectItem>
+                  <SelectItem value="optional">Optional only</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {user?.role !== 'employee' && (
@@ -2050,10 +2083,12 @@ export default function SettingsView() {
             <div className="mt-3 divide-y rounded-lg border">
               {holidaysLoading ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
-              ) : holidays.length === 0 ? (
-                <div className="p-4 text-center text-sm text-muted-foreground">No holidays configured for this period.</div>
+              ) : filteredHolidays.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  {holidays.length === 0 ? 'No holidays configured for this period.' : 'No holidays match these filters.'}
+                </div>
               ) : (
-                holidays.map((h) => (
+                filteredHolidays.map((h) => (
                   <div key={h.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
                     <div>
                       <span className="font-medium">{h.name}</span>{' '}

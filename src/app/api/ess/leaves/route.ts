@@ -19,11 +19,19 @@ export async function GET(request: NextRequest) {
     const { employeeId } = await requireOwnEmployeeId(request);
     const { searchParams } = request.nextUrl;
     const year = searchParams.get("year");
+    const status = searchParams.get("status");
+    const leaveTypeId = searchParams.get("leaveTypeId");
 
     const where: Record<string, unknown> = { employeeId };
     if (year) {
       const y = parseInt(year, 10);
       where.startDate = { gte: new Date(y, 0, 1), lte: new Date(y, 11, 31, 23, 59, 59, 999) };
+    }
+    if (status) {
+      where.status = status;
+    }
+    if (leaveTypeId) {
+      where.leaveTypeId = leaveTypeId;
     }
 
     const applications = await db.leaveApplication.findMany({

@@ -126,6 +126,13 @@ function availableDays(b: LeaveBalance): number {
   return b.totalAllocated + b.carryForwarded - b.used;
 }
 
+const LEAVE_YEAR_OPTIONS = (() => {
+  const current = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = current - 2; y <= current + 1; y++) years.push(y);
+  return years;
+})();
+
 // ---------- Helpers ----------
 
 function formatDate(dateStr: string) {
@@ -252,6 +259,8 @@ export default function LeavesView() {
   // ---- Filter state ----
   const [filterEmployee, setFilterEmployee] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterLeaveType, setFilterLeaveType] = useState<string>('all');
+  const [filterYear, setFilterYear] = useState<number>(() => new Date().getFullYear());
 
   // ---- Dialog state ----
   const [applyOpen, setApplyOpen] = useState(false);
@@ -267,8 +276,6 @@ export default function LeavesView() {
   const [formStartDate, setFormStartDate] = useState('');
   const [formEndDate, setFormEndDate] = useState('');
   const [formReason, setFormReason] = useState('');
-
-  const currentYear = new Date().getFullYear();
 
   // ---- Computed total days ----
   const totalDays = useMemo(() => {
@@ -319,7 +326,10 @@ export default function LeavesView() {
       if (filterStatus && filterStatus !== 'all') {
         params.set('status', filterStatus);
       }
-      params.set('year', String(currentYear));
+      if (filterLeaveType && filterLeaveType !== 'all') {
+        params.set('leaveTypeId', filterLeaveType);
+      }
+      params.set('year', String(filterYear));
       params.set('limit', '200');
       const res = await fetch(`/api/leaves?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch applications');
@@ -331,7 +341,7 @@ export default function LeavesView() {
     } finally {
       setLoadingApplications(false);
     }
-  }, [filterEmployee, filterStatus, currentYear]);
+  }, [filterEmployee, filterStatus, filterLeaveType, filterYear]);
 
   // ---- Fetch balance for selected employee ----
   const fetchBalances = useCallback(async () => {
@@ -344,7 +354,7 @@ export default function LeavesView() {
     setLoadingBalances(true);
     try {
       const res = await fetch(
-        `/api/leaves/balance?employeeId=${empId}&year=${currentYear}`
+        `/api/leaves/balance?employeeId=${empId}&year=${filterYear}`
       );
       if (!res.ok) throw new Error('Failed to fetch balances');
       const data = await res.json();
@@ -355,7 +365,7 @@ export default function LeavesView() {
     } finally {
       setLoadingBalances(false);
     }
-  }, [filterEmployee, selectedEmployeeId, currentYear]);
+  }, [filterEmployee, selectedEmployeeId, filterYear]);
 
   // ---- Fetch all employees balances ----
   const fetchAllBalances = useCallback(async () => {
@@ -364,7 +374,7 @@ export default function LeavesView() {
       const allData: LeaveBalance[] = [];
       for (const emp of employees) {
         const res = await fetch(
-          `/api/leaves/balance?employeeId=${emp.id}&year=${currentYear}`
+          `/api/leaves/balance?employeeId=${emp.id}&year=${filterYear}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -378,7 +388,15 @@ export default function LeavesView() {
     } finally {
       setLoadingAllBalances(false);
     }
-  }, [employees, currentYear]);
+  }, [employees, filterYear]);
+
+  const filteredAllBalances = useMemo(() => {
+    return allBalances.filter((b) => {
+      if (filterEmployee !== 'all' && b.employeeId !== filterEmployee) return false;
+      if (filterLeaveType !== 'all' && b.leaveTypeId !== filterLeaveType) return false;
+      return true;
+    });
+  }, [allBalances, filterEmployee, filterLeaveType]);
 
   // ---- Effects ----
   useEffect(() => {
@@ -735,7 +753,7 @@ export default function LeavesView() {
             Leave Management
           </h1>
           <p className="text-sm text-muted-foreground">
-            Manage leave applications and balances for {currentYear}
+            Manage leave applications and balances for {filterYear}
           </p>
         </div>
         <Button
@@ -787,6 +805,37 @@ export default function LeavesView() {
               <SelectItem value="pending">Pending</SelectItem>
               <SelectItem value="approved">Approved</SelectItem>
               <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5 min-w-[160px]">
+          <Label className="text-xs font-medium text-muted-foreground">
+            Leave Type
+          </Label>
+          <Select value={filterLeaveType} onValueChange={setFilterLeaveType}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="All Leave Types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Leave Types</SelectItem>
+              {leaveTypes.map((lt) => (
+                <SelectItem key={lt.id} value={lt.id}>{lt.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5 min-w-[110px]">
+          <Label className="text-xs font-medium text-muted-foreground">
+            Year
+          </Label>
+          <Select value={String(filterYear)} onValueChange={(v) => setFilterYear(parseInt(v, 10))}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LEAVE_YEAR_OPTIONS.map((y) => (
+                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -1011,21 +1060,58 @@ export default function LeavesView() {
         {/* ---- Employee Balances Tab ---- */}
         <TabsContent value="balances">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
               <div>
                 <CardTitle className="text-base">
                   Leave Balances — All Employees
                 </CardTitle>
                 <CardDescription>
-                  Year {currentYear} leave balance overview
+                  Year {filterYear} leave balance overview
                 </CardDescription>
               </div>
-              {canManageLeavePolicy && (
-                <Button size="sm" className="gap-1.5" onClick={openAddBalance}>
-                  <Plus className="size-4" />
-                  Add Balance
-                </Button>
-              )}
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-col gap-1.5 min-w-[170px]">
+                  <Label className="text-xs font-medium text-muted-foreground">Employee</Label>
+                  <Select value={filterEmployee} onValueChange={setFilterEmployee}>
+                    <SelectTrigger className="w-full h-8 text-xs"><SelectValue placeholder="All Employees" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Employees</SelectItem>
+                      {employees.map((emp) => (
+                        <SelectItem key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName} ({emp.employeeCode})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5 min-w-[150px]">
+                  <Label className="text-xs font-medium text-muted-foreground">Leave Type</Label>
+                  <Select value={filterLeaveType} onValueChange={setFilterLeaveType}>
+                    <SelectTrigger className="w-full h-8 text-xs"><SelectValue placeholder="All Leave Types" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Leave Types</SelectItem>
+                      {leaveTypes.map((lt) => (
+                        <SelectItem key={lt.id} value={lt.id}>{lt.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5 min-w-[100px]">
+                  <Label className="text-xs font-medium text-muted-foreground">Year</Label>
+                  <Select value={String(filterYear)} onValueChange={(v) => setFilterYear(parseInt(v, 10))}>
+                    <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {LEAVE_YEAR_OPTIONS.map((y) => (
+                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {canManageLeavePolicy && (
+                  <Button size="sm" className="gap-1.5" onClick={openAddBalance}>
+                    <Plus className="size-4" />
+                    Add Balance
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               {loadingAllBalances ? (
@@ -1034,10 +1120,10 @@ export default function LeavesView() {
                     <Skeleton key={i} className="h-12 w-full" />
                   ))}
                 </div>
-              ) : allBalances.length === 0 ? (
+              ) : filteredAllBalances.length === 0 ? (
                 <div className="py-12 text-center text-muted-foreground">
                   <Leaf className="mx-auto mb-2 size-10 opacity-40" />
-                  <p className="text-sm">No balance data available.</p>
+                  <p className="text-sm">No balance data matches these filters.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto rounded-md border">
@@ -1054,7 +1140,7 @@ export default function LeavesView() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {allBalances.map((b) => {
+                      {filteredAllBalances.map((b) => {
                         const available = availableDays(b);
                         return (
                           <TableRow key={b.id}>
