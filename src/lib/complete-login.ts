@@ -17,7 +17,17 @@ interface LoginUser {
 // instead of separately duplicating signSession/cookie/audit/login-attendance logic.
 export async function completeLogin(
   user: LoginUser,
-  opts: { ipAddress: string; auditAction?: string }
+  opts: {
+    ipAddress: string;
+    auditAction?: string;
+    // Best-effort browser geolocation captured at the moment of login (see
+    // src/lib/geolocation-client.ts) — absent whenever permission was denied, timed out, or the
+    // browser doesn't support it. Only ever affects whether login-triggered auto-punch is
+    // geofence-checked; it never blocks or delays the login itself.
+    latitude?: number | null;
+    longitude?: number | null;
+    accuracy?: number | null;
+  }
 ): Promise<NextResponse> {
   const role = user.role as Role;
 
@@ -39,7 +49,8 @@ export async function completeLogin(
 
   // Gap 6 fix (pre-existing): login-based attendance is opt-in (Company.enableLoginAttendance,
   // default false) and only applies to logins linked to an employee record. Never let a failure
-  // here (including the very common "already punched in today") affect the login response itself.
+  // here (including the very common "already punched in today", or now a geofence rejection —
+  // recordPunch's return value is deliberately never inspected) affect the login response itself.
   if (user.employeeId) {
     try {
       const company = await db.company.findFirst();
@@ -49,6 +60,9 @@ export async function completeLogin(
           action: "in",
           method: "login",
           ipAddress: opts.ipAddress,
+          latitude: opts.latitude ?? null,
+          longitude: opts.longitude ?? null,
+          accuracy: opts.accuracy ?? null,
         });
       }
     } catch (err) {

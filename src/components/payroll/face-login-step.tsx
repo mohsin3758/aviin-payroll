@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
+import { getBestEffortLocation } from '@/lib/geolocation-client';
 
 interface FaceLoginStepProps {
   pendingToken: string;
@@ -87,11 +88,20 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
         return;
       }
 
+      // Best-effort only — never blocks or delays sign-in on a denied/slow/unsupported prompt.
+      // Only ever affects whether a login-triggered auto-punch (if enabled) is geofence-checked.
+      const location = await getBestEffortLocation();
+      const locationFields = { latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, accuracy: location?.accuracy ?? null };
+
       const url = enrolled ? '/api/auth/face-login' : '/api/auth/face-login/enroll';
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(enrolled ? { pendingToken, descriptor: result.descriptor } : { pendingToken, descriptor: result.descriptor, consent: true }),
+        body: JSON.stringify(
+          enrolled
+            ? { pendingToken, descriptor: result.descriptor, ...locationFields }
+            : { pendingToken, descriptor: result.descriptor, consent: true, ...locationFields }
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Face verification failed');

@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { Loader2, ShieldCheck } from 'lucide-react'
 import FaceLoginStep from '@/components/payroll/face-login-step'
 import ForgotPasswordStep from '@/components/payroll/forgot-password-step'
+import { getBestEffortLocation } from '@/lib/geolocation-client'
 
 interface PendingFace {
   pendingToken: string
@@ -26,10 +27,19 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
     e.preventDefault()
     setSubmitting(true)
     try {
+      // Best-effort only — never blocks or delays sign-in on a denied/slow/unsupported prompt.
+      // Only ever affects whether a login-triggered auto-punch (if enabled) is geofence-checked.
+      const location = await getBestEffortLocation()
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email,
+          password,
+          latitude: location?.latitude ?? null,
+          longitude: location?.longitude ?? null,
+          accuracy: location?.accuracy ?? null,
+        }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {

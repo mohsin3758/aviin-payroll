@@ -13,6 +13,11 @@ import { completeLogin } from "@/lib/complete-login";
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
+  // Best-effort browser geolocation (src/lib/geolocation-client.ts) — only ever used to
+  // geofence-check login-triggered auto-punch, never to gate the login itself.
+  latitude: z.number().finite().nullable().optional(),
+  longitude: z.number().finite().nullable().optional(),
+  accuracy: z.number().finite().nullable().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -24,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, password } = loginSchema.parse(body);
+    const { email, password, latitude, longitude, accuracy } = loginSchema.parse(body);
 
     const user = await db.user.findUnique({ where: { email } });
     if (!user || !user.active) {
@@ -48,7 +53,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ requiresFaceVerification: true, pendingToken, enrolled: !!enrollment });
     }
 
-    return completeLogin(user, { ipAddress: ip });
+    return completeLogin(user, { ipAddress: ip, latitude, longitude, accuracy });
   } catch (error) {
     return handleApiError(error, "login");
   }

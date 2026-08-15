@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { pendingToken } = body;
+    const { pendingToken, latitude, longitude, accuracy } = body;
     if (typeof pendingToken !== "string" || !pendingToken) {
       return apiError("Your session has expired. Please sign in again.", 401);
     }
@@ -47,7 +47,13 @@ export async function POST(request: NextRequest) {
       ipAddress: ip,
     });
 
-    return completeLogin(user, { ipAddress: ip, auditAction: "face-login-success" });
+    return completeLogin(user, {
+      ipAddress: ip,
+      auditAction: "face-login-success",
+      latitude: typeof latitude === "number" && Number.isFinite(latitude) ? latitude : null,
+      longitude: typeof longitude === "number" && Number.isFinite(longitude) ? longitude : null,
+      accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : null,
+    });
   } catch (error) {
     return handleApiError(error, "enroll face at login");
   }

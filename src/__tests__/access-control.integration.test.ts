@@ -5,6 +5,7 @@
 // (see vitest.integration.config.ts) since they require a live server + seeded DB.
 // Run manually with the dev server up: `npx vitest run --config vitest.integration.config.ts src/__tests__/access-control.integration.test.ts`
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { db } from "@/lib/db";
 
 const BASE = "http://localhost:3000";
 
@@ -751,6 +752,116 @@ describe("Access control fixes (requires live dev server)", () => {
       expect(data.length).toBeGreaterThan(0);
       expect(data[0].punchInMethod).toBe("login");
     });
+
+    // A login now MAY optionally carry best-effort browser geolocation (see
+    // src/lib/geolocation-client.ts) — when it does, the login-triggered auto-punch is
+    // geofence-checked exactly like a manual/face punch, but a geofence rejection only ever
+    // skips the auto-punch (recordPunch's return value is never inspected by completeLogin) —
+    // it can never fail the login itself.
+    //
+    // Both tests below use a brand-new disposable Employee (never an EMP00X code) — this file's
+    // seeded/reused employee codes accumulate real attendance history across the many other
+    // integration suites that touch them over a long dev session, which made an early version of
+    // these two tests flaky (`data.length`/`data[0]` assumptions broke against pre-existing rows
+    // for the same employee from unrelated earlier test runs). A fresh employee has none.
+    async function createDisposableGeofenceEmployee(label: string): Promise<string> {
+      const res = await fetch(`${BASE}/api/employees`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({
+          firstName: "QA", lastName: label, email: `qa.geofence.${label.toLowerCase()}.${Date.now()}@test.local`,
+          designation: "QA Engineer", department: "Quality", dateOfJoining: "2020-01-01", pfApplicable: true,
+          salaryStructure: { basic: 20000, houseRentAllowance: 8000, specialAllowance: 2000 },
+        }),
+      });
+      if (!res.ok) throw new Error(`Failed to create disposable geofence employee ${label}: ${res.status} ${await res.text()}`);
+      const emp = await res.json();
+      return emp.id as string;
+    }
+
+    // Deliberately avoids ensureEmployeeLogin here — it also calls login() internally, whose
+    // returned cookie neither test below actually needs (the real action is a raw, coordinate-
+    // bearing POST /api/auth/login later). Skipping that extra login call keeps this already
+    // login-heavy file comfortably under the 10-logins/60s rate limit in a single run.
+    async function createEmployeeLoginNoLogin(email: string, password: string, employeeId: string): Promise<void> {
+      const res = await fetch(`${BASE}/api/users`, {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ email, password, name: "QA Geofence Login", role: "employee", employeeId }),
+      });
+      if (res.status !== 201 && res.status !== 409) {
+        throw new Error(`Failed to create test login ${email}: ${res.status} ${await res.text()}`);
+      }
+    }
+
+    it("skips the auto-punch (but still logs in successfully) when login-supplied coordinates are outside the radius", async () => {
+      const freshEmployeeId = await createDisposableGeofenceEmployee("Outside");
+      const email = `qa.employeegeofence.outside.${Date.now()}@test.local`;
+      const password = "TestEmp@12345";
+      try {
+        // Login-attendance explicitly off for setup, so account creation can't itself trigger a
+        // stray attendance record ahead of the real action (it wouldn't anyway — account
+        // creation alone never logs in — but keeps the invariant explicit and self-contained).
+        await fetch(`${BASE}/api/settings`, {
+          method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ enableLoginAttendance: false }),
+        });
+        await createEmployeeLoginNoLogin(email, password, freshEmployeeId);
+
+        await fetch(`${BASE}/api/settings`, {
+          method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ officeLatitude: 19.076, officeLongitude: 72.8777, geofenceRadiusMeters: 50, enforceGeofence: true, enableLoginAttendance: true }),
+        });
+
+        const loginRes = await fetch(`${BASE}/api/auth/login`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, latitude: 28.6139, longitude: 77.209 }), // Mumbai office, Delhi login
+        });
+        expect(loginRes.status).toBe(200); // never blocked by geofence, regardless of distance
+
+        const attRes = await fetch(`${BASE}/api/attendance?employeeId=${freshEmployeeId}`, { headers: { Cookie: adminCookie } });
+        const { data } = await attRes.json();
+        expect(data.length).toBe(0);
+      } finally {
+        await db.attendance.deleteMany({ where: { employeeId: freshEmployeeId } });
+        await db.user.deleteMany({ where: { email } });
+        await db.salaryStructure.deleteMany({ where: { employeeId: freshEmployeeId } });
+        await db.employee.deleteMany({ where: { id: freshEmployeeId } });
+      }
+    });
+
+    it("marks present via login with punchInMethod \"login\" when login-supplied coordinates are inside the radius", async () => {
+      const freshEmployeeId = await createDisposableGeofenceEmployee("Inside");
+      const email = `qa.employeegeofence.inside.${Date.now()}@test.local`;
+      const password = "TestEmp@12345";
+      try {
+        await fetch(`${BASE}/api/settings`, {
+          method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ enableLoginAttendance: false }),
+        });
+        await createEmployeeLoginNoLogin(email, password, freshEmployeeId);
+
+        await fetch(`${BASE}/api/settings`, {
+          method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ officeLatitude: 19.076, officeLongitude: 72.8777, geofenceRadiusMeters: 50, enforceGeofence: true, enableLoginAttendance: true }),
+        });
+
+        const loginRes = await fetch(`${BASE}/api/auth/login`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, latitude: 19.0761, longitude: 72.8778 }), // a few meters from the office
+        });
+        expect(loginRes.status).toBe(200);
+
+        const attRes = await fetch(`${BASE}/api/attendance?employeeId=${freshEmployeeId}`, { headers: { Cookie: adminCookie } });
+        const { data } = await attRes.json();
+        expect(data.length).toBe(1);
+        expect(data[0].punchInMethod).toBe("login");
+        expect(data[0].distanceFromOfficeMeters).toBeLessThan(50);
+      } finally {
+        await db.attendance.deleteMany({ where: { employeeId: freshEmployeeId } });
+        await db.user.deleteMany({ where: { email } });
+        await db.salaryStructure.deleteMany({ where: { employeeId: freshEmployeeId } });
+        await db.employee.deleteMany({ where: { id: freshEmployeeId } });
+      }
+    });
   });
 
   // ---- Login-based attendance (gap 6) ----
@@ -774,8 +885,11 @@ describe("Access control fixes (requires live dev server)", () => {
 
       await ensureEmployeeLogin(adminCookie, "qa.employee4@test.local", freshEmployeeId);
 
-      const today = new Date().toISOString().split("T")[0];
-      const res = await fetch(`${BASE}/api/attendance?employeeId=${freshEmployeeId}&date=${today}`, { headers: { Cookie: adminCookie } });
+      // No date filter (rather than computing "today" client-side in UTC) — the record's `date`
+      // is stored as an IST calendar date server-side (see istDateOnly()), which can differ from
+      // the UTC date right around IST midnight, making a client-computed date param flaky. Same
+      // fix already applied to the analogous test in the "geofence" describe above.
+      const res = await fetch(`${BASE}/api/attendance?employeeId=${freshEmployeeId}`, { headers: { Cookie: adminCookie } });
       const { data } = await res.json();
       expect(data.length).toBeGreaterThan(0);
       expect(data[0].punchInMethod).toBe("login");

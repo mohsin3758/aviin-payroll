@@ -11,6 +11,11 @@ import { logAudit } from "@/lib/audit";
 const faceLoginSchema = z.object({
   pendingToken: z.string().min(1),
   descriptor: z.array(z.number().finite()).length(128),
+  // Best-effort browser geolocation (src/lib/geolocation-client.ts) — only ever used to
+  // geofence-check login-triggered auto-punch, never to gate the login itself.
+  latitude: z.number().finite().nullable().optional(),
+  longitude: z.number().finite().nullable().optional(),
+  accuracy: z.number().finite().nullable().optional(),
 });
 
 // POST /api/auth/face-login — completes a login that's already password-verified and was
@@ -27,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { pendingToken, descriptor } = faceLoginSchema.parse(body);
+    const { pendingToken, descriptor, latitude, longitude, accuracy } = faceLoginSchema.parse(body);
 
     const pending = await verifyPendingFaceToken(pendingToken);
     if (!pending) {
@@ -70,7 +75,7 @@ export async function POST(request: NextRequest) {
       return apiError("Face not recognized. Try again with better lighting.", 401);
     }
 
-    return completeLogin(user, { ipAddress: ip, auditAction: "face-login-success" });
+    return completeLogin(user, { ipAddress: ip, auditAction: "face-login-success", latitude, longitude, accuracy });
   } catch (error) {
     return handleApiError(error, "verify face login");
   }
