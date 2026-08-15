@@ -1126,6 +1126,45 @@ export default function SettingsView() {
     }
   };
 
+  // Edit user dialog (name / email / role)
+  const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserRole, setEditUserRole] = useState<UserRole>('employee');
+  const [savingEditUser, setSavingEditUser] = useState(false);
+
+  const openEditUser = (target: ManagedUser) => {
+    setEditingUser(target);
+    setEditUserName(target.name);
+    setEditUserEmail(target.email);
+    setEditUserRole(target.role);
+  };
+
+  const handleSaveEditUser = async () => {
+    if (!editingUser) return;
+    if (!editUserName.trim() || !editUserEmail.trim()) {
+      toast.error('Name and email are required.');
+      return;
+    }
+    setSavingEditUser(true);
+    try {
+      const res = await fetch(`/api/users/${editingUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editUserName.trim(), email: editUserEmail.trim(), role: editUserRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update user');
+      toast.success(`${editUserName.trim()}'s details have been updated.`);
+      setEditingUser(null);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update user');
+    } finally {
+      setSavingEditUser(false);
+    }
+  };
+
   const handleDeleteUser = async (target: ManagedUser) => {
     if (!confirm(`Permanently delete the login for ${target.name} (${target.email})? This only removes their portal access — it does not delete any linked employee record. This cannot be undone.`)) return;
     setDeletingUserId(target.id);
@@ -2886,6 +2925,12 @@ export default function SettingsView() {
                                     Unlink
                                   </Button>
                                 )}
+                                {u.id !== user?.id && (
+                                  <Button variant="ghost" size="sm" onClick={() => openEditUser(u)}>
+                                    <Pencil className="size-3.5 mr-1" />
+                                    Edit
+                                  </Button>
+                                )}
                                 <Button variant="ghost" size="sm" onClick={() => { setResetTarget(u); setResetPasswordValue(''); }}>
                                   <KeyRound className="size-3.5 mr-1" />
                                   Reset Password
@@ -2933,6 +2978,49 @@ export default function SettingsView() {
               </CardContent>
             </Card>
           )}
+
+          {/* ─── Edit User Dialog ─────────────────────────────────────────────── */}
+          <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Edit User</DialogTitle>
+                <DialogDescription>Update {editingUser?.name}&apos;s name, email, or role.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-user-name">Name</Label>
+                  <Input id="edit-user-name" value={editUserName} onChange={(e) => setEditUserName(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-user-email">Email</Label>
+                  <Input id="edit-user-email" type="email" value={editUserEmail} onChange={(e) => setEditUserEmail(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-user-role">Role</Label>
+                  <Select value={editUserRole} onValueChange={(v) => setEditUserRole(v as UserRole)}>
+                    <SelectTrigger id="edit-user-role" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="hr">HR</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="employee">Employee</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditingUser(null)} disabled={savingEditUser}>
+                  Cancel
+                </Button>
+                <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleSaveEditUser} disabled={savingEditUser}>
+                  {savingEditUser ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+                  Save
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* ─── Link Employee Dialog ─────────────────────────────────────────── */}
           <Dialog open={!!linkTarget} onOpenChange={(open) => !open && setLinkTarget(null)}>

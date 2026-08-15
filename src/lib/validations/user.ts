@@ -13,6 +13,8 @@ export const createUserSchema = z.object({
 });
 
 export const updateUserSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  email: z.string().trim().toLowerCase().email().optional(),
   active: z.boolean().optional(),
   role: z.enum(ROLES).optional(),
   // Links (or, passed as null, unlinks) this login to an Employee record after the fact —

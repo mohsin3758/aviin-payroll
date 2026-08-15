@@ -36,6 +36,22 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return apiError("User not found", 404);
     }
 
+    if (parsed.email && parsed.email !== existing.email) {
+      const emailTaken = await db.user.findUnique({ where: { email: parsed.email } });
+      if (emailTaken) {
+        return apiError("A user with this email already exists.", 409);
+      }
+    }
+
+    // Demoting the last remaining active admin would lock everyone out with no way back in —
+    // same reasoning as the delete guard below, just triggered by a role change instead.
+    if (parsed.role && parsed.role !== "admin" && existing.role === "admin") {
+      const otherAdmins = await db.user.count({ where: { role: "admin", active: true, id: { not: id } } });
+      if (otherAdmins === 0) {
+        return apiError("Cannot change the role of the last remaining admin account.", 409);
+      }
+    }
+
     // "employeeId" in parsed but falsy (null) means "unlink" — only run the exists/uniqueness
     // checks when actually linking to a specific record.
     if (parsed.employeeId) {

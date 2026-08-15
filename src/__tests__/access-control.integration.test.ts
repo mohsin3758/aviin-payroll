@@ -579,6 +579,108 @@ describe("Access control fixes (requires live dev server)", () => {
     });
   });
 
+  // ---- Edit user login (name/email/role) ----
+  describe("edit user login", () => {
+    async function createDisposableUser(email: string, role: string = "employee"): Promise<string> {
+      const res = await fetch(`${BASE}/api/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ email, password: "TestEdit@12345", name: "QA Edit Target", role }),
+      });
+      if (res.status === 201) return res.json().then((r) => r.data.id);
+      const listRes = await fetch(`${BASE}/api/users`, { headers: { Cookie: adminCookie } });
+      const { data } = await listRes.json();
+      const existing = data.find((u: { email: string }) => u.email === email);
+      if (!existing) throw new Error(`Expected an existing user for ${email} after a 409, found none`);
+      return existing.id;
+    }
+
+    it("admin can edit another user's name, email, and role", async () => {
+      const userId = await createDisposableUser("qa.edittest1@test.local");
+      const res = await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ name: "QA Renamed", email: "qa.edittest1.renamed@test.local", role: "manager" }),
+      });
+      expect(res.status).toBe(200);
+      const { data } = await res.json();
+      expect(data.name).toBe("QA Renamed");
+      expect(data.email).toBe("qa.edittest1.renamed@test.local");
+      expect(data.role).toBe("manager");
+
+      await fetch(`${BASE}/api/users/${userId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+    });
+
+    it("blocks changing email to one already used by another user", async () => {
+      const userAId = await createDisposableUser("qa.edittest.a@test.local");
+      const userBId = await createDisposableUser("qa.edittest.b@test.local");
+      try {
+        const res = await fetch(`${BASE}/api/users/${userAId}`, {
+          method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ email: "qa.edittest.b@test.local" }),
+        });
+        expect(res.status).toBe(409);
+      } finally {
+        await fetch(`${BASE}/api/users/${userAId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+        await fetch(`${BASE}/api/users/${userBId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+      }
+    });
+
+    it("blocks self-edit", async () => {
+      const sessionRes = await fetch(`${BASE}/api/auth/session`, { headers: { Cookie: adminCookie } });
+      const session = await sessionRes.json();
+      const res = await fetch(`${BASE}/api/users/${session.user.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ name: "Should Fail" }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("blocks demoting the last remaining admin account's role", async () => {
+      // Same stateless-JWT reasoning as the "blocks deleting the last remaining admin account"
+      // test above — a second, independent admin session is required to deactivate every
+      // *other* admin down to zero before attempting the role change this test targets.
+      const disposableAdminEmail = "qa.edittest.onlyadmin@test.local";
+      const disposableAdminId = await createDisposableUser(disposableAdminEmail, "admin");
+      const disposableAdminCookie = await login(disposableAdminEmail, "TestEdit@12345");
+
+      const listRes = await fetch(`${BASE}/api/users`, { headers: { Cookie: adminCookie } });
+      const { data } = await listRes.json();
+      const otherActiveAdmins = data.filter((u: { id: string; role: string; active: boolean }) => u.role === "admin" && u.active && u.id !== disposableAdminId);
+
+      try {
+        for (const a of otherActiveAdmins) {
+          const deactivateRes = await fetch(`${BASE}/api/users/${a.id}`, { method: "PUT", headers: { "Content-Type": "application/json", Cookie: disposableAdminCookie }, body: JSON.stringify({ active: false }) });
+          expect(deactivateRes.status, `deactivating ${a.id}`).toBe(200);
+        }
+
+        const res = await fetch(`${BASE}/api/users/${disposableAdminId}`, {
+          method: "PUT", headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ role: "employee" }),
+        });
+        expect(res.status).toBe(409);
+      } finally {
+        for (const a of otherActiveAdmins) {
+          await fetch(`${BASE}/api/users/${a.id}`, { method: "PUT", headers: { "Content-Type": "application/json", Cookie: disposableAdminCookie }, body: JSON.stringify({ active: true }) });
+        }
+        await fetch(`${BASE}/api/users/${disposableAdminId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+      }
+    });
+
+    it("employee and manager roles cannot edit users", async () => {
+      const userId = await createDisposableUser("qa.edittest.blocked@test.local");
+      const asEmployee = await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: employeeCookie }, body: JSON.stringify({ name: "Should Fail" }),
+      });
+      expect(asEmployee.status).toBe(403);
+      const asManager = await fetch(`${BASE}/api/users/${userId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Cookie: managerCookie }, body: JSON.stringify({ name: "Should Fail" }),
+      });
+      expect(asManager.status).toBe(403);
+
+      await fetch(`${BASE}/api/users/${userId}`, { method: "DELETE", headers: { Cookie: adminCookie } });
+    });
+  });
+
   // ---- Geofence (gap 4) ----
   describe("geofence", () => {
     afterAll(async () => {
