@@ -249,6 +249,27 @@ describe("processEmployeePayroll", () => {
     expect(half.totalEarnings).toBeCloseTo(full.totalEarnings / 2, -1); // within rounding
   });
 
+  it("prorates the TDS installment by paid-days ratio, so a partial month isn't taxed as a full month (regression: previously deducted a full month's TDS against a fraction of a month's pay, producing absurd effective tax rates)", () => {
+    const emp = buildEmployee({
+      taxRegime: "new",
+      salaryStructure: {
+        basic: 150000, dearnessAllowance: 0, houseRentAllowance: 60000, conveyanceAllowance: 1600,
+        medicalAllowance: 1250, specialAllowance: 30000, overtimeAllowance: 0, bonus: 0, otherEarnings: 0,
+        employerPF: 18000, employerESI: 0, gratuity: 0,
+      },
+    });
+    const full = processEmployeePayroll(emp, 7, 2026, 31, 31);
+    const partial = processEmployeePayroll(emp, 7, 2026, 4, 31);
+    expect(full.tdsMonthly).toBeGreaterThan(0);
+    // TDS scales down with the same paid-days ratio as earnings (allowing for rounding).
+    const expectedPartialTds = Math.round((full.tdsMonthly * 4) / 31);
+    expect(partial.tdsMonthly).toBeCloseTo(expectedPartialTds, -1);
+    // Guard against the old bug regressing: a 4/31-day month must not carry anywhere near a full month's TDS.
+    expect(partial.tdsMonthly).toBeLessThan(full.tdsMonthly * 0.3);
+    // And the resulting effective deduction rate for the month must stay sane, not the ~65% the bug produced.
+    expect(partial.totalDeductions / partial.totalEarnings).toBeLessThan(0.4);
+  });
+
   it("caps paidDays at daysInMonth even if presentDays overcounts", () => {
     const emp = buildEmployee();
     const result = processEmployeePayroll(emp, 7, 2026, 45, 31);

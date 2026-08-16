@@ -528,11 +528,18 @@ export function processEmployeePayroll(
   taxableIncome = Math.max(0, taxableIncome);
 
   const taxResult = calculateIncomeTax(taxableIncome, emp.taxRegime);
-  const tdsMonthly = Math.round(taxResult.total / 12);
+  // The annual tax projection above is deliberately based on the employee's standing (full-month)
+  // salary, not this month's prorated earnings — that's the correct steady-state annual estimate.
+  // But the monthly *installment* collected must be scaled down by the same paid-days ratio as
+  // earnings, or a partial month (new joiner, extended leave, resignation mid-month) gets hit with
+  // a full month's TDS bite against a fraction of a month's pay (previously produced absurd
+  // effective tax rates, e.g. 65% of a 4-paid-day month's earnings).
+  const tdsMonthly = Math.round((taxResult.total / 12) * prorationFactor);
 
   // Total deductions
-  // TDS/PT/ESI are computed from the employee's standing (full-month) salary structure — a
-  // reasonable approximation in a normal month, but if attendance-based proration has already
+  // PT/ESI are computed from the employee's standing (full-month) salary structure — a
+  // reasonable approximation in a normal month (PT slabs and ESI eligibility are standing-salary
+  // based per Indian practice, not prorated), but if attendance-based proration has already
   // reduced totalEarnings to less than the standing deductions (e.g. presentDays=0, unpaid leave,
   // new joiner mid-month), deductions must never exceed what was actually earned that month.
   //
