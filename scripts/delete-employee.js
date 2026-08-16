@@ -5,9 +5,12 @@
  * for genuinely non-real records (e.g. leftover demo/seed data) where a full purge is wanted
  * instead of the app's normal soft-delete (DELETE /api/employees/[id] just sets dateOfExit).
  *
- * Usage: npx tsx scripts/delete-employee.ts <employeeCode> --confirm
+ * Plain CommonJS (no build step, no devDependencies) so it can run inside the production
+ * container with a bare `node` — the standalone image doesn't ship tsx/ts-node.
+ *
+ * Usage: node scripts/delete-employee.js <employeeCode> [--confirm]
  */
-import { PrismaClient } from "@prisma/client";
+const { PrismaClient } = require("@prisma/client");
 
 const db = new PrismaClient();
 
@@ -16,7 +19,7 @@ async function main() {
   const confirmed = process.argv.includes("--confirm");
 
   if (!employeeCode) {
-    console.error("Usage: npx tsx scripts/delete-employee.ts <employeeCode> --confirm");
+    console.error("Usage: node scripts/delete-employee.js <employeeCode> [--confirm]");
     process.exit(1);
   }
 
@@ -88,7 +91,7 @@ async function main() {
   // stays internally consistent (summary cards, reports) after the row is gone.
   for (const runId of affectedRunIds) {
     const remaining = await db.payrollDetail.findMany({ where: { payrollRunId: runId } });
-    const sum = (fn: (d: (typeof remaining)[number]) => number) => remaining.reduce((acc, d) => acc + fn(d), 0);
+    const sum = (fn) => remaining.reduce((acc, d) => acc + fn(d), 0);
     await db.payrollRun.update({
       where: { id: runId },
       data: {
