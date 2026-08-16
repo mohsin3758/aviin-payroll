@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole, requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollFeature, requirePayrollSelfOrFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const employeeId = searchParams.get("employeeId");
     if (!employeeId) return apiError("employeeId is required", 400);
-    await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+    await requirePayrollSelfOrFeature(request, employeeId, ["admin", "hr"], "manage_onboarding");
 
     const tasks = await db.onboardingTask.findMany({
       where: { employeeId },
@@ -33,9 +33,10 @@ export async function GET(request: NextRequest) {
 // POST /api/onboarding/tasks — admin/hr only, adds a single checklist item.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const body = await request.json();
     const parsed = createTaskSchema.parse(body);
+    assertEmployeeInScope(restriction, parsed.employeeId);
 
     const task = await db.onboardingTask.create({ data: parsed });
 

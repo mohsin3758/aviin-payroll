@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { getOnboardingLetterData, OnboardingLetterError } from "@/lib/payroll/onboarding-letter";
 import { buildOnboardingLetterHtml } from "@/lib/payroll/onboarding-letter-email";
@@ -15,13 +15,14 @@ const letterSchema = z.object({ letterType: z.enum(["experience", "relieving"]) 
 // relieving letter, saving a copy as an EmployeeDocument.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_exit_management");
     const body = await request.json();
     const { letterType } = letterSchema.parse(body);
 
     const exitRequest = await db.exitRequest.findUnique({ where: { id } });
     if (!exitRequest) return apiError("Exit request not found", 404);
+    assertEmployeeInScope(restriction, exitRequest.employeeId);
 
     const data = await getOnboardingLetterData(exitRequest.employeeId);
     const html = buildOnboardingLetterHtml(data, letterType);

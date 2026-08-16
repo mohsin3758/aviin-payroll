@@ -8,13 +8,22 @@ import { AuthError, requireAuth, requireRole, type Role, type SessionPayload } f
 // restriction row can never leak extra privilege.
 export const PAYROLL_FEATURES = [
   "process_payroll", // POST /api/payroll, PUT /api/payroll/[runId], POST off-cycle, POST alternate-pay
-  "view_payroll", // GET /api/payroll, GET /api/payroll/[runId], GET /api/salary-slip
+  "view_payroll", // GET /api/payroll, GET /api/payroll/[runId], GET /api/salary-slip, salary-revisions
   "download_bank_file", // GET /api/payroll/[runId]/bank-file
   "manage_arrears", // GET/POST /api/arrears
   "manage_loans", // GET/POST /api/loans
   "send_payslips", // POST /api/salary-slip/send, POST /api/salary-slip/send-bulk
   "manage_form16", // GET /api/form16, POST /api/form16/send-bulk
   "view_reports", // GET /api/reports, GET /api/reports/trends
+  "manage_hiring_incentives", // GET/POST /api/hiring-incentives, PUT [id] — payroll-adjacent, feeds a real run
+  "view_employees", // GET /api/employees, GET /api/employees/[id]
+  "create_employee", // POST /api/employees — scope-exempt, no existing target
+  "edit_employee", // PUT/DELETE /api/employees/[id], activate-portal, face-enrollment, shift
+  "manage_employee_assets", // /api/employees/[id]/assets, /assets/[assetId]
+  "manage_onboarding", // /api/onboarding-invites/*, /api/onboarding/tasks/*, letters
+  "view_assets", // GET /api/assets (company-wide inventory)
+  "manage_exit_management", // /api/exit-requests/* except manager-approve
+  "manage_leave_management", // /api/leaves/* (hr branch), leave-types, leave-balances, encashment
 ] as const;
 export type PayrollFeature = (typeof PAYROLL_FEATURES)[number];
 
@@ -64,6 +73,14 @@ export function filterToScope<T extends { employeeId: string }>(restriction: Pay
   if (restriction.employeeIds === null) return rows;
   const ids = restriction.employeeIds;
   return rows.filter((r) => ids.has(r.employeeId));
+}
+
+/** Same as filterToScope, but for rows that are themselves the employee (keyed by .id, not
+ * .employeeId) — e.g. the Employees list route's own rows. */
+export function filterEmployeesToScope<T extends { id: string }>(restriction: PayrollRestriction, rows: T[]): T[] {
+  if (restriction.employeeIds === null) return rows;
+  const ids = restriction.employeeIds;
+  return rows.filter((r) => ids.has(r.id));
 }
 
 /**

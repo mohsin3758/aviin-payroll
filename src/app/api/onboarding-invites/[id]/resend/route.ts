@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { sendEmail } from "@/lib/mailer";
@@ -13,11 +13,12 @@ import { buildOnboardingInviteEmailHtml } from "@/lib/payroll/onboarding-invite-
 // (re-sending doesn't discard that context, it's just a fresh link to the same in-progress record).
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const { id } = await params;
 
     const invite = await db.onboardingInvite.findUnique({ where: { id }, include: { employee: true } });
     if (!invite) return apiError("Onboarding invite not found", 404);
+    assertEmployeeInScope(restriction, invite.employeeId);
     if (!canResendOrRevoke(invite.status)) {
       return apiError("Cannot resend — this onboarding has already been approved.", 409);
     }

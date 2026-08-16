@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { allocateLeaveTypeSchema } from "@/lib/validations/leave-type";
 import { logAudit } from "@/lib/audit";
@@ -22,7 +22,7 @@ interface AllocateResult {
 // src/app/api/form16/send-bulk/route.ts for the same per-item BulkResult convention.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session } = await requirePayrollFeature(request, ["admin", "hr"], "manage_leave_management");
     const { id: leaveTypeId } = await params;
 
     const leaveType = await db.leaveType.findUnique({ where: { id: leaveTypeId } });

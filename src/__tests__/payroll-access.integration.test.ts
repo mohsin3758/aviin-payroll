@@ -61,15 +61,19 @@ describe("Payroll access restrictions (requires live dev server)", () => {
   let adminCookie: string;
   let hrCookie: string;
   let hrId: string;
+  let managerCookie: string;
   let selfId: string; // EMP001 — the "in-scope" employee for scoped tests
   let otherId: string; // EMP002 — the "out-of-scope" employee for scoped tests
   const createdArrearIds: string[] = [];
+  const createdEmployeeIds: string[] = [];
+  const createdExitRequestIds: string[] = [];
 
   beforeAll(async () => {
     adminCookie = await login("admin@payrollpro.local", "Admin@12345");
     const hr = await ensureLogin(adminCookie, "qa.payrollaccess.hr@test.local", "hr");
     hrCookie = hr.cookie;
     hrId = hr.id;
+    managerCookie = await login("manager@payrollpro.local", "Manager@12345");
     selfId = await resolveEmployeeId(adminCookie, "EMP001");
     otherId = await resolveEmployeeId(adminCookie, "EMP002");
   });
@@ -79,6 +83,14 @@ describe("Payroll access restrictions (requires live dev server)", () => {
     await setPayrollAccess(adminCookie, hrId, [], []);
     if (createdArrearIds.length) {
       await db.salaryArrear.deleteMany({ where: { id: { in: createdArrearIds } } });
+    }
+    if (createdExitRequestIds.length) {
+      await db.exitChecklistItem.deleteMany({ where: { exitRequestId: { in: createdExitRequestIds } } });
+      await db.exitRequest.deleteMany({ where: { id: { in: createdExitRequestIds } } });
+    }
+    if (createdEmployeeIds.length) {
+      await db.salaryStructure.deleteMany({ where: { employeeId: { in: createdEmployeeIds } } });
+      await db.employee.deleteMany({ where: { id: { in: createdEmployeeIds } } });
     }
   });
 
@@ -225,5 +237,99 @@ describe("Payroll access restrictions (requires live dev server)", () => {
       body: JSON.stringify({ features: ["view_reports"], employeeIds: [] }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("feature-restricted hr user (manage_leave_management only) can manage leave types but is 403'd on arrears", async () => {
+    await setPayrollAccess(adminCookie, hrId, ["manage_leave_management"], []);
+
+    const createType = await fetch(`${BASE}/api/leave-types`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: hrCookie },
+      body: JSON.stringify({ name: `QA Leave Type ${Date.now()}`, shortCode: "QAL", totalDays: 5, isCarryForward: false, maxCarryForward: 0, isPaid: true }),
+    });
+    expect(createType.status).toBe(201);
+    const created = await createType.json();
+    await db.leaveType.delete({ where: { id: created.data.id } });
+
+    const arrears = await fetch(`${BASE}/api/arrears`, { headers: { Cookie: hrCookie } });
+    expect(arrears.status).toBe(403);
+  });
+
+  it("employee-scoped hr user (edit_employee, scoped to selfId) can edit selfId but is 403'd on otherId, and the employees list comes back filtered", async () => {
+    await setPayrollAccess(adminCookie, hrId, ["edit_employee", "view_employees"], [selfId]);
+
+    const editSelf = await fetch(`${BASE}/api/employees/${selfId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: hrCookie },
+      body: JSON.stringify({}),
+    });
+    expect(editSelf.status).not.toBe(403);
+
+    const editOther = await fetch(`${BASE}/api/employees/${otherId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: hrCookie },
+      body: JSON.stringify({}),
+    });
+    expect(editOther.status).toBe(403);
+
+    const list = await fetch(`${BASE}/api/employees?limit=200`, { headers: { Cookie: hrCookie } });
+    expect(list.status).toBe(200);
+    const { data } = await list.json();
+    expect(data.length).toBeGreaterThan(0);
+    expect(data.every((e: { id: string }) => e.id === selfId)).toBe(true);
+  });
+
+  it("create_employee is exempt from employee-scoping — a scoped hr user can still create a brand-new employee", async () => {
+    await setPayrollAccess(adminCookie, hrId, ["create_employee"], [selfId]);
+
+    const res = await fetch(`${BASE}/api/employees`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: hrCookie },
+      body: JSON.stringify({
+        firstName: "QA", lastName: "ScopeExempt", email: `qa.scope.exempt.${Date.now()}@test.local`,
+        dateOfJoining: new Date().toISOString(), designation: "QA Tester", department: "QA",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const created = await res.json();
+    createdEmployeeIds.push(created.id);
+  });
+
+  it("exit management: hr user without manage_exit_management is 403'd on hr-approve, but manager's manager-approve on the same request is unaffected", async () => {
+    const empRes = await fetch(`${BASE}/api/employees`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({
+        firstName: "QA", lastName: "ExitFlow", email: `qa.exit.flow.${Date.now()}@test.local`,
+        dateOfJoining: new Date().toISOString(), designation: "QA Tester", department: "QA",
+      }),
+    });
+    expect(empRes.status).toBe(201);
+    const employee = await empRes.json();
+    createdEmployeeIds.push(employee.id);
+
+    const exitRes = await fetch(`${BASE}/api/exit-requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ employeeId: employee.id, resignationDate: new Date().toISOString() }),
+    });
+    expect(exitRes.status).toBe(201);
+    const { data: exitRequest } = await exitRes.json();
+    createdExitRequestIds.push(exitRequest.id);
+
+    await setPayrollAccess(adminCookie, hrId, ["view_reports"], []); // no manage_exit_management
+    const hrApprove = await fetch(`${BASE}/api/exit-requests/${exitRequest.id}/hr-approve`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: hrCookie },
+      body: JSON.stringify({ approved: true }),
+    });
+    expect(hrApprove.status).toBe(403);
+
+    const managerApprove = await fetch(`${BASE}/api/exit-requests/${exitRequest.id}/manager-approve`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: managerCookie },
+      body: JSON.stringify({ approved: true }),
+    });
+    expect(managerApprove.status).not.toBe(403);
   });
 });

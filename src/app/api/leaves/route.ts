@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { z } from "zod";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { scopeToOwnEmployeeIfSelf } from "@/lib/auth";
+import { AuthError, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
+import { getPayrollRestriction, hasFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 
 const createLeaveSchema = z.object({
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   try {
     // employee role: silently restricted to their own applications (matches ess/leaves)
     // rather than 403ing, since the shared Leave Mgmt page and My Portal both hit this route.
-    const { forcedEmployeeId } = await scopeToOwnEmployeeIfSelf(request);
+    const { session, forcedEmployeeId } = await scopeToOwnEmployeeIfSelf(request);
     const { searchParams } = request.nextUrl;
 
     // If "types" query param is present, return all leave types (reference data, not
@@ -29,6 +30,14 @@ export async function GET(request: NextRequest) {
         orderBy: { name: "asc" },
       });
       return NextResponse.json(leaveTypes);
+    }
+
+    // An hr caller is additionally subject to their manage_leave_management feature/employee-
+    // scope restriction, if any — no-op for admin/manager/employee (getPayrollRestriction only
+    // ever narrows "hr").
+    const restriction = await getPayrollRestriction(session);
+    if (!forcedEmployeeId && session.role === "hr" && !hasFeature(restriction, "manage_leave_management")) {
+      throw new AuthError("Forbidden — your access doesn't include: manage_leave_management.", 403);
     }
 
     // Otherwise return leave applications with optional filters
@@ -44,7 +53,10 @@ export async function GET(request: NextRequest) {
     if (forcedEmployeeId) {
       where.employeeId = forcedEmployeeId;
     } else if (employeeId) {
+      assertEmployeeInScope(restriction, employeeId);
       where.employeeId = employeeId;
+    } else if (restriction.employeeIds) {
+      where.employeeId = { in: [...restriction.employeeIds] };
     }
 
     if (status) {
@@ -106,6 +118,14 @@ export async function POST(request: NextRequest) {
     // route is now admin/hr/manager-only, but this route itself must still refuse to let an
     // employee session log a leave against someone else's record via a direct API call.
     const employeeId = forcedEmployeeId ?? parsed.employeeId;
+
+    if (!forcedEmployeeId) {
+      const restriction = await getPayrollRestriction(session);
+      if (session.role === "hr" && !hasFeature(restriction, "manage_leave_management")) {
+        throw new AuthError("Forbidden — your access doesn't include: manage_leave_management.", 403);
+      }
+      assertEmployeeInScope(restriction, employeeId);
+    }
     const { leaveTypeId, startDate, endDate, reason } = parsed;
 
     if (endDate.getTime() < startDate.getTime()) {

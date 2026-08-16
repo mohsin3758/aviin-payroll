@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { handleApiError } from "@/lib/api-utils";
 
 // GET /api/assets — company-wide asset inventory, admin/hr only. Everything else in this
@@ -8,7 +8,7 @@ import { handleApiError } from "@/lib/api-utils";
 // view, so it stays out of ESS entirely and off the manager/self-or-role tier.
 export async function GET(request: NextRequest) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "view_assets");
     const { searchParams } = request.nextUrl;
     const search = searchParams.get("search") ?? "";
     const assetType = searchParams.get("assetType");
@@ -23,6 +23,9 @@ export async function GET(request: NextRequest) {
       where.returnedDate = null;
     } else if (status === "returned") {
       where.returnedDate = { not: null };
+    }
+    if (restriction.employeeIds) {
+      where.employeeId = { in: [...restriction.employeeIds] };
     }
     if (search) {
       where.OR = [

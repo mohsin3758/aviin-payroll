@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole, requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollFeature, requirePayrollSelfOrFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -18,7 +18,7 @@ const allocateAssetSchema = z.object({
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    await requireSelfOrRole(request, id, ["admin", "hr", "manager"]);
+    await requirePayrollSelfOrFeature(request, id, ["admin", "hr", "manager"], "manage_employee_assets");
     const assets = await db.employeeAsset.findMany({ where: { employeeId: id }, orderBy: { allocatedDate: "desc" } });
     return NextResponse.json({ data: assets });
   } catch (error) {
@@ -29,8 +29,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 // POST /api/employees/[id]/assets — admin/hr only, allocates a new asset.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_employee_assets");
+    assertEmployeeInScope(restriction, id);
     const body = await request.json();
     const parsed = allocateAssetSchema.parse(body);
 

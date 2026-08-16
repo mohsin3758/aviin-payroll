@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { sendEmail } from "@/lib/mailer";
@@ -16,13 +16,14 @@ import { reviewInviteSchema } from "@/lib/validations/onboarding-invite";
 // re-sending a "please fix this" email pointing at a dead link would be a genuine bug).
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const { id } = await params;
     const body = await request.json();
     const { decision, reason } = reviewInviteSchema.parse(body);
 
     const invite = await db.onboardingInvite.findUnique({ where: { id }, include: { employee: true } });
     if (!invite) return apiError("Onboarding invite not found", 404);
+    assertEmployeeInScope(restriction, invite.employeeId);
     if (!canReview(invite.status, decision)) {
       return apiError(`Cannot ${decision === "approved" ? "approve" : "reject"} an invite with status "${invite.status}".`, 409);
     }

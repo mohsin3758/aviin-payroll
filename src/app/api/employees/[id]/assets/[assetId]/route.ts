@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -17,8 +17,9 @@ const editAssetSchema = z.object({
 // PUT /api/employees/[id]/assets/[assetId] — admin/hr only, marks an asset returned.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string; assetId: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id, assetId } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_employee_assets");
+    assertEmployeeInScope(restriction, id);
 
     const existing = await db.employeeAsset.findUnique({ where: { id: assetId } });
     if (!existing || existing.employeeId !== id) return apiError("Asset not found", 404);
@@ -37,8 +38,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 // (type/brand/model/tag/condition/notes) — distinct from PUT, which only ever marks it returned.
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; assetId: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id, assetId } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_employee_assets");
+    assertEmployeeInScope(restriction, id);
 
     const existing = await db.employeeAsset.findUnique({ where: { id: assetId } });
     if (!existing || existing.employeeId !== id) return apiError("Asset not found", 404);
@@ -61,8 +63,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 // data-entry mistakes, not the normal end-of-life path for a real allocated asset.
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string; assetId: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id, assetId } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_employee_assets");
+    assertEmployeeInScope(restriction, id);
 
     const existing = await db.employeeAsset.findUnique({ where: { id: assetId } });
     if (!existing || existing.employeeId !== id) return apiError("Asset not found", 404);

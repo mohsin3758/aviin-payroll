@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
-import { requireRole, hashPassword } from "@/lib/auth";
+import { hashPassword } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { sendEmail } from "@/lib/mailer";
@@ -16,8 +17,9 @@ function generateTempPassword(): string {
 // emails it to them. This is the "onboarding portal activation" + "welcome email" step.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id: employeeId } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "edit_employee");
+    assertEmployeeInScope(restriction, employeeId);
 
     const employee = await db.employee.findUnique({ where: { id: employeeId } });
     if (!employee) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { approveExitRequestSchema } from "@/lib/validations/exit-request";
 import { logAudit } from "@/lib/audit";
@@ -18,13 +18,14 @@ const DEFAULT_EXIT_CHECKLIST = [
 // On approval, seeds the standard exit checklist.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_exit_management");
     const body = await request.json();
     const { approved, comment } = approveExitRequestSchema.parse(body);
 
     const existing = await db.exitRequest.findUnique({ where: { id } });
     if (!existing) return apiError("Exit request not found", 404);
+    assertEmployeeInScope(restriction, existing.employeeId);
     if (existing.status !== "pending_hr") {
       return apiError(`This request is not awaiting HR approval (current status: ${existing.status}).`, 409);
     }

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 
 // GET /api/onboarding-invites/[id] — admin/hr only. Full detail for the review dialog: the
 // employee snapshot as submitted, plus every uploaded document.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const { id } = await params;
 
     const invite = await db.onboardingInvite.findUnique({
@@ -18,6 +18,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
     });
     if (!invite) return apiError("Onboarding invite not found", 404);
+    assertEmployeeInScope(restriction, invite.employeeId);
 
     const documents = await db.employeeDocument.findMany({
       where: { employeeId: invite.employeeId },

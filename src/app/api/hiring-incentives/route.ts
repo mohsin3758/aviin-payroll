@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createHiringIncentiveSchema } from "@/lib/validations/hiring-incentive";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 import { computeIncentiveSchedule, refreshPendingHiringIncentiveVesting, resolveIncentiveRate } from "@/lib/payroll/hiring-incentive";
 
@@ -19,7 +19,7 @@ const CANDIDATE_SUMMARY = {
 // listing, so status is always current even if no payroll run has touched them yet.
 export async function GET(request: NextRequest) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_hiring_incentives");
     await refreshPendingHiringIncentiveVesting();
 
     const { searchParams } = request.nextUrl;
@@ -29,12 +29,15 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get("month");
     const year = searchParams.get("year");
 
+    if (recruiterId) assertEmployeeInScope(restriction, recruiterId);
+
     const where: Record<string, unknown> = {};
     if (recruiterId) where.recruiterId = recruiterId;
     if (candidateId) where.candidateId = candidateId;
     if (status) where.status = status;
     if (month) where.payMonth = Number(month);
     if (year) where.payYear = Number(year);
+    if (!recruiterId && restriction.employeeIds) where.recruiterId = { in: [...restriction.employeeIds] };
 
     const incentives = await db.hiringIncentive.findMany({
       where,
@@ -60,9 +63,10 @@ export async function GET(request: NextRequest) {
 // the client, since this determines a real cash payout.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_hiring_incentives");
     const body = await request.json();
     const parsed = createHiringIncentiveSchema.parse(body);
+    assertEmployeeInScope(restriction, parsed.recruiterId);
 
     const [recruiter, candidate] = await Promise.all([
       db.employee.findUnique({ where: { id: parsed.recruiterId } }),

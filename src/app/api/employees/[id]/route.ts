@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { updateEmployeeSchema } from "@/lib/validations/employee";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
-import { requireRole, requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollFeature, requirePayrollSelfOrFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { calculateGrossSalary } from "@/lib/payroll/engine";
 
 export async function GET(
@@ -15,7 +15,9 @@ export async function GET(
     // Matches the employees-list policy: self, or admin/hr/manager may view any record, but
     // manager never sees salaryStructure (full PAN/Aadhaar/bank/DOB/address is fine for
     // manager to see here, same as the list route — only compensation figures are stripped).
-    const session = await requireSelfOrRole(request, id, ["admin", "hr", "manager"]);
+    // An hr caller is additionally subject to their view_employees feature/employee-scope
+    // restriction, if any — no-op for admin/manager/self.
+    const { session } = await requirePayrollSelfOrFeature(request, id, ["admin", "hr", "manager"], "view_employees");
 
     const employee = await db.employee.findUnique({
       where: { id },
@@ -37,8 +39,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "edit_employee");
+    assertEmployeeInScope(restriction, id);
     const body = await request.json();
     const parsed = updateEmployeeSchema.parse(body);
     const { salaryStructure: salaryStructureData, ...employeeData } = parsed;
@@ -116,8 +119,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "edit_employee");
+    assertEmployeeInScope(restriction, id);
 
     const existing = await db.employee.findUnique({ where: { id } });
 

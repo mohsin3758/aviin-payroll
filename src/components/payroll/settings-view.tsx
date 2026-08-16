@@ -172,7 +172,9 @@ interface ManagedUser {
 
 const PAYROLL_FEATURES = [
   "process_payroll", "view_payroll", "download_bank_file", "manage_arrears",
-  "manage_loans", "send_payslips", "manage_form16", "view_reports",
+  "manage_loans", "send_payslips", "manage_form16", "view_reports", "manage_hiring_incentives",
+  "view_employees", "create_employee", "edit_employee", "manage_employee_assets",
+  "manage_onboarding", "view_assets", "manage_exit_management", "manage_leave_management",
 ] as const;
 type PayrollFeature = (typeof PAYROLL_FEATURES)[number];
 
@@ -185,7 +187,25 @@ const PAYROLL_FEATURE_LABELS: Record<PayrollFeature, string> = {
   send_payslips: "Send salary slips",
   manage_form16: "Manage Form 16",
   view_reports: "View reports",
+  manage_hiring_incentives: "Manage hiring incentives",
+  view_employees: "View employees",
+  create_employee: "Add employees",
+  edit_employee: "Edit employees",
+  manage_employee_assets: "Manage employee assets",
+  manage_onboarding: "Manage onboarding",
+  view_assets: "View asset inventory",
+  manage_exit_management: "Manage exit requests",
+  manage_leave_management: "Manage leave",
 };
+
+const FEATURE_GROUPS: { label: string; features: PayrollFeature[] }[] = [
+  { label: "Payroll & Hiring Incentives", features: ["process_payroll", "view_payroll", "download_bank_file", "manage_arrears", "manage_loans", "send_payslips", "manage_form16", "view_reports", "manage_hiring_incentives"] },
+  { label: "Employees", features: ["view_employees", "create_employee", "edit_employee", "manage_employee_assets"] },
+  { label: "Onboarding", features: ["manage_onboarding"] },
+  { label: "Assets", features: ["view_assets"] },
+  { label: "Exit Management", features: ["manage_exit_management"] },
+  { label: "Leave Management", features: ["manage_leave_management"] },
+];
 
 interface LinkableEmployee {
   id: string;
@@ -3079,7 +3099,7 @@ export default function SettingsView() {
                                 {u.role === 'hr' && (
                                   <Button variant="ghost" size="sm" onClick={() => openPayrollAccessDialog(u)}>
                                     <Shield className="size-3.5 mr-1" />
-                                    Payroll Access
+                                    Feature Access
                                   </Button>
                                 )}
                                 <Button variant="ghost" size="sm" onClick={() => { setResetTarget(u); setResetPasswordValue(''); }}>
@@ -3216,9 +3236,9 @@ export default function SettingsView() {
           <Dialog open={!!payrollAccessTarget} onOpenChange={(open) => !open && setPayrollAccessTarget(null)}>
             <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Payroll Access — {payrollAccessTarget?.name}</DialogTitle>
+                <DialogTitle>Feature Access — {payrollAccessTarget?.name}</DialogTitle>
                 <DialogDescription>
-                  By default an HR login has full payroll access. Restrict it to specific features and/or specific employees below —
+                  By default an HR login has full access. Restrict it to specific features and/or specific employees below —
                   this can only narrow their access, never grant more than an HR role already has.
                 </DialogDescription>
               </DialogHeader>
@@ -3228,25 +3248,32 @@ export default function SettingsView() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between rounded-lg border p-3">
                     <div>
-                      <p className="text-sm font-medium">Restrict this user&apos;s payroll access</p>
-                      <p className="text-xs text-muted-foreground">Off = full, unrestricted HR access to every payroll feature and employee.</p>
+                      <p className="text-sm font-medium">Restrict this user&apos;s access</p>
+                      <p className="text-xs text-muted-foreground">Off = full, unrestricted HR access to every feature and employee.</p>
                     </div>
                     <Switch checked={restrictPayroll} onCheckedChange={setRestrictPayroll} />
                   </div>
 
                   {restrictPayroll && (
                     <>
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <Label>Allowed features</Label>
-                        <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
-                          {PAYROLL_FEATURES.map((feature) => (
-                            <label key={feature} className="flex items-center gap-2 text-sm cursor-pointer">
-                              <Checkbox
-                                checked={selectedFeatures.has(feature)}
-                                onCheckedChange={() => toggleFeature(feature)}
-                              />
-                              {PAYROLL_FEATURE_LABELS[feature]}
-                            </label>
+                        <div className="space-y-3 rounded-lg border p-3">
+                          {FEATURE_GROUPS.map((group) => (
+                            <div key={group.label}>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">{group.label}</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                {group.features.map((feature) => (
+                                  <label key={feature} className="flex items-center gap-2 text-sm cursor-pointer">
+                                    <Checkbox
+                                      checked={selectedFeatures.has(feature)}
+                                      onCheckedChange={() => toggleFeature(feature)}
+                                    />
+                                    {PAYROLL_FEATURE_LABELS[feature]}
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </div>

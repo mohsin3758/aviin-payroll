@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 import { notifyEmployee } from "@/lib/notifications";
 
 // PUT /api/hiring-incentives/[id] — cancel a pending/eligible incentive before it's been paid.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_hiring_incentives");
     const { id } = await params;
     const body = await request.json();
 
@@ -16,6 +16,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!existing) {
       return apiError("Hiring incentive not found", 404);
     }
+    assertEmployeeInScope(restriction, existing.recruiterId);
     if (existing.status === "paid") {
       return apiError("This hiring incentive has already been paid out and cannot be cancelled.", 409);
     }

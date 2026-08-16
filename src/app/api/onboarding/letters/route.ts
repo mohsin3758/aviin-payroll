@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { getOnboardingLetterData, OnboardingLetterError } from "@/lib/payroll/onboarding-letter";
 import { buildOnboardingLetterHtml } from "@/lib/payroll/onboarding-letter-email";
@@ -18,9 +18,10 @@ const letterSchema = z.object({
 // employee, and saves a copy as an EmployeeDocument for record-keeping.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const body = await request.json();
     const { employeeId, letterType } = letterSchema.parse(body);
+    assertEmployeeInScope(restriction, employeeId);
 
     const data = await getOnboardingLetterData(employeeId);
     const html = buildOnboardingLetterHtml(data, letterType);

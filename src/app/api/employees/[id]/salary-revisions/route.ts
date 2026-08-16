@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollSelfOrFeature } from "@/lib/payroll-access";
 import { handleApiError } from "@/lib/api-utils";
 
 // GET /api/employees/[id]/salary-revisions — the append-only salary change history. Treated
@@ -8,7 +8,7 @@ import { handleApiError } from "@/lib/api-utils";
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    await requireSelfOrRole(request, id, ["admin", "hr"]);
+    await requirePayrollSelfOrFeature(request, id, ["admin", "hr"], "view_payroll");
     const revisions = await db.salaryRevision.findMany({
       where: { employeeId: id },
       orderBy: { effectiveDate: "desc" },

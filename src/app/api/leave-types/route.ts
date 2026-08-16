@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { handleApiError } from "@/lib/api-utils";
 import { createLeaveTypeSchema } from "@/lib/validations/leave-type";
 import { logAudit } from "@/lib/audit";
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
 // POST /api/leave-types — admin/hr only.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session } = await requirePayrollFeature(request, ["admin", "hr"], "manage_leave_management");
     const body = await request.json();
     const parsed = createLeaveTypeSchema.parse(body);
 

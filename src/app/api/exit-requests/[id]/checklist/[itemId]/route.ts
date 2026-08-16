@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -10,22 +10,23 @@ const updateSchema = z.object({ isCompleted: z.boolean() });
 // PUT /api/exit-requests/[id]/checklist/[itemId] — admin/hr only.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string; itemId: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id, itemId } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_exit_management");
     const body = await request.json();
     const { isCompleted } = updateSchema.parse(body);
 
     const existing = await db.exitChecklistItem.findUnique({ where: { id: itemId } });
     if (!existing || existing.exitRequestId !== id) return apiError("Checklist item not found", 404);
+    const parentRequest = await db.exitRequest.findUnique({ where: { id } });
+    if (parentRequest) assertEmployeeInScope(restriction, parentRequest.employeeId);
 
     // "Company assets returned" is a free-text checklist title (see DEFAULT_EXIT_CHECKLIST in
     // hr-approve/route.ts) — this is the one place it's cross-checked against real
     // EmployeeAsset records, so HR can't tick it off while a laptop/phone is still outstanding.
     if (isCompleted && existing.taskName === "Company assets returned") {
-      const exitRequest = await db.exitRequest.findUnique({ where: { id } });
-      if (exitRequest) {
+      if (parentRequest) {
         const unreturned = await db.employeeAsset.findMany({
-          where: { employeeId: exitRequest.employeeId, returnedDate: null },
+          where: { employeeId: parentRequest.employeeId, returnedDate: null },
         });
         if (unreturned.length > 0) {
           const list = unreturned.map((a) => `${a.assetType}${a.assetTag ? ` (${a.assetTag})` : ""}`).join(", ");

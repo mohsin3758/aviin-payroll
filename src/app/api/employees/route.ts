@@ -3,15 +3,22 @@ import { db } from "@/lib/db";
 import { createEmployeeSchema } from "@/lib/validations/employee";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
-import { requireRole, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
+import { AuthError, scopeToOwnEmployeeIfSelf } from "@/lib/auth";
+import { requirePayrollFeature, getPayrollRestriction, hasFeature } from "@/lib/payroll-access";
 import { generateNextEmployeeCode } from "@/lib/employee-code";
 
 export async function GET(request: NextRequest) {
   try {
     // employee role: silently restricted to their own record (matches the ESS routes'
     // pattern) rather than 403ing, since this route also backs an employee's own lookups.
-    // manager: sees everyone, but never salary figures — see include below.
+    // manager: sees everyone, but never salary figures — see include below. An hr caller is
+    // additionally subject to their configured view_employees feature/employee-scope restriction,
+    // if any — no-op for every other role, since getPayrollRestriction only narrows "hr".
     const { session, forcedEmployeeId } = await scopeToOwnEmployeeIfSelf(request);
+    const restriction = await getPayrollRestriction(session);
+    if (!hasFeature(restriction, "view_employees")) {
+      throw new AuthError("Forbidden — your access doesn't include: view_employees.", 403);
+    }
     const { searchParams } = request.nextUrl;
     const search = searchParams.get("search") ?? "";
     const department = searchParams.get("department");
@@ -60,6 +67,10 @@ export async function GET(request: NextRequest) {
       if (onboardingStatus) {
         where.onboardingStatus = onboardingStatus;
       }
+
+      if (restriction.employeeIds) {
+        where.id = { in: [...restriction.employeeIds] };
+      }
     }
 
     const [employees, total] = await Promise.all([
@@ -87,7 +98,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session } = await requirePayrollFeature(request, ["admin", "hr"], "create_employee");
     const body = await request.json();
     const parsed = createEmployeeSchema.parse(body);
     const { salaryStructure: salaryStructureData, employeeCode, ...employeeData } = parsed;

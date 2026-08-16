@@ -1,22 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { AuthError, requireAuth } from "@/lib/auth";
 import { apiError, handleApiError, getDefaultCompanyId } from "@/lib/api-utils";
 import { createExitRequestSchema } from "@/lib/validations/exit-request";
 import { logAudit } from "@/lib/audit";
 import { notifyRoles } from "@/lib/notifications";
+import { getPayrollRestriction, hasFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 
-// GET /api/exit-requests — employees see only their own; admin/hr/manager see everyone's.
+// GET /api/exit-requests — employees see only their own; admin/hr/manager see everyone's. An hr
+// caller is additionally subject to their manage_exit_management feature/employee-scope
+// restriction, if any — no-op for admin/manager/employee.
 export async function GET(request: NextRequest) {
   try {
     const session = await requireAuth(request);
     const { searchParams } = request.nextUrl;
     const status = searchParams.get("status");
+    const restriction = await getPayrollRestriction(session);
+    if (session.role === "hr" && !hasFeature(restriction, "manage_exit_management")) {
+      throw new AuthError("Forbidden — your access doesn't include: manage_exit_management.", 403);
+    }
 
     const where: Record<string, unknown> = {};
     if (session.role === "employee") {
       if (!session.employeeId) return apiError("Your login isn't linked to an employee record.", 403);
       where.employeeId = session.employeeId;
+    } else if (restriction.employeeIds) {
+      where.employeeId = { in: [...restriction.employeeIds] };
     }
     if (status) where.status = status;
 
@@ -50,6 +59,11 @@ export async function POST(request: NextRequest) {
       }
       if (!parsed.employeeId) return apiError("employeeId is required", 400);
       employeeId = parsed.employeeId;
+      const restriction = await getPayrollRestriction(session);
+      if (session.role === "hr" && !hasFeature(restriction, "manage_exit_management")) {
+        throw new AuthError("Forbidden — your access doesn't include: manage_exit_management.", 403);
+      }
+      assertEmployeeInScope(restriction, employeeId);
     }
 
     const employee = await db.employee.findUnique({ where: { id: employeeId } });

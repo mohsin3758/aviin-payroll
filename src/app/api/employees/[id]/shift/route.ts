@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole, requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollFeature, requirePayrollSelfOrFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -13,7 +13,7 @@ const assignSchema = z.object({ shiftId: z.string().min(1) });
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    await requireSelfOrRole(request, id, ["admin", "hr", "manager"]);
+    await requirePayrollSelfOrFeature(request, id, ["admin", "hr", "manager"], "edit_employee");
     const assignment = await db.employeeShift.findFirst({
       where: { employeeId: id },
       include: { shift: true },
@@ -28,8 +28,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 // POST /api/employees/[id]/shift — admin/hr only, assigns a shift effective now.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "edit_employee");
+    assertEmployeeInScope(restriction, id);
     const body = await request.json();
     const { shiftId } = assignSchema.parse(body);
 

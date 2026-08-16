@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollSelfOrFeature } from "@/lib/payroll-access";
 
 // GET /api/leaves/balance?employeeId=...&year=...
 export async function GET(request: NextRequest) {
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
 
     // Same category of gap as the rest of this pass: found while writing the integration
     // tests below, not one of the original 7, but the identical missing-ownership-check bug.
-    await requireSelfOrRole(request, employeeId, ["admin", "hr", "manager"]);
+    await requirePayrollSelfOrFeature(request, employeeId, ["admin", "hr", "manager"], "manage_leave_management");
 
     const yearParam = searchParams.get("year");
     const year = yearParam ? parseInt(yearParam, 10) : new Date().getFullYear();

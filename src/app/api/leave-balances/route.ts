@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { createLeaveBalanceSchema } from "@/lib/validations/leave-balance";
 import { logAudit } from "@/lib/audit";
@@ -10,9 +10,10 @@ import { logAudit } from "@/lib/audit";
 // (src/app/api/leave-types/[id]/allocate/route.ts). 409 if one already exists — use PUT instead.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_leave_management");
     const body = await request.json();
     const parsed = createLeaveBalanceSchema.parse(body);
+    assertEmployeeInScope(restriction, parsed.employeeId);
 
     const [employee, leaveType] = await Promise.all([
       db.employee.findUnique({ where: { id: parsed.employeeId } }),

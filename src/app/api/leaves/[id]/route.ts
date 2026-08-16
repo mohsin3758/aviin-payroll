@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireRole, requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollFeature, requirePayrollSelfOrFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 import { notifyEmployee } from "@/lib/notifications";
 
@@ -31,7 +31,7 @@ export async function GET(
       return apiError("Leave application not found", 404);
     }
 
-    await requireSelfOrRole(request, leaveApplication.employeeId, ["admin", "hr", "manager"]);
+    await requirePayrollSelfOrFeature(request, leaveApplication.employeeId, ["admin", "hr", "manager"], "manage_leave_management");
 
     return NextResponse.json(leaveApplication);
   } catch (error) {
@@ -45,7 +45,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireRole(request, ["admin", "hr", "manager"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr", "manager"], "manage_leave_management");
     const { id } = await params;
     const body = await request.json();
     const { status, approvedBy } = body;
@@ -59,6 +59,7 @@ export async function PUT(
     if (!existing) {
       return apiError("Leave application not found", 404);
     }
+    assertEmployeeInScope(restriction, existing.employeeId);
 
     if (existing.status !== "pending") {
       return apiError(
@@ -166,7 +167,7 @@ export async function DELETE(
       return apiError("Leave application not found", 404);
     }
 
-    const session = await requireSelfOrRole(request, existing.employeeId, ["admin", "hr", "manager"]);
+    const { session } = await requirePayrollSelfOrFeature(request, existing.employeeId, ["admin", "hr", "manager"], "manage_leave_management");
 
     if (existing.status === "cancelled") {
       return apiError("This leave application is already cancelled.", 409);

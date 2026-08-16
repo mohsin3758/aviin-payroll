@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { notifyEmployee } from "@/lib/notifications";
@@ -11,11 +11,12 @@ import { notifyEmployee } from "@/lib/notifications";
 // is locked.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
     const { id } = await params;
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_exit_management");
 
     const exitRequest = await db.exitRequest.findUnique({ where: { id } });
     if (!exitRequest) return apiError("Exit request not found", 404);
+    assertEmployeeInScope(restriction, exitRequest.employeeId);
 
     const settlement = await db.finalSettlement.findUnique({ where: { exitRequestId: id } });
     if (!settlement) return apiError("Compute the final settlement before finalizing.", 400);

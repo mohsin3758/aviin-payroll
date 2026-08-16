@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 
@@ -21,9 +21,10 @@ const DEFAULT_TASKS = [
 // checklist for a new employee in one action (skips if tasks already exist for them).
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const body = await request.json();
     const { employeeId } = seedSchema.parse(body);
+    assertEmployeeInScope(restriction, employeeId);
 
     const employee = await db.employee.findUnique({ where: { id: employeeId } });
     if (!employee) return apiError("Employee not found", 404);

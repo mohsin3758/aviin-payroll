@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { canResendOrRevoke } from "@/lib/onboarding-invite";
@@ -11,11 +11,12 @@ import { canResendOrRevoke } from "@/lib/onboarding-invite";
 // onboarding is done, there's nothing left to revoke.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const { id } = await params;
 
     const invite = await db.onboardingInvite.findUnique({ where: { id } });
     if (!invite) return apiError("Onboarding invite not found", 404);
+    assertEmployeeInScope(restriction, invite.employeeId);
     if (!canResendOrRevoke(invite.status)) {
       return apiError("Cannot revoke — this onboarding has already been approved.", 409);
     }

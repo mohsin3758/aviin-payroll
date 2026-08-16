@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { apiError, handleApiError } from "@/lib/api-utils";
 import { editLeaveTypeSchema } from "@/lib/validations/leave-type";
 import { logAudit } from "@/lib/audit";
@@ -12,7 +12,7 @@ import { logAudit } from "@/lib/audit";
 // real leave history (LeaveBalance/LeaveApplication) that must never disappear.
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session } = await requirePayrollFeature(request, ["admin", "hr"], "manage_leave_management");
     const { id } = await params;
 
     const existing = await db.leaveType.findUnique({ where: { id } });

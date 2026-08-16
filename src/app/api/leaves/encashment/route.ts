@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createEncashmentSchema } from "@/lib/validations/encashment";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 
 // POST /api/leaves/encashment — pay out unused leave balance beyond what can be carried
@@ -10,9 +10,10 @@ import { logAudit } from "@/lib/audit";
 // carried forward or taken as leave later.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_leave_management");
     const body = await request.json();
     const { employeeId, leaveTypeId, year, payMonth, payYear } = createEncashmentSchema.parse(body);
+    assertEmployeeInScope(restriction, employeeId);
 
     const [employee, leaveType, balance] = await Promise.all([
       db.employee.findUnique({ where: { id: employeeId }, include: { salaryStructure: true } }),

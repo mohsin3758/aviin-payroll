@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { apiError, handleApiError } from "@/lib/api-utils";
+import { getPayrollRestriction, hasFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 
 // GET /api/exit-requests/[id] — full detail with checklist + settlement.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -20,6 +21,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!exitRequest) return apiError("Exit request not found", 404);
     if (session.role === "employee" && session.employeeId !== exitRequest.employeeId) {
       return apiError("You can only view your own exit request.", 403);
+    }
+    if (session.role === "hr") {
+      const restriction = await getPayrollRestriction(session);
+      if (!hasFeature(restriction, "manage_exit_management")) {
+        return apiError("Forbidden — your access doesn't include: manage_exit_management.", 403);
+      }
+      assertEmployeeInScope(restriction, exitRequest.employeeId);
     }
 
     // So the checklist screen can show what's still outstanding before "Company assets

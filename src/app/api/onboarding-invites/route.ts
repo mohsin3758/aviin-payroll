@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
 import { logAudit } from "@/lib/audit";
 import { sendEmail } from "@/lib/mailer";
@@ -13,12 +13,13 @@ import { buildOnboardingInviteEmailHtml } from "@/lib/payroll/onboarding-invite-
 // HR has one place to see everyone mid-onboarding rather than checking one employee at a time.
 export async function GET(request: NextRequest) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const { searchParams } = request.nextUrl;
     const status = searchParams.get("status");
 
     const where: Record<string, unknown> = {};
     if (status) where.status = status;
+    if (restriction.employeeIds) where.employeeId = { in: [...restriction.employeeIds] };
 
     const invites = await db.onboardingInvite.findMany({
       where,
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
 // if the email silently fails to send.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session } = await requirePayrollFeature(request, ["admin", "hr"], "manage_onboarding");
     const body = await request.json();
     const parsed = createOnboardingInviteSchema.parse(body);
 
