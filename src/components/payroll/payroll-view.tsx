@@ -124,6 +124,7 @@ interface PayrollDetailRow {
   tds: number;
   professionalTax: number;
   lwf: number;
+  employerLwf: number;
   totalDeductions: number;
   netSalary: number;
   grossSalary: number;
@@ -452,7 +453,7 @@ export default function PayrollView() {
       paidDays: 0, basic: 0, dearnessAllowance: 0, houseRentAllowance: 0,
       specialAllowance: 0, totalEarnings: 0,
       employeePF: 0, employeeESI: 0, tds: 0, professionalTax: 0, lwf: 0,
-      totalDeductions: 0, netSalary: 0, employerPF: 0, employerESI: 0,
+      totalDeductions: 0, netSalary: 0, employerPF: 0, employerESI: 0, employerLwf: 0,
     };
     for (const d of detail.details) {
       t.paidDays += d.paidDays;
@@ -470,6 +471,7 @@ export default function PayrollView() {
       t.netSalary += d.netSalary;
       t.employerPF += d.employerPF;
       t.employerESI += d.employerESI;
+      t.employerLwf += d.employerLwf;
     }
     return t;
   };
@@ -823,6 +825,7 @@ export default function PayrollView() {
                       <TableHead className="text-right">Net Salary</TableHead>
                       <TableHead className="text-right">Er. PF</TableHead>
                       <TableHead className="text-right">Er. ESI</TableHead>
+                      <TableHead className="text-right">Er. LWF</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -853,6 +856,7 @@ export default function PayrollView() {
                         </TableCell>
                         <TableCell className="text-right">{fmt(d.employerPF)}</TableCell>
                         <TableCell className="text-right">{fmt(d.employerESI)}</TableCell>
+                        <TableCell className="text-right">{fmt(d.employerLwf)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -904,6 +908,9 @@ export default function PayrollView() {
                         </TableCell>
                         <TableCell className="text-right">
                           {fmt(detailTotals(selectedRun).employerESI)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {fmt(detailTotals(selectedRun).employerLwf)}
                         </TableCell>
                       </TableRow>
                     </TableFooter>

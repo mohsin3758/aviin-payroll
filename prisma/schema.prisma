@@ -660,6 +660,11 @@ model PayrollDetail {
   tds                 Float
   professionalTax     Float
   lwf                 Float
+  // Employer's LWF share — like employerPF/employerESI above, this is netted against the
+  // employee's own take-home Net Pay too (confirmed company policy, not standard statutory
+  // practice — see src/lib/payroll/engine.ts), so it's tracked separately from `lwf` (the
+  // employee's own share) for an honest, reconcilable payslip breakdown.
+  employerLwf         Float    @default(0)
   tardinessDeduction  Float    @default(0)
   otherDeductions     Float    @default(0)
   totalDeductions     Float

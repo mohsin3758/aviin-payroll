@@ -186,17 +186,42 @@ describe("processEmployeePayroll", () => {
     expect(result.deductionsCapped).toBe(false);
   });
 
-  it("nets the full employer PF contribution against take-home Net Pay, matching this company's payroll convention (Net Pay = Gross - Employee PF - ESI - Employer PF Deduction - TDS - PT - LWF)", () => {
+  it("nets both employee AND employer PF against take-home Net Pay — confirmed company policy despite not being standard statutory practice (Net Pay = Gross - Employee PF - Employer PF - Employee ESI - Employer ESI - TDS - PT - Employee LWF - Employer LWF)", () => {
     const emp = buildEmployee();
     const result = processEmployeePayroll(emp, 7, 2026, 31, 31);
     const employerPFContribution = result.employerPF + result.employerEPS + result.employerEDLI;
     expect(employerPFContribution).toBe(result.employeePF); // same 12% rate on the same wage base, by construction
     const expectedTotalDeductions =
-      result.employeePF + employerPFContribution + result.employeeESI + result.tdsMonthly + result.ptAmount + result.lwfEmployee;
+      result.employeePF + employerPFContribution + result.employeeESI + result.employerESI
+      + result.tdsMonthly + result.ptAmount + result.lwfEmployee + result.lwfEmployer;
     expect(result.totalDeductions).toBe(expectedTotalDeductions);
     expect(result.netSalary).toBe(result.totalEarnings - result.totalDeductions);
-    // Gross Salary and CTC are unaffected — only take-home Net Pay nets against employer PF.
+    // Gross Salary and CTC are unaffected — only take-home Net Pay nets against the employer's share.
     expect(result.grossSalary).toBe(result.totalEarnings);
+  });
+
+  it("also nets employer ESI and employer LWF against Net Pay when those are applicable (not just PF)", () => {
+    // Haryana LWF is monthly with no wage ceiling (Maharashtra, the buildEmployee default, is
+    // half-yearly with a ₹3,000 ceiling — wouldn't engage for an arbitrary test month/salary).
+    // Low salary structure so gross also stays under the ESI wage ceiling and ESI applies too.
+    const emp = buildEmployee({
+      state: "Haryana",
+      esiApplicable: true,
+      lwfApplicable: true,
+      salaryStructure: {
+        basic: 12000, dearnessAllowance: 0, houseRentAllowance: 4000, conveyanceAllowance: 1000,
+        medicalAllowance: 0, specialAllowance: 0, overtimeAllowance: 0, bonus: 0, otherEarnings: 0,
+        employerPF: 0, employerESI: 0, gratuity: 0,
+      },
+    });
+    const result = processEmployeePayroll(emp, 7, 2026, 31, 31);
+    expect(result.employerESI).toBeGreaterThan(0);
+    expect(result.lwfEmployer).toBeGreaterThan(0);
+    const expectedTotalDeductions =
+      result.employeePF + result.employeePF + result.employeeESI + result.employerESI
+      + result.tdsMonthly + result.ptAmount + result.lwfEmployee + result.lwfEmployer;
+    expect(result.totalDeductions).toBe(expectedTotalDeductions);
+    expect(result.netSalary).toBe(result.totalEarnings - result.totalDeductions);
   });
 
   it("adds computed overtime pay on top of the standing overtimeAllowance", () => {

@@ -149,6 +149,7 @@ export async function getSalarySlipData(employeeId: string, month: number, year:
         employerEPS: pfResult.employerEPS,
         employerEDLI: pfResult.employerEDLI,
         employerESI: payrollDetail.employerESI,
+        employerLWF: payrollDetail.employerLwf,
       },
       totals: {
         totalEarnings: payrollDetail.totalEarnings,
@@ -208,6 +209,7 @@ export async function getSalarySlipData(employeeId: string, month: number, year:
       employerEPS: result.employerEPS,
       employerEDLI: result.employerEDLI,
       employerESI: result.employerESI,
+      employerLWF: result.lwfEmployer,
     },
     totals: {
       totalEarnings: result.totalEarnings,

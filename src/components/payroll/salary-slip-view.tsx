@@ -104,6 +104,7 @@ interface SalarySlipData {
     employerEPS: number;
     employerEDLI: number;
     employerESI: number;
+    employerLWF: number;
   };
   totals: {
     totalEarnings: number;
@@ -482,10 +483,13 @@ export default function SalarySlipView() {
                   <Table>
                     <TableBody>
                       <SlipRow label="EPF (Employee)" value={slip.deductions.employeePF} />
+                      <SlipRow label="EPF (Employer share)" value={slip.employerContributions.employerPF} />
                       <SlipRow label="ESI (Employee)" value={slip.deductions.employeeESI} />
+                      <SlipRow label="ESI (Employer share)" value={slip.employerContributions.employerESI} />
                       <SlipRow label="TDS" value={slip.deductions.tds} />
                       <SlipRow label="Professional Tax" value={slip.deductions.professionalTax} />
-                      <SlipRow label="LWF" value={slip.deductions.lwf} />
+                      <SlipRow label="LWF (Employee)" value={slip.deductions.lwf} />
+                      <SlipRow label="LWF (Employer share)" value={slip.employerContributions.employerLWF} />
                       <SlipRow label="Tardiness Ded." value={slip.deductions.tardinessDeduction} />
                       <SlipRow label="Other Deductions" value={slip.deductions.otherDeductions} />
                     </TableBody>
@@ -501,17 +505,21 @@ export default function SalarySlipView() {
                 </div>
               </div>
 
-              {/* ── Employer Contributions ────────────────────────── */}
+              {/* ── Employer Contributions (Cost to Company) ────────── */}
               <div>
                 <h4 className="text-sm font-bold uppercase tracking-wider text-slate-600 mb-2 border-b pb-1">
-                  Employer Contributions
+                  Employer Contributions (Cost to Company)
                 </h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Company policy: these amounts are also deducted from your Net Pay above, in addition to your own PF/ESI/LWF share.
+                </p>
                 <Table>
                   <TableBody>
                     <SlipRow label="EPF (Employer)" value={slip.employerContributions.employerPF} />
                     <SlipRow label="EPS" value={slip.employerContributions.employerEPS} />
                     <SlipRow label="EDLI" value={slip.employerContributions.employerEDLI} />
                     <SlipRow label="ESI (Employer)" value={slip.employerContributions.employerESI} />
+                    <SlipRow label="LWF (Employer)" value={slip.employerContributions.employerLWF} />
                   </TableBody>
                 </Table>
               </div>

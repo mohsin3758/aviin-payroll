@@ -536,22 +536,25 @@ export function processEmployeePayroll(
   // reduced totalEarnings to less than the standing deductions (e.g. presentDays=0, unpaid leave,
   // new joiner mid-month), deductions must never exceed what was actually earned that month.
   //
-  // Employer PF (employerPF+employerEPS+employerEDLI, always equal to employeePF since both use
-  // the same 12% rate on the same pfWages) is netted against take-home Net Pay here too, matching
-  // this company's own payroll convention (Net Pay = Gross - Employee PF - ESI - Employer PF
-  // Deduction - TDS - PT - LWF) — Gross Salary and CTC still separately report the full employer
-  // cost, this only changes what actually reaches the employee's bank account.
+  // Deliberate, explicit company policy (confirmed after flagging that this is not standard
+  // statutory practice — under the EPF/ESI Acts the employer's contribution is legally the
+  // employer's own cost and cannot ordinarily be recovered from an employee's wages): BOTH the
+  // employee's own share AND the employer's matching share of PF, ESI, and LWF are netted
+  // against take-home Net Pay here (Net Pay = Gross - Employee PF - Employer PF - Employee ESI -
+  // Employer ESI - TDS - PT - Employee LWF - Employer LWF). TDS and PT have no employer-side
+  // component in Indian payroll, so only the employee amount applies to those two. Gross Salary
+  // and CTC still separately report the full employer cost regardless of this — this only
+  // changes what actually reaches the employee's bank account.
   const employerPFMonthly = pfResult.employeePF; // Employer matches
+  const employerESIMonthly = esiResult.employerESI;
+  const employerLWFMonthly = lwfResult.employer;
   const rawTotalDeductions =
-    pfResult.employeePF + employerPFMonthly + esiResult.employeeESI + tdsMonthly + ptAmount + lwfResult.employee;
+    pfResult.employeePF + employerPFMonthly + esiResult.employeeESI + employerESIMonthly + tdsMonthly + ptAmount + lwfResult.employee + employerLWFMonthly;
   const totalDeductions = Math.min(rawTotalDeductions, totalEarnings);
   const deductionsCapped = rawTotalDeductions > totalEarnings;
 
   // Net salary
   const netSalary = totalEarnings - totalDeductions;
-
-  // Employer contributions for CTC
-  const employerESIMonthly = esiResult.employerESI;
 
   const ctcMonthly = totalEarnings + employerPFMonthly + employerESIMonthly + ss.gratuity;
 

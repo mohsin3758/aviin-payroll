@@ -49,10 +49,13 @@ export function buildSalarySlipEmailHtml(slip: SalarySlipData): string {
         <p style="font-size:12px;font-weight:700;color:#dc2626;text-transform:uppercase;margin:0 0 6px;">Deductions</p>
         <table style="width:100%;border-collapse:collapse;">
           ${row('Employee PF', fmt(slip.deductions.employeePF))}
+          ${row('Employer PF share', fmt(slip.employerContributions.employerPF))}
           ${row('Employee ESI', fmt(slip.deductions.employeeESI))}
+          ${row('Employer ESI share', fmt(slip.employerContributions.employerESI))}
           ${row('TDS', fmt(slip.deductions.tds))}
           ${row('Professional Tax', fmt(slip.deductions.professionalTax))}
-          ${row('LWF', fmt(slip.deductions.lwf))}
+          ${row('LWF (Employee)', fmt(slip.deductions.lwf))}
+          ${row('LWF (Employer share)', fmt(slip.employerContributions.employerLWF))}
           ${row('Other Deductions', fmt(slip.deductions.otherDeductions))}
           ${row('Total Deductions', fmt(slip.deductions.totalDeductions), true)}
         </table>

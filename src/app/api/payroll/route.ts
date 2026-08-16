@@ -176,6 +176,7 @@ export async function POST(request: NextRequest) {
       tds: number;
       professionalTax: number;
       lwf: number;
+      employerLwf: number;
       otherDeductions: number;
       totalDeductions: number;
       netSalary: number;
@@ -337,6 +338,7 @@ export async function POST(request: NextRequest) {
         tds: result.tdsMonthly,
         professionalTax: result.ptAmount,
         lwf: result.lwfEmployee,
+        employerLwf: result.lwfEmployer,
         otherDeductions: loanDeduction,
         totalDeductions: adjustedTotalDeductions,
         netSalary: adjustedNetSalary,
