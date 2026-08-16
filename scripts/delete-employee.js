@@ -29,12 +29,13 @@ async function main() {
     process.exit(1);
   }
 
-  const [loans, tickets, exitRequests, payrollDetails, attendanceCount] = await Promise.all([
+  const [loans, tickets, exitRequests, payrollDetails, attendanceCount, linkedUser] = await Promise.all([
     db.employeeLoan.findMany({ where: { employeeId: employee.id } }),
     db.helpDeskTicket.findMany({ where: { employeeId: employee.id } }),
     db.exitRequest.findMany({ where: { employeeId: employee.id } }),
     db.payrollDetail.findMany({ where: { employeeId: employee.id } }),
     db.attendance.count({ where: { employeeId: employee.id } }),
+    db.user.findUnique({ where: { employeeId: employee.id } }),
   ]);
 
   console.log(`Employee: ${employee.firstName} ${employee.lastName ?? ""} (${employee.employeeCode}, id=${employee.id})`);
@@ -79,6 +80,10 @@ async function main() {
     db.salaryRevision.deleteMany({ where: { employeeId: employee.id } }),
     db.expenseClaim.deleteMany({ where: { employeeId: employee.id } }),
     db.employeeShift.deleteMany({ where: { employeeId: employee.id } }),
+    db.userPayrollEmployeeScope.deleteMany({ where: { employeeId: employee.id } }),
+    // If this employee is also linked to a portal login (e.g. an hr staffer who is themselves
+    // an employee record), that login's own payroll-feature overrides must go before the user row.
+    db.userPayrollFeature.deleteMany({ where: { userId: linkedUser?.id ?? "__none__" } }),
     db.user.deleteMany({ where: { employeeId: employee.id } }),
     db.salaryStructure.deleteMany({ where: { employeeId: employee.id } }),
 

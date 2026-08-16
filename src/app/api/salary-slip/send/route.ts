@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSalarySlipData, SalarySlipError } from "@/lib/payroll/salary-slip";
 import { buildSalarySlipEmailHtml } from "@/lib/payroll/salary-slip-email";
 import { sendEmail } from "@/lib/mailer";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { handleApiError } from "@/lib/api-utils";
 
 // POST /api/salary-slip/send  { employeeId, month, year } — admin/hr only, matching its
@@ -11,7 +11,7 @@ import { handleApiError } from "@/lib/api-utils";
 // this send action.
 export async function POST(request: NextRequest) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "send_payslips");
     const body = await request.json();
     const { employeeId, month: monthRaw, year: yearRaw } = body;
 
@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    assertEmployeeInScope(restriction, employeeId);
 
     const month = Number(monthRaw);
     const year = Number(yearRaw);

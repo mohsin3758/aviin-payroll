@@ -7,7 +7,7 @@ import {
 } from "@/lib/payroll/engine";
 import { computeMonthlyAttendance } from "@/lib/payroll/attendance-tally";
 import { apiError, getDefaultCompanyId, handleApiError } from "@/lib/api-utils";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 import { refreshPendingHiringIncentiveVesting } from "@/lib/payroll/hiring-incentive";
 import { ACTIVE_EMPLOYEE_WHERE } from "@/lib/employee-scope";
@@ -16,7 +16,7 @@ import { ACTIVE_EMPLOYEE_WHERE } from "@/lib/employee-scope";
 export async function GET(request: NextRequest) {
   try {
     // Payroll run data (gross/net totals, per-run detail counts) — admin/hr only, not manager.
-    await requireRole(request, ["admin", "hr"]);
+    await requirePayrollFeature(request, ["admin", "hr"], "view_payroll");
     const { searchParams } = new URL(request.url);
     const month = searchParams.get("month");
     const year = searchParams.get("year");
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
 // POST /api/payroll - Process payroll for a month
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session } = await requirePayrollFeature(request, ["admin", "hr"], "process_payroll");
     const body = await request.json();
     const { month, year, force } = body;
 

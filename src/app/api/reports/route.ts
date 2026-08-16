@@ -6,7 +6,7 @@ import { computeMonthlyAttendance } from "@/lib/payroll/attendance-tally";
 import Papa from "papaparse";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { apiError, handleApiError, toDate, getDefaultCompanyId } from "@/lib/api-utils";
 import { ACTIVE_EMPLOYEE_WHERE } from "@/lib/employee-scope";
 import { reportQuerySchema, type ReportType, type ReportFormat } from "@/lib/validations/report";
@@ -473,7 +473,7 @@ export async function GET(request: NextRequest) {
     // so manager gets the same access as admin/hr rather than self-scoping. Headcount/attrition
     // stay at this same tier: managers already see department/state/exit counts in aggregate on
     // their own Dashboard, so a row-level export of the same data isn't a narrowing.
-    await requireRole(request, ["admin", "hr", "manager"]);
+    await requirePayrollFeature(request, ["admin", "hr", "manager"], "view_reports");
     const { searchParams } = new URL(request.url);
     const parsed = reportQuerySchema.parse(Object.fromEntries(searchParams));
     const { type, format } = parsed;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, inEmployeeScope } from "@/lib/payroll-access";
 import { apiError, handleApiError, getDefaultCompanyId } from "@/lib/api-utils";
 import { getDaysInMonth } from "@/lib/payroll/engine";
 import { logAudit } from "@/lib/audit";
@@ -25,9 +25,14 @@ const offCycleSchema = z.object({
 // off-cycle payout doesn't carry the monthly context that calculation needs.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "process_payroll");
     const body = await request.json();
     const { month, year, reason, tdsRate, entries } = offCycleSchema.parse(body);
+
+    const outOfScope = entries.filter((e) => !inEmployeeScope(restriction, e.employeeId)).map((e) => e.employeeId);
+    if (outOfScope.length > 0) {
+      return apiError(`You don't have payroll access to: ${outOfScope.join(", ")}`, 403);
+    }
 
     const companyId = await getDefaultCompanyId();
     const daysInMonth = getDaysInMonth(month, year);

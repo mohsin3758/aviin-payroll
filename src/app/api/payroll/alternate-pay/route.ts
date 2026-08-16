@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, inEmployeeScope } from "@/lib/payroll-access";
 import { apiError, handleApiError, getDefaultCompanyId } from "@/lib/api-utils";
 import { getDaysInMonth, processAlternateEmployeePayroll, CONTRACTOR_TDS_RATE, type AlternateWageType } from "@/lib/payroll/engine";
 import { logAudit } from "@/lib/audit";
@@ -26,9 +26,14 @@ const alternatePaySchema = z.object({
 // rate on file.
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "process_payroll");
     const body = await request.json();
     const { month, year, entries } = alternatePaySchema.parse(body);
+
+    const outOfScope = entries.filter((e) => !inEmployeeScope(restriction, e.employeeId)).map((e) => e.employeeId);
+    if (outOfScope.length > 0) {
+      return apiError(`You don't have payroll access to: ${outOfScope.join(", ")}`, 403);
+    }
 
     const companyId = await getDefaultCompanyId();
     const daysInMonth = getDaysInMonth(month, year);

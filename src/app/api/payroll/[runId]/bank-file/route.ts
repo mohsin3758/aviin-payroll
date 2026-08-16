@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import Papa from "papaparse";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { getMonthName } from "@/lib/payroll/engine";
 import { buildBankFileRows, TEXT_FORMAT_FIELDS, type BankFileRow } from "@/lib/bank-format";
 import type { ColumnDef } from "@/lib/validations/bank-format";
@@ -17,7 +17,7 @@ type Params = { params: Promise<{ runId: string }> };
 // column layout (bankFormatId, or whichever format is marked default if omitted).
 export async function GET(request: NextRequest, { params }: Params) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    await requirePayrollFeature(request, ["admin", "hr"], "download_bank_file");
     const { runId } = await params;
     const format = request.nextUrl.searchParams.get("format") ?? "json";
     const bankFormatId = request.nextUrl.searchParams.get("bankFormatId");

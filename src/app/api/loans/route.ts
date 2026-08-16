@@ -2,27 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createLoanSchema } from "@/lib/validations/loan";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireRole, requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollFeature, requirePayrollSelfOrFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 
 // GET /api/loans?employeeId=...&status=... — includes computed remainingMonths per loan.
-// Financial data, same tier as salary-slip/form16: self or admin/hr only, not manager.
+// Financial data, same tier as salary-slip/form16: self or admin/hr only, not manager. admin/hr
+// callers are additionally subject to that user's configured payroll feature/employee
+// restrictions, if any — see src/lib/payroll-access.ts.
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
     const employeeId = searchParams.get("employeeId");
     const status = searchParams.get("status");
 
+    let scopedEmployeeIds: string[] | null = null;
     if (employeeId) {
-      await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+      await requirePayrollSelfOrFeature(request, employeeId, ["admin", "hr"], "manage_loans");
     } else {
       // No specific target requested — this is a company-wide listing, admin/hr only.
-      await requireRole(request, ["admin", "hr"]);
+      const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_loans");
+      if (restriction.employeeIds) scopedEmployeeIds = [...restriction.employeeIds];
     }
 
     const where: Record<string, unknown> = {};
     if (employeeId) where.employeeId = employeeId;
     if (status) where.status = status;
+    if (scopedEmployeeIds) where.employeeId = { in: scopedEmployeeIds };
 
     const loans = await db.employeeLoan.findMany({
       where,
@@ -48,9 +53,10 @@ export async function GET(request: NextRequest) {
 // POST /api/loans — create a new loan/advance for an employee
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session, restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_loans");
     const body = await request.json();
     const parsed = createLoanSchema.parse(body);
+    assertEmployeeInScope(restriction, parsed.employeeId);
 
     const employee = await db.employee.findUnique({ where: { id: parsed.employeeId } });
     if (!employee) {

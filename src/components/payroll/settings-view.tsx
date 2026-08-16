@@ -167,7 +167,25 @@ interface ManagedUser {
   employeeId: string | null;
   employee: { firstName: string; lastName: string | null; employeeCode: string } | null;
   createdAt: string;
+  _count?: { payrollFeatures: number; payrollEmployeeScopes: number };
 }
+
+const PAYROLL_FEATURES = [
+  "process_payroll", "view_payroll", "download_bank_file", "manage_arrears",
+  "manage_loans", "send_payslips", "manage_form16", "view_reports",
+] as const;
+type PayrollFeature = (typeof PAYROLL_FEATURES)[number];
+
+const PAYROLL_FEATURE_LABELS: Record<PayrollFeature, string> = {
+  process_payroll: "Process payroll",
+  view_payroll: "View payroll runs & salary slips",
+  download_bank_file: "Download bank file",
+  manage_arrears: "Manage arrears",
+  manage_loans: "Manage loans",
+  send_payslips: "Send salary slips",
+  manage_form16: "Manage Form 16",
+  view_reports: "View reports",
+};
 
 interface LinkableEmployee {
   id: string;
@@ -1190,6 +1208,93 @@ export default function SettingsView() {
       toast.error(err instanceof Error ? err.message : 'Failed to delete user');
     } finally {
       setDeletingUserId(null);
+    }
+  };
+
+  // Payroll access dialog (hr users only) — narrows which payroll features + which employees a
+  // specific hr login can use, on top of (never beyond) the role's existing baseline access.
+  const [payrollAccessTarget, setPayrollAccessTarget] = useState<ManagedUser | null>(null);
+  const [restrictPayroll, setRestrictPayroll] = useState(false);
+  const [selectedFeatures, setSelectedFeatures] = useState<Set<PayrollFeature>>(new Set());
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<string>>(new Set());
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [loadingPayrollAccess, setLoadingPayrollAccess] = useState(false);
+  const [savingPayrollAccess, setSavingPayrollAccess] = useState(false);
+
+  const openPayrollAccessDialog = async (target: ManagedUser) => {
+    setPayrollAccessTarget(target);
+    setEmployeeSearch('');
+    setLoadingPayrollAccess(true);
+    try {
+      const res = await fetch(`/api/users/${target.id}/payroll-access`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load payroll access');
+      const features: PayrollFeature[] = data.data.features ?? [];
+      const employeeIds: string[] = data.data.employeeIds ?? [];
+      setRestrictPayroll(features.length > 0 || employeeIds.length > 0);
+      setSelectedFeatures(new Set(features));
+      setSelectedEmployeeIds(new Set(employeeIds));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load payroll access');
+      setPayrollAccessTarget(null);
+    } finally {
+      setLoadingPayrollAccess(false);
+    }
+  };
+
+  const toggleFeature = (feature: PayrollFeature) => {
+    setSelectedFeatures((prev) => {
+      const next = new Set(prev);
+      if (next.has(feature)) next.delete(feature); else next.add(feature);
+      return next;
+    });
+  };
+
+  const toggleScopedEmployee = (id: string) => {
+    setSelectedEmployeeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const filteredEmployeesForScope = useMemo(() => {
+    const q = employeeSearch.trim().toLowerCase();
+    if (!q) return allEmployees;
+    return allEmployees.filter((e) =>
+      `${e.firstName} ${e.lastName ?? ''} ${e.employeeCode}`.toLowerCase().includes(q)
+    );
+  }, [allEmployees, employeeSearch]);
+
+  const handleSavePayrollAccess = async () => {
+    if (!payrollAccessTarget) return;
+    if (restrictPayroll && selectedFeatures.size === 0) {
+      toast.error('Select at least one feature, or turn the switch off to remove restrictions entirely.');
+      return;
+    }
+    if (restrictPayroll && selectedEmployeeIds.size === 0) {
+      toast.error('Select at least one employee, or turn the switch off to remove restrictions entirely.');
+      return;
+    }
+    setSavingPayrollAccess(true);
+    try {
+      const res = await fetch(`/api/users/${payrollAccessTarget.id}/payroll-access`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          features: restrictPayroll ? [...selectedFeatures] : [],
+          employeeIds: restrictPayroll ? [...selectedEmployeeIds] : [],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update payroll access');
+      toast.success(`Payroll access updated for ${payrollAccessTarget.name}.`);
+      setPayrollAccessTarget(null);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update payroll access');
+    } finally {
+      setSavingPayrollAccess(false);
     }
   };
 
@@ -2930,7 +3035,12 @@ export default function SettingsView() {
                             </TableCell>
                             <TableCell className="text-xs">{u.email}</TableCell>
                             <TableCell>
-                              <Badge variant="outline" className={`${ROLE_BADGE[u.role]} capitalize`}>{u.role}</Badge>
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant="outline" className={`${ROLE_BADGE[u.role]} capitalize`}>{u.role}</Badge>
+                                {u.role === 'hr' && ((u._count?.payrollFeatures ?? 0) > 0 || (u._count?.payrollEmployeeScopes ?? 0) > 0) && (
+                                  <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">Restricted</Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell className="text-xs">
                               {u.role !== 'employee' ? (
@@ -2964,6 +3074,12 @@ export default function SettingsView() {
                                   <Button variant="ghost" size="sm" onClick={() => openEditUser(u)}>
                                     <Pencil className="size-3.5 mr-1" />
                                     Edit
+                                  </Button>
+                                )}
+                                {u.role === 'hr' && (
+                                  <Button variant="ghost" size="sm" onClick={() => openPayrollAccessDialog(u)}>
+                                    <Shield className="size-3.5 mr-1" />
+                                    Payroll Access
                                   </Button>
                                 )}
                                 <Button variant="ghost" size="sm" onClick={() => { setResetTarget(u); setResetPasswordValue(''); }}>
@@ -3091,6 +3207,88 @@ export default function SettingsView() {
                 <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleLinkEmployee} disabled={linkingUser || !linkEmployeeId}>
                   {linkingUser ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
                   Link
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* ─── Payroll Access Dialog (hr users only) ───────────────────────── */}
+          <Dialog open={!!payrollAccessTarget} onOpenChange={(open) => !open && setPayrollAccessTarget(null)}>
+            <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Payroll Access — {payrollAccessTarget?.name}</DialogTitle>
+                <DialogDescription>
+                  By default an HR login has full payroll access. Restrict it to specific features and/or specific employees below —
+                  this can only narrow their access, never grant more than an HR role already has.
+                </DialogDescription>
+              </DialogHeader>
+              {loadingPayrollAccess ? (
+                <div className="py-8 text-center text-muted-foreground text-sm">Loading...</div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium">Restrict this user&apos;s payroll access</p>
+                      <p className="text-xs text-muted-foreground">Off = full, unrestricted HR access to every payroll feature and employee.</p>
+                    </div>
+                    <Switch checked={restrictPayroll} onCheckedChange={setRestrictPayroll} />
+                  </div>
+
+                  {restrictPayroll && (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Allowed features</Label>
+                        <div className="grid grid-cols-2 gap-2 rounded-lg border p-3">
+                          {PAYROLL_FEATURES.map((feature) => (
+                            <label key={feature} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <Checkbox
+                                checked={selectedFeatures.has(feature)}
+                                onCheckedChange={() => toggleFeature(feature)}
+                              />
+                              {PAYROLL_FEATURE_LABELS[feature]}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Allowed employees ({selectedEmployeeIds.size} selected)</Label>
+                        <Input
+                          placeholder="Search by name or employee code..."
+                          value={employeeSearch}
+                          onChange={(e) => setEmployeeSearch(e.target.value)}
+                        />
+                        <div className="max-h-56 overflow-y-auto rounded-lg border p-2 space-y-1">
+                          {filteredEmployeesForScope.length === 0 ? (
+                            <p className="text-xs text-muted-foreground p-2">No matching employees.</p>
+                          ) : (
+                            filteredEmployeesForScope.map((e) => (
+                              <label key={e.id} className="flex items-center gap-2 text-sm cursor-pointer px-1.5 py-1 rounded hover:bg-muted">
+                                <Checkbox
+                                  checked={selectedEmployeeIds.has(e.id)}
+                                  onCheckedChange={() => toggleScopedEmployee(e.id)}
+                                />
+                                {e.firstName} {e.lastName ?? ''} <span className="text-muted-foreground">({e.employeeCode})</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPayrollAccessTarget(null)} disabled={savingPayrollAccess}>
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={handleSavePayrollAccess}
+                  disabled={savingPayrollAccess || loadingPayrollAccess}
+                >
+                  {savingPayrollAccess ? <Loader2 className="size-4 animate-spin" /> : <Shield className="size-4" />}
+                  Save
                 </Button>
               </DialogFooter>
             </DialogContent>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, inEmployeeScope } from "@/lib/payroll-access";
 import { handleApiError, apiError } from "@/lib/api-utils";
 import { getSalarySlipData } from "@/lib/payroll/salary-slip";
 import { buildSalarySlipEmailHtml } from "@/lib/payroll/salary-slip-email";
@@ -18,7 +18,7 @@ interface BulkResult {
 // Emails every employee's salary slip for a given payroll run in one action.
 export async function POST(request: NextRequest) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "send_payslips");
 
     const body = await request.json();
     const { payrollRunId } = body;
@@ -41,6 +41,10 @@ export async function POST(request: NextRequest) {
         const name = detail.employee
           ? `${detail.employee.firstName} ${detail.employee.lastName ?? ""}`.trim()
           : detail.employeeId;
+
+        if (!inEmployeeScope(restriction, detail.employeeId)) {
+          return { employeeId: detail.employeeId, name, email: detail.employee?.email ?? null, status: "skipped", error: "Outside your payroll access scope" };
+        }
 
         if (!detail.employee?.email) {
           return { employeeId: detail.employeeId, name, email: null, status: "skipped", error: "No email on file" };

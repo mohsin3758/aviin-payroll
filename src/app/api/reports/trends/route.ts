@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature } from "@/lib/payroll-access";
 import { handleApiError } from "@/lib/api-utils";
 
 const DEFAULT_MONTHS = 6;
@@ -14,7 +14,7 @@ const MAX_MONTHS = 12;
 // since both ARE historically accurate (Employee.dateOfExit, PayrollRun figures).
 export async function GET(request: NextRequest) {
   try {
-    await requireRole(request, ["admin", "hr", "manager"]);
+    await requirePayrollFeature(request, ["admin", "hr", "manager"], "view_reports");
     const { searchParams } = new URL(request.url);
     const monthsParam = searchParams.get("months");
     const months = Math.min(MAX_MONTHS, Math.max(1, parseInt(monthsParam ?? String(DEFAULT_MONTHS), 10) || DEFAULT_MONTHS));

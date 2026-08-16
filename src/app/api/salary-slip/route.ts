@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSalarySlipData, SalarySlipError } from "@/lib/payroll/salary-slip";
-import { requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollSelfOrFeature } from "@/lib/payroll-access";
 import { handleApiError } from "@/lib/api-utils";
 
 // GET /api/salary-slip?employeeId=xxx&month=1&year=2025
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Carries one named person's PAN + full pay breakup — self or admin/hr only, not manager.
-    await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+    await requirePayrollSelfOrFeature(request, employeeId, ["admin", "hr"], "view_payroll");
 
     const month = parseInt(monthParam, 10);
     const year = parseInt(yearParam, 10);

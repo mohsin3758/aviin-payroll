@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiError, handleApiError } from "@/lib/api-utils";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, filterToScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 
 type Params = {
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     // Returns full bank/PAN/Aadhaar + salary detail for every employee in the run — matches
     // its bank-file sibling and the payroll list route: admin/hr only, not self-or-manager.
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "view_payroll");
     const { runId } = await params;
 
     const payrollRun = await db.payrollRun.findUnique({
@@ -42,7 +42,10 @@ export async function GET(request: NextRequest, { params }: Params) {
       return apiError("Payroll run not found", 404);
     }
 
-    return NextResponse.json(payrollRun);
+    // An employee-scoped hr user only sees the run's rows for their assigned employees — the
+    // run-level aggregates (totalGrossSalary etc.) still reflect the whole company; see the
+    // called-out limitation in the plan for GET /api/payroll's list view.
+    return NextResponse.json({ ...payrollRun, details: filterToScope(restriction, payrollRun.details) });
   } catch (error) {
     return handleApiError(error, "fetch payroll run");
   }
@@ -51,7 +54,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 // PUT /api/payroll/[runId] - Update payroll run status
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
-    const session = await requireRole(request, ["admin", "hr"]);
+    const { session } = await requirePayrollFeature(request, ["admin", "hr"], "process_payroll");
     const { runId } = await params;
     const body = await request.json();
     const { status } = body;

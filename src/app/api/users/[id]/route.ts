@@ -107,6 +107,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     }
 
     await db.passwordResetToken.deleteMany({ where: { userId: id } });
+    await db.userPayrollFeature.deleteMany({ where: { userId: id } });
+    await db.userPayrollEmployeeScope.deleteMany({ where: { userId: id } });
     await db.user.delete({ where: { id } });
 
     await logAudit({ session, action: "delete", entity: "User", entityId: id, details: { email: existing.email, name: existing.name, role: existing.role } });

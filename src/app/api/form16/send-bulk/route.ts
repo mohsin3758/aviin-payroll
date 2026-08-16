@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireRole } from "@/lib/auth";
+import { requirePayrollFeature, inEmployeeScope } from "@/lib/payroll-access";
 import { handleApiError, apiError, getDefaultCompanyId } from "@/lib/api-utils";
 import { getForm16Data, Form16Error } from "@/lib/payroll/form16";
 import { buildForm16EmailHtml } from "@/lib/payroll/form16-email";
@@ -19,7 +19,7 @@ interface BulkResult {
 // Employees with no payroll data for that FY (e.g. joined later) are skipped, not failed.
 export async function POST(request: NextRequest) {
   try {
-    await requireRole(request, ["admin", "hr"]);
+    const { restriction } = await requirePayrollFeature(request, ["admin", "hr"], "manage_form16");
 
     const body = await request.json();
     const { fyStartYear: fyStartYearRaw } = body;
@@ -35,6 +35,10 @@ export async function POST(request: NextRequest) {
     const results = await Promise.allSettled(
       employees.map(async (employee): Promise<BulkResult> => {
         const name = `${employee.firstName} ${employee.lastName ?? ""}`.trim();
+
+        if (!inEmployeeScope(restriction, employee.id)) {
+          return { employeeId: employee.id, name, email: employee.email ?? null, status: "skipped", error: "Outside your payroll access scope" };
+        }
 
         if (!employee.email) {
           return { employeeId: employee.id, name, email: null, status: "skipped", error: "No email on file" };

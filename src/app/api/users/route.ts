@@ -14,6 +14,7 @@ const userSelect = {
   employeeId: true,
   employee: { select: { firstName: true, lastName: true, employeeCode: true } },
   createdAt: true,
+  _count: { select: { payrollFeatures: true, payrollEmployeeScopes: true } },
 } as const;
 
 // GET /api/users — admin only, never returns passwordHash

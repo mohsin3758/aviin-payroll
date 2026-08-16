@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getForm16Data, Form16Error } from "@/lib/payroll/form16";
-import { requireSelfOrRole } from "@/lib/auth";
+import { requirePayrollSelfOrFeature } from "@/lib/payroll-access";
 import { handleApiError } from "@/lib/api-utils";
 
 // GET /api/form16?employeeId=xxx&fyStartYear=2025
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Carries one named person's PAN + full annual pay/tax detail — self or admin/hr only.
-    await requireSelfOrRole(request, employeeId, ["admin", "hr"]);
+    await requirePayrollSelfOrFeature(request, employeeId, ["admin", "hr"], "manage_form16");
 
     const fyStartYear = parseInt(fyStartYearParam, 10);
     if (isNaN(fyStartYear) || fyStartYear < 2000 || fyStartYear > 2100) {
