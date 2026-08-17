@@ -4,6 +4,8 @@ import { apiError, handleApiError } from "@/lib/api-utils";
 import { requirePayrollFeature, requirePayrollSelfOrFeature, assertEmployeeInScope } from "@/lib/payroll-access";
 import { logAudit } from "@/lib/audit";
 import { notifyEmployee } from "@/lib/notifications";
+import { sendEmail } from "@/lib/mailer";
+import { buildLeaveApprovalEmailHtml } from "@/lib/payroll/leave-approval-email";
 
 // GET /api/leaves/[id]
 export async function GET(
@@ -86,7 +88,7 @@ export async function PUT(
             approvedAt: new Date(),
           },
           include: {
-            employee: { select: { firstName: true, lastName: true, employeeCode: true } },
+            employee: { select: { firstName: true, lastName: true, employeeCode: true, email: true } },
             leaveType: true,
           },
         });
@@ -119,6 +121,32 @@ export async function PUT(
         message: `Your ${result.leaveType.name} leave (${result.totalDays} day${result.totalDays === 1 ? "" : "s"}) was approved.`,
         category: "leave",
       });
+
+      // A durable, external record of the approval — emailed to the employee on top of (not
+      // instead of) the in-app notification above. Never blocks the approval itself: a failed
+      // send is logged, not surfaced as an approval failure.
+      if (result.employee.email) {
+        try {
+          const company = await db.company.findFirst({ orderBy: { createdAt: "asc" } });
+          const html = buildLeaveApprovalEmailHtml({
+            employee: { name: `${result.employee.firstName} ${result.employee.lastName ?? ""}`.trim(), code: result.employee.employeeCode },
+            company: { name: company?.name ?? "PayrollPro" },
+            leaveType: result.leaveType.name,
+            startDate: result.startDate,
+            endDate: result.endDate,
+            totalDays: result.totalDays,
+            approvedAt: result.approvedAt ?? new Date(),
+            approvedByName: session.name,
+          });
+          await sendEmail({
+            to: result.employee.email,
+            subject: `Leave Approved — ${result.leaveType.name} (${result.totalDays} day${result.totalDays === 1 ? "" : "s"})`,
+            html,
+          });
+        } catch (emailError) {
+          console.error("Failed to send leave approval email:", emailError);
+        }
+      }
 
       return NextResponse.json(result);
     }

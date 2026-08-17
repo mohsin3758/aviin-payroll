@@ -12,6 +12,13 @@ const allocateAssetSchema = z.object({
   model: z.string().trim().max(100).nullable().optional(),
   condition: z.enum(["new", "good", "fair", "damaged"]).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
+  // Laptop-only detail fields — left unset by the client for any other assetType.
+  chargerSerialNo: z.string().trim().max(100).nullable().optional(),
+  chargerWireSerialNo: z.string().trim().max(100).nullable().optional(),
+  laptopName: z.string().trim().max(100).nullable().optional(),
+  laptopLoginId: z.string().trim().max(100).nullable().optional(),
+  laptopPassword: z.string().trim().max(100).nullable().optional(),
+  laptopPin: z.string().trim().max(20).nullable().optional(),
 });
 
 // GET /api/employees/[id]/assets — operational, not financial: self, or admin/hr/manager.

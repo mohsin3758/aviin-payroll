@@ -12,6 +12,12 @@ const editAssetSchema = z.object({
   model: z.string().trim().max(100).nullable().optional(),
   condition: z.enum(["new", "good", "fair", "damaged"]).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
+  chargerSerialNo: z.string().trim().max(100).nullable().optional(),
+  chargerWireSerialNo: z.string().trim().max(100).nullable().optional(),
+  laptopName: z.string().trim().max(100).nullable().optional(),
+  laptopLoginId: z.string().trim().max(100).nullable().optional(),
+  laptopPassword: z.string().trim().max(100).nullable().optional(),
+  laptopPin: z.string().trim().max(20).nullable().optional(),
 });
 
 // PUT /api/employees/[id]/assets/[assetId] — admin/hr only, marks an asset returned.

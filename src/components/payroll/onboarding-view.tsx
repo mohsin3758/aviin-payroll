@@ -26,6 +26,8 @@ interface Task { id: string; taskName: string; isCompleted: boolean; order: numb
 interface Asset {
   id: string; assetType: string; assetTag: string | null; brand: string | null; model: string | null;
   condition: string | null; notes: string | null; allocatedDate: string; returnedDate: string | null;
+  chargerSerialNo: string | null; chargerWireSerialNo: string | null;
+  laptopName: string | null; laptopLoginId: string | null; laptopPassword: string | null; laptopPin: string | null;
 }
 interface Candidate {
   id: string; firstName: string; lastName: string | null; email: string | null; phone: string | null;
@@ -84,6 +86,12 @@ export default function OnboardingView() {
   const [assetModel, setAssetModel] = useState('');
   const [assetCondition, setAssetCondition] = useState('new');
   const [assetNotes, setAssetNotes] = useState('');
+  const [assetChargerSerialNo, setAssetChargerSerialNo] = useState('');
+  const [assetChargerWireSerialNo, setAssetChargerWireSerialNo] = useState('');
+  const [assetLaptopName, setAssetLaptopName] = useState('');
+  const [assetLaptopLoginId, setAssetLaptopLoginId] = useState('');
+  const [assetLaptopPassword, setAssetLaptopPassword] = useState('');
+  const [assetLaptopPin, setAssetLaptopPin] = useState('');
   const [allocating, setAllocating] = useState(false);
 
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
@@ -93,6 +101,12 @@ export default function OnboardingView() {
   const [editAssetModel, setEditAssetModel] = useState('');
   const [editAssetCondition, setEditAssetCondition] = useState('new');
   const [editAssetNotes, setEditAssetNotes] = useState('');
+  const [editAssetChargerSerialNo, setEditAssetChargerSerialNo] = useState('');
+  const [editAssetChargerWireSerialNo, setEditAssetChargerWireSerialNo] = useState('');
+  const [editAssetLaptopName, setEditAssetLaptopName] = useState('');
+  const [editAssetLaptopLoginId, setEditAssetLaptopLoginId] = useState('');
+  const [editAssetLaptopPassword, setEditAssetLaptopPassword] = useState('');
+  const [editAssetLaptopPin, setEditAssetLaptopPin] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
   const [sendingLetter, setSendingLetter] = useState<'offer' | 'appointment' | null>(null);
@@ -354,12 +368,22 @@ export default function OnboardingView() {
           model: assetModel.trim() || null,
           condition: assetCondition || null,
           notes: assetNotes.trim() || null,
+          ...(assetType === 'laptop' ? {
+            chargerSerialNo: assetChargerSerialNo.trim() || null,
+            chargerWireSerialNo: assetChargerWireSerialNo.trim() || null,
+            laptopName: assetLaptopName.trim() || null,
+            laptopLoginId: assetLaptopLoginId.trim() || null,
+            laptopPassword: assetLaptopPassword.trim() || null,
+            laptopPin: assetLaptopPin.trim() || null,
+          } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to allocate asset');
       toast.success('Asset allocated');
       setAssetTag(''); setAssetBrand(''); setAssetModel(''); setAssetCondition('new'); setAssetNotes('');
+      setAssetChargerSerialNo(''); setAssetChargerWireSerialNo('');
+      setAssetLaptopName(''); setAssetLaptopLoginId(''); setAssetLaptopPassword(''); setAssetLaptopPin('');
       fetchTasksAndAssets();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to allocate asset');
@@ -386,6 +410,12 @@ export default function OnboardingView() {
     setEditAssetModel(a.model ?? '');
     setEditAssetCondition(a.condition ?? 'new');
     setEditAssetNotes(a.notes ?? '');
+    setEditAssetChargerSerialNo(a.chargerSerialNo ?? '');
+    setEditAssetChargerWireSerialNo(a.chargerWireSerialNo ?? '');
+    setEditAssetLaptopName(a.laptopName ?? '');
+    setEditAssetLaptopLoginId(a.laptopLoginId ?? '');
+    setEditAssetLaptopPassword(a.laptopPassword ?? '');
+    setEditAssetLaptopPin(a.laptopPin ?? '');
   };
 
   const handleSaveEditAsset = async () => {
@@ -401,6 +431,14 @@ export default function OnboardingView() {
           model: editAssetModel.trim() || null,
           condition: editAssetCondition || null,
           notes: editAssetNotes.trim() || null,
+          ...(editAssetType === 'laptop' ? {
+            chargerSerialNo: editAssetChargerSerialNo.trim() || null,
+            chargerWireSerialNo: editAssetChargerWireSerialNo.trim() || null,
+            laptopName: editAssetLaptopName.trim() || null,
+            laptopLoginId: editAssetLaptopLoginId.trim() || null,
+            laptopPassword: editAssetLaptopPassword.trim() || null,
+            laptopPin: editAssetLaptopPin.trim() || null,
+          } : {}),
         }),
       });
       const data = await res.json();
@@ -596,6 +634,16 @@ export default function OnboardingView() {
                   </Select>
                 </div>
               </div>
+              {assetType === 'laptop' && (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="space-y-1.5"><Label>Laptop Name</Label><Input value={assetLaptopName} onChange={(e) => setAssetLaptopName(e.target.value)} placeholder="e.g. LAP-EMP001" /></div>
+                  <div className="space-y-1.5"><Label>Laptop Login ID</Label><Input value={assetLaptopLoginId} onChange={(e) => setAssetLaptopLoginId(e.target.value)} /></div>
+                  <div className="space-y-1.5"><Label>Laptop Password</Label><Input type="password" value={assetLaptopPassword} onChange={(e) => setAssetLaptopPassword(e.target.value)} /></div>
+                  <div className="space-y-1.5"><Label>Laptop PIN</Label><Input type="password" value={assetLaptopPin} onChange={(e) => setAssetLaptopPin(e.target.value)} /></div>
+                  <div className="space-y-1.5"><Label>Charger Serial No</Label><Input value={assetChargerSerialNo} onChange={(e) => setAssetChargerSerialNo(e.target.value)} /></div>
+                  <div className="space-y-1.5"><Label>Charger Wire Serial No</Label><Input value={assetChargerWireSerialNo} onChange={(e) => setAssetChargerWireSerialNo(e.target.value)} /></div>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label>Notes (optional)</Label>
                 <Input value={assetNotes} onChange={(e) => setAssetNotes(e.target.value)} placeholder="Any other detail worth recording" />
@@ -615,6 +663,11 @@ export default function OnboardingView() {
                         {(a.brand || a.model) && <span>{[a.brand, a.model].filter(Boolean).join(' ')} </span>}
                         {a.assetTag && <span className="text-muted-foreground">({a.assetTag})</span>}
                         {a.condition && <span className="text-muted-foreground capitalize"> · {a.condition}</span>}
+                        {a.assetType === 'laptop' && (a.laptopName || a.laptopLoginId) && (
+                          <p className="text-xs text-muted-foreground">
+                            {a.laptopName && <>Name: {a.laptopName}</>}{a.laptopName && a.laptopLoginId ? ' · ' : ''}{a.laptopLoginId && <>Login ID: {a.laptopLoginId}</>}
+                          </p>
+                        )}
                         {a.notes && <p className="text-xs text-muted-foreground">{a.notes}</p>}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
@@ -829,7 +882,7 @@ export default function OnboardingView() {
       </Dialog>
 
       <Dialog open={!!editingAsset} onOpenChange={(open) => { if (!open) setEditingAsset(null); }}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Asset</DialogTitle>
           </DialogHeader>
@@ -863,6 +916,16 @@ export default function OnboardingView() {
               <div className="space-y-1.5"><Label>Model</Label><Input value={editAssetModel} onChange={(e) => setEditAssetModel(e.target.value)} /></div>
               <div className="space-y-1.5 col-span-2"><Label>{ASSET_TAG_LABEL[editAssetType]}</Label><Input value={editAssetTag} onChange={(e) => setEditAssetTag(e.target.value)} /></div>
             </div>
+            {editAssetType === 'laptop' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><Label>Laptop Name</Label><Input value={editAssetLaptopName} onChange={(e) => setEditAssetLaptopName(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>Laptop Login ID</Label><Input value={editAssetLaptopLoginId} onChange={(e) => setEditAssetLaptopLoginId(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>Laptop Password</Label><Input type="password" value={editAssetLaptopPassword} onChange={(e) => setEditAssetLaptopPassword(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>Laptop PIN</Label><Input type="password" value={editAssetLaptopPin} onChange={(e) => setEditAssetLaptopPin(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>Charger Serial No</Label><Input value={editAssetChargerSerialNo} onChange={(e) => setEditAssetChargerSerialNo(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>Charger Wire Serial No</Label><Input value={editAssetChargerWireSerialNo} onChange={(e) => setEditAssetChargerWireSerialNo(e.target.value)} /></div>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Notes (optional)</Label>
               <Input value={editAssetNotes} onChange={(e) => setEditAssetNotes(e.target.value)} />
