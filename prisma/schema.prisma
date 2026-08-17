@@ -801,7 +801,12 @@ model EmployeeDocument {
 
 model EmployeeAsset {
   id                  String    @id @default(cuid())
-  employeeId          String
+  // Nullable: an asset can sit unassigned in company inventory ("In Stock") before ever being
+  // allocated to anyone, or after being returned to the pool for reassignment — distinct from
+  // returnedDate, which records a specific employee's own return without releasing the asset
+  // from that history. See src/app/api/assets/route.ts / [id]/route.ts for the assign / return-
+  // to-stock actions that toggle this.
+  employeeId          String?
   assetType           String // "laptop" | "phone" | "id_card" | "other"
   assetTag            String? // serial number (laptop/id_card) or IMEI (phone) — label adapts per assetType in the UI
   brand               String?
@@ -823,7 +828,7 @@ model EmployeeAsset {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  employee Employee @relation(fields: [employeeId], references: [id])
+  employee Employee? @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
 }
