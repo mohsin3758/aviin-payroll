@@ -24,6 +24,11 @@ import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
 import { istDateOnly } from '@/lib/date-ist';
 import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
+
+// Bounds the punch API call the same way captureFaceDescriptor bounds on-device detection — a
+// stalled/slow network request fails fast with a clear error instead of leaving "Finalizing..."
+// spinning forever.
+const PUNCH_REQUEST_TIMEOUT_MS = 15000;
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -558,23 +563,37 @@ export default function AttendanceView() {
         toast.error(
           capture.reason === 'no-face' ? 'No face detected — center your face in the frame and try again.'
             : capture.reason === 'multiple-faces' ? 'More than one face detected — make sure only you are in frame.'
-              : 'Capture failed. Try again.'
+              : capture.reason === 'timeout' ? 'Detection timed out — try again.'
+                : 'Capture failed. Try again.'
         );
         return;
       }
       setVerificationStep('verifying');
       const geo = await captureGeoLocation();
-      const res = await fetch('/api/attendance/punch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employeeId: punchEmployeeId,
-          action: punchAction,
-          method: 'face',
-          faceData: { descriptor: capture.descriptor },
-          ...(geo && { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy }),
-        }),
-      });
+      const punchController = new AbortController();
+      const punchTimeoutId = setTimeout(() => punchController.abort(), PUNCH_REQUEST_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch('/api/attendance/punch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employeeId: punchEmployeeId,
+            action: punchAction,
+            method: 'face',
+            faceData: { descriptor: capture.descriptor },
+            ...(geo && { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy }),
+          }),
+          signal: punchController.signal,
+        });
+      } catch (fetchErr) {
+        if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+          throw new Error('Request timed out — check your connection and try again.');
+        }
+        throw fetchErr;
+      } finally {
+        clearTimeout(punchTimeoutId);
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Punch failed' }));
         throw new Error(err.error || 'Punch failed');

@@ -10,6 +10,10 @@ import { Label } from '@/components/ui/label';
 import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
 import { getBestEffortLocation } from '@/lib/geolocation-client';
 
+// Bounds the login-verification API call so a stalled/slow request fails fast with a clear error
+// instead of leaving the user stuck unable to sign in at all.
+const FACE_LOGIN_REQUEST_TIMEOUT_MS = 15000;
+
 interface FaceLoginStepProps {
   pendingToken: string;
   enrolled: boolean;
@@ -83,7 +87,8 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
         toast.error(
           result.reason === 'no-face' ? 'No face detected — center your face in the frame and try again.'
             : result.reason === 'multiple-faces' ? 'More than one face detected — make sure only you are in frame.'
-              : 'Capture failed. Try again.'
+              : result.reason === 'timeout' ? 'Detection timed out — try again.'
+                : 'Capture failed. Try again.'
         );
         return;
       }
@@ -94,15 +99,28 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
       const locationFields = { latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, accuracy: location?.accuracy ?? null };
 
       const url = enrolled ? '/api/auth/face-login' : '/api/auth/face-login/enroll';
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          enrolled
-            ? { pendingToken, descriptor: result.descriptor, ...locationFields }
-            : { pendingToken, descriptor: result.descriptor, consent: true, ...locationFields }
-        ),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FACE_LOGIN_REQUEST_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            enrolled
+              ? { pendingToken, descriptor: result.descriptor, ...locationFields }
+              : { pendingToken, descriptor: result.descriptor, consent: true, ...locationFields }
+          ),
+          signal: controller.signal,
+        });
+      } catch (fetchErr) {
+        if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+          throw new Error('Request timed out — check your connection and try again.');
+        }
+        throw fetchErr;
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Face verification failed');
       stopCamera();

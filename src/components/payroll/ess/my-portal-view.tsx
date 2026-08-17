@@ -27,6 +27,10 @@ import {
 import { usePayrollStore } from '@/store/payroll-store';
 import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
 
+// Bounds the face-enrollment API call so a stalled/slow request fails fast with a clear error
+// instead of leaving the "Capture & Enroll" button spinning forever.
+const FACE_ENROLLMENT_REQUEST_TIMEOUT_MS = 15000;
+
 const fmt = (n: number) => '₹' + n.toLocaleString('en-IN');
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -1018,15 +1022,29 @@ function FaceEnrollmentCard() {
         toast.error(
           result.reason === 'no-face' ? 'No face detected — center your face in the frame and try again.'
             : result.reason === 'multiple-faces' ? 'More than one face detected — make sure only you are in frame.'
-              : 'Capture failed. Try again.'
+              : result.reason === 'timeout' ? 'Detection timed out — try again.'
+                : 'Capture failed. Try again.'
         );
         return;
       }
-      const res = await fetch('/api/ess/face-enrollment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ descriptor: result.descriptor, consent: true }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FACE_ENROLLMENT_REQUEST_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch('/api/ess/face-enrollment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ descriptor: result.descriptor, consent: true }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr) {
+        if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+          throw new Error('Request timed out — check your connection and try again.');
+        }
+        throw fetchErr;
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to enroll');
       toast.success('Face enrolled — you can now use Quick Confirm to punch in/out.');
