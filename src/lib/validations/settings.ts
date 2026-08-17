@@ -37,6 +37,12 @@ export const updateSettingsSchema = z.object({
   // the Settings UI can show the SMTP form as "configured" without ever re-displaying it.
   smtpPassword: z.string().trim().max(500).optional(),
   smtpFrom: z.string().trim().max(200).nullable().optional(),
+  whatsappEnabled: z.boolean().optional(),
+  whatsappPhoneNumberId: z.string().trim().max(100).nullable().optional(),
+  // Omit entirely (or send "") to leave the currently-saved token untouched, same convention as smtpPassword.
+  whatsappAccessToken: z.string().trim().max(1000).optional(),
+  whatsappLeaveApprovalTemplate: z.string().trim().max(100).nullable().optional(),
+  whatsappTemplateLanguage: z.string().trim().max(20).nullable().optional(),
   officeLatitude: z.coerce.number().min(-90).max(90).nullable().optional(),
   officeLongitude: z.coerce.number().min(-180).max(180).nullable().optional(),
   geofenceRadiusMeters: z.coerce.number().int().min(1).max(50000).nullable().optional(),

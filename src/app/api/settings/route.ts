@@ -27,6 +27,10 @@ const DEFAULT_COMPANY = {
   allowFacePunch: true,
   allowManualPunch: true,
   requireFaceLogin: false,
+  whatsappEnabled: false,
+  whatsappPhoneNumberId: "",
+  whatsappLeaveApprovalTemplate: "leave_approved",
+  whatsappTemplateLanguage: "en_US",
 };
 
 function parseWeeklyOffDays(value: string): number[] {
@@ -45,15 +49,16 @@ export async function GET(request: NextRequest) {
     const company = await db.company.findFirst();
 
     if (!company) {
-      return NextResponse.json({ data: { ...DEFAULT_COMPANY, smtpPasswordSet: false } });
+      return NextResponse.json({ data: { ...DEFAULT_COMPANY, smtpPasswordSet: false, whatsappAccessTokenSet: false } });
     }
 
-    const { smtpPassword, ...safeCompany } = company;
+    const { smtpPassword, whatsappAccessToken, ...safeCompany } = company;
     return NextResponse.json({
       data: {
         ...safeCompany,
         weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays),
         smtpPasswordSet: !!smtpPassword,
+        whatsappAccessTokenSet: !!whatsappAccessToken,
       },
     });
   } catch (error) {
@@ -97,6 +102,11 @@ export async function PUT(request: NextRequest) {
           ...(body.smtpUser !== undefined && { smtpUser: body.smtpUser }),
           ...(body.smtpPassword && { smtpPassword: body.smtpPassword }),
           ...(body.smtpFrom !== undefined && { smtpFrom: body.smtpFrom }),
+          ...(body.whatsappEnabled !== undefined && { whatsappEnabled: body.whatsappEnabled }),
+          ...(body.whatsappPhoneNumberId !== undefined && { whatsappPhoneNumberId: body.whatsappPhoneNumberId }),
+          ...(body.whatsappAccessToken && { whatsappAccessToken: body.whatsappAccessToken }),
+          ...(body.whatsappLeaveApprovalTemplate !== undefined && { whatsappLeaveApprovalTemplate: body.whatsappLeaveApprovalTemplate }),
+          ...(body.whatsappTemplateLanguage !== undefined && { whatsappTemplateLanguage: body.whatsappTemplateLanguage }),
           ...(body.officeLatitude !== undefined && { officeLatitude: body.officeLatitude }),
           ...(body.officeLongitude !== undefined && { officeLongitude: body.officeLongitude }),
           ...(body.geofenceRadiusMeters !== undefined && { geofenceRadiusMeters: body.geofenceRadiusMeters }),
@@ -130,6 +140,11 @@ export async function PUT(request: NextRequest) {
           smtpUser: body.smtpUser ?? null,
           smtpPassword: body.smtpPassword || null,
           smtpFrom: body.smtpFrom ?? null,
+          whatsappEnabled: body.whatsappEnabled ?? false,
+          whatsappPhoneNumberId: body.whatsappPhoneNumberId ?? null,
+          whatsappAccessToken: body.whatsappAccessToken || null,
+          whatsappLeaveApprovalTemplate: body.whatsappLeaveApprovalTemplate ?? DEFAULT_COMPANY.whatsappLeaveApprovalTemplate,
+          whatsappTemplateLanguage: body.whatsappTemplateLanguage ?? DEFAULT_COMPANY.whatsappTemplateLanguage,
           officeLatitude: body.officeLatitude ?? null,
           officeLongitude: body.officeLongitude ?? null,
           geofenceRadiusMeters: body.geofenceRadiusMeters ?? null,
@@ -143,11 +158,25 @@ export async function PUT(request: NextRequest) {
       });
     }
 
-    await logAudit({ session, action: "update", entity: "Company", entityId: company.id, details: { smtpChanged: body.smtpHost !== undefined || !!body.smtpPassword } });
+    await logAudit({
+      session,
+      action: "update",
+      entity: "Company",
+      entityId: company.id,
+      details: {
+        smtpChanged: body.smtpHost !== undefined || !!body.smtpPassword,
+        whatsappChanged: body.whatsappEnabled !== undefined || body.whatsappPhoneNumberId !== undefined || !!body.whatsappAccessToken,
+      },
+    });
 
-    const { smtpPassword, ...safeCompany } = company;
+    const { smtpPassword, whatsappAccessToken, ...safeCompany } = company;
     return NextResponse.json({
-      data: { ...safeCompany, weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays), smtpPasswordSet: !!smtpPassword },
+      data: {
+        ...safeCompany,
+        weeklyOffDays: parseWeeklyOffDays(company.weeklyOffDays),
+        smtpPasswordSet: !!smtpPassword,
+        whatsappAccessTokenSet: !!whatsappAccessToken,
+      },
     });
   } catch (error) {
     return handleApiError(error, "update company settings");

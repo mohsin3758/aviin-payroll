@@ -93,63 +93,74 @@ model AuditLog {
 }
 
 model Company {
-  id                          String   @id @default(cuid())
-  name                        String
-  address                     String?
-  pan                         String?
-  tan                         String?
-  gstin                       String?
-  pfNumber                    String?
-  esiNumber                   String?
-  state                       String   @default("Maharashtra")
-  financialYearStart          String   @default("2025-04-01")
-  payrollMonth                Int      @default(4)
-  payrollYear                 Int      @default(2025)
-  defaultNoticePeriodDays     Int      @default(30)
+  id                            String   @id @default(cuid())
+  name                          String
+  address                       String?
+  pan                           String?
+  tan                           String?
+  gstin                         String?
+  pfNumber                      String?
+  esiNumber                     String?
+  state                         String   @default("Maharashtra")
+  financialYearStart            String   @default("2025-04-01")
+  payrollMonth                  Int      @default(4)
+  payrollYear                   Int      @default(2025)
+  defaultNoticePeriodDays       Int      @default(30)
   // Fixed one-time recruiter payout rates for the Hiring Incentive feature, keyed by the new
   // hire's employmentType at close time ("permanent" -> Fte rate, "contractor" -> Contract
   // rate). Configured from the dedicated Hiring Incentives screen, not the general Settings page.
-  hiringIncentiveFteRate      Float    @default(0)
-  hiringIncentiveContractRate Float    @default(0)
+  hiringIncentiveFteRate        Float    @default(0)
+  hiringIncentiveContractRate   Float    @default(0)
   // Comma-separated day-of-week numbers that are paid non-working days every week: 0=Sunday..6=Saturday.
-  weeklyOffDays               String   @default("0")
+  weeklyOffDays                 String   @default("0")
   // Admin-configured SMTP, set via Settings so a real deployment doesn't require VPS/env-var
   // access to enable email. Falls back to SMTP_* env vars, then to an Ethereal test inbox, if
   // unset. smtpPassword is stored in plaintext (no secrets-manager in this deployment) and is
   // never returned by GET /api/settings — only a smtpPasswordSet boolean is.
-  smtpHost                    String?
-  smtpPort                    Int?
-  smtpSecure                  Boolean  @default(false)
-  smtpUser                    String?
-  smtpPassword                String?
-  smtpFrom                    String?
+  smtpHost                      String?
+  smtpPort                      Int?
+  smtpSecure                    Boolean  @default(false)
+  smtpUser                      String?
+  smtpPassword                  String?
+  smtpFrom                      String?
+  // Meta WhatsApp Cloud API config, set via Settings — same "no VPS/env access needed" and
+  // "plaintext, no secrets manager" tradeoffs as the SMTP block above. whatsappAccessToken is
+  // never returned by GET /api/settings — only a whatsappAccessTokenSet boolean is. Sending a
+  // business-initiated template message (like a leave-approval notice) requires a pre-approved
+  // Meta message template — whatsappLeaveApprovalTemplate/whatsappTemplateLanguage must match
+  // exactly what was approved in Meta's WhatsApp Manager, or the send fails.
+  whatsappEnabled               Boolean  @default(false)
+  whatsappPhoneNumberId         String?
+  whatsappAccessToken           String?
+  whatsappLeaveApprovalTemplate String?  @default("leave_approved")
+  whatsappTemplateLanguage      String?  @default("en_US")
   // Office geofencing for attendance punches, all optional/opt-in: with no office coordinates
   // set, punches never capture/require location. enforceGeofence defaults false — coordinates
   // and radius can be configured (and location silently logged) without ever blocking a punch
   // until an admin explicitly turns enforcement on.
-  officeLatitude              Float?
-  officeLongitude             Float?
-  geofenceRadiusMeters        Int?
-  enforceGeofence             Boolean  @default(false)
+  officeLatitude                Float?
+  officeLongitude               Float?
+  geofenceRadiusMeters          Int?
+  enforceGeofence               Boolean  @default(false)
   // Auto-marks an employee "present" (punchInMethod: "login") on successful sign-in when true.
   // Defaults false so existing deployments see no behavior change until explicitly enabled.
-  enableLoginAttendance       Boolean  @default(false)
+  enableLoginAttendance         Boolean  @default(false)
   // Mirrors enableLoginAttendance for the other end of the day: auto-records a punch-out
   // (method "login") when a session with a linked employee logs out, if they're still
   // punched in for today. Defaults false for the same reason.
-  enableLogoutAttendance      Boolean  @default(false)
+  enableLogoutAttendance        Boolean  @default(false)
   // Which interactive self-service punch methods are available on the Punch In/Out card
   // (Quick Confirm vs Manual Punch tabs). Both default true — existing behavior unchanged
   // until an admin narrows it down. Never restricts the admin "Mark Attendance" override tool.
-  allowFacePunch              Boolean  @default(true)
-  allowManualPunch            Boolean  @default(true)
+  allowFacePunch                Boolean  @default(true)
+  allowManualPunch              Boolean  @default(true)
   // Company-wide mandatory face verification at login, layered on top of (never instead of)
   // password. Only ever applies to logins linked to an Employee record (see login/route.ts) —
   // a login with no employeeId has no FaceEnrollment to check against, so it's always exempt.
   // Default false: existing logins are completely unaffected until an admin opts in.
-  requireFaceLogin            Boolean  @default(false)
-  createdAt                   DateTime @default(now())
-  updatedAt                   DateTime @updatedAt
+  requireFaceLogin              Boolean  @default(false)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
 
   employees   Employee[]
   payrollRuns PayrollRun[]

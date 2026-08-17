@@ -69,7 +69,7 @@ import { toast } from 'sonner';
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
 import { findLikelyHeaderRowIndex, guessFieldForHeader } from '@/lib/bank-format';
-import { ScrollText, CalendarDays, Trash2, PlusCircle, Pencil, Upload, ArrowUp, ArrowDown, FileSpreadsheet, Clock } from 'lucide-react';
+import { ScrollText, CalendarDays, Trash2, PlusCircle, Pencil, Upload, ArrowUp, ArrowDown, FileSpreadsheet, Clock, MessageCircle } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 
@@ -368,6 +368,88 @@ export default function SettingsView() {
       toast.error(err instanceof Error ? err.message : 'Failed to send test email');
     } finally {
       setSendingTest(false);
+    }
+  };
+
+  // ─── WhatsApp (Meta Cloud API) ──────────────────────────────────────────────
+  const [whatsappEnabled, setWhatsappEnabled] = useState(false);
+  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState('');
+  const [whatsappAccessToken, setWhatsappAccessToken] = useState('');
+  const [whatsappAccessTokenSet, setWhatsappAccessTokenSet] = useState(false);
+  const [whatsappLeaveApprovalTemplate, setWhatsappLeaveApprovalTemplate] = useState('leave_approved');
+  const [whatsappTemplateLanguage, setWhatsappTemplateLanguage] = useState('en_US');
+  const [savingWhatsapp, setSavingWhatsapp] = useState(false);
+  const [testWhatsappNumber, setTestWhatsappNumber] = useState('');
+  const [sendingWhatsappTest, setSendingWhatsappTest] = useState(false);
+
+  const fetchWhatsappSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const json = await res.json();
+      setWhatsappEnabled(!!json.data.whatsappEnabled);
+      setWhatsappPhoneNumberId(json.data.whatsappPhoneNumberId ?? '');
+      setWhatsappAccessTokenSet(!!json.data.whatsappAccessTokenSet);
+      setWhatsappLeaveApprovalTemplate(json.data.whatsappLeaveApprovalTemplate ?? 'leave_approved');
+      setWhatsappTemplateLanguage(json.data.whatsappTemplateLanguage ?? 'en_US');
+    } catch {
+      // non-critical; the main fetchSettings() call already surfaces a toast on failure
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWhatsappSettings();
+  }, [fetchWhatsappSettings, refreshKey]);
+
+  const handleSaveWhatsapp = async () => {
+    if (whatsappEnabled && !whatsappPhoneNumberId.trim()) {
+      toast.error('Phone Number ID is required to enable WhatsApp.');
+      return;
+    }
+    setSavingWhatsapp(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          whatsappEnabled,
+          whatsappPhoneNumberId: whatsappPhoneNumberId.trim() || null,
+          ...(whatsappAccessToken.trim() ? { whatsappAccessToken: whatsappAccessToken.trim() } : {}),
+          whatsappLeaveApprovalTemplate: whatsappLeaveApprovalTemplate.trim() || 'leave_approved',
+          whatsappTemplateLanguage: whatsappTemplateLanguage.trim() || 'en_US',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save WhatsApp settings');
+      toast.success('WhatsApp settings saved.');
+      setWhatsappAccessToken('');
+      setWhatsappAccessTokenSet(!!data.data.whatsappAccessTokenSet);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save WhatsApp settings');
+    } finally {
+      setSavingWhatsapp(false);
+    }
+  };
+
+  const handleSendTestWhatsapp = async () => {
+    if (!testWhatsappNumber.trim()) {
+      toast.error('Enter a 10-digit mobile number to send the test to.');
+      return;
+    }
+    setSendingWhatsappTest(true);
+    try {
+      const res = await fetch('/api/settings/test-whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testWhatsappNumber.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send test WhatsApp message');
+      toast.success(`Test WhatsApp message sent to ${testWhatsappNumber.trim()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send test WhatsApp message');
+    } finally {
+      setSendingWhatsappTest(false);
     }
   };
 
@@ -2435,6 +2517,68 @@ export default function SettingsView() {
               <Button variant="outline" onClick={handleSendTestEmail} disabled={sendingTest}>
                 {sendingTest ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
                 Send Test Email
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─── WhatsApp (Meta Cloud API) Configuration (admin only) ─────────────── */}
+      {user?.role === 'admin' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageCircle className="h-4 w-4 text-emerald-600" />
+              WhatsApp Notifications
+            </CardTitle>
+            <CardDescription>
+              Sends a WhatsApp record-keeping message to the employee when their leave is approved, via Meta&apos;s WhatsApp
+              Cloud API (a real WhatsApp Business number — never your personal WhatsApp). Requires a Meta Business Account
+              with WhatsApp set up, and a message template approved in Meta&apos;s WhatsApp Manager with the same name/language
+              as below and 6 body placeholders (employee name, leave type, from date, to date, days, approver).
+              Leave off and nothing changes — email-on-approval keeps working either way.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Switch id="whatsapp-enabled" checked={whatsappEnabled} onCheckedChange={setWhatsappEnabled} />
+              <Label htmlFor="whatsapp-enabled" className="cursor-pointer">Enable WhatsApp notifications</Label>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="whatsapp-phone-id">Phone Number ID</Label>
+                <Input id="whatsapp-phone-id" value={whatsappPhoneNumberId} onChange={(e) => setWhatsappPhoneNumberId(e.target.value)} placeholder="From Meta WhatsApp Manager" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="whatsapp-token">
+                  Access Token {whatsappAccessTokenSet && <span className="text-xs font-normal text-emerald-600">(configured — leave blank to keep it)</span>}
+                </Label>
+                <Input id="whatsapp-token" type="password" autoComplete="new-password" value={whatsappAccessToken} onChange={(e) => setWhatsappAccessToken(e.target.value)} placeholder={whatsappAccessTokenSet ? '••••••••' : ''} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="whatsapp-template">Leave Approval Template Name</Label>
+                <Input id="whatsapp-template" value={whatsappLeaveApprovalTemplate} onChange={(e) => setWhatsappLeaveApprovalTemplate(e.target.value)} placeholder="leave_approved" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="whatsapp-lang">Template Language Code</Label>
+                <Input id="whatsapp-lang" value={whatsappTemplateLanguage} onChange={(e) => setWhatsappTemplateLanguage(e.target.value)} placeholder="en_US" />
+              </div>
+            </div>
+            <Button onClick={handleSaveWhatsapp} disabled={savingWhatsapp} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              {savingWhatsapp ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              Save WhatsApp Settings
+            </Button>
+
+            <Separator />
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5 flex-1 min-w-[220px]">
+                <Label htmlFor="whatsapp-test-to">Send a test message to (10-digit mobile)</Label>
+                <Input id="whatsapp-test-to" value={testWhatsappNumber} onChange={(e) => setTestWhatsappNumber(e.target.value)} placeholder="9876543210" />
+              </div>
+              <Button variant="outline" onClick={handleSendTestWhatsapp} disabled={sendingWhatsappTest}>
+                {sendingWhatsappTest ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                Send Test Message
               </Button>
             </div>
           </CardContent>

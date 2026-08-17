@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { notifyEmployee } from "@/lib/notifications";
 import { sendEmail } from "@/lib/mailer";
 import { buildLeaveApprovalEmailHtml } from "@/lib/payroll/leave-approval-email";
+import { getEffectiveWhatsappConfig, sendWhatsappTemplate } from "@/lib/whatsapp";
 
 // GET /api/leaves/[id]
 export async function GET(
@@ -88,7 +89,7 @@ export async function PUT(
             approvedAt: new Date(),
           },
           include: {
-            employee: { select: { firstName: true, lastName: true, employeeCode: true, email: true } },
+            employee: { select: { firstName: true, lastName: true, employeeCode: true, email: true, phone: true } },
             leaveType: true,
           },
         });
@@ -145,6 +146,28 @@ export async function PUT(
           });
         } catch (emailError) {
           console.error("Failed to send leave approval email:", emailError);
+        }
+      }
+
+      // Same record-keeping purpose as the email above, over WhatsApp — only fires if an admin
+      // has actually configured Meta Cloud API credentials in Settings; a no-op otherwise. Also
+      // never blocks the approval: a failed send (including "template not approved yet") is
+      // logged, not surfaced as an approval failure.
+      if (result.employee.phone) {
+        try {
+          const whatsappConfig = await getEffectiveWhatsappConfig();
+          if (whatsappConfig) {
+            await sendWhatsappTemplate(whatsappConfig, result.employee.phone, [
+              `${result.employee.firstName} ${result.employee.lastName ?? ""}`.trim(),
+              result.leaveType.name,
+              result.startDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+              result.endDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+              String(result.totalDays),
+              session.name,
+            ]);
+          }
+        } catch (whatsappError) {
+          console.error("Failed to send leave approval WhatsApp message:", whatsappError);
         }
       }
 
