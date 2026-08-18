@@ -73,14 +73,22 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ] as const;
 
-type ReportType = 'summary' | 'pf' | 'esi' | 'tds' | 'pt' | 'lwf' | 'headcount' | 'attrition' | 'attendance' | 'leave-balance';
-// The 6 original types are all tied to a payroll run for a single month (or range of months);
-// headcount/attrition/attendance/leave-balance are workforce-analytics types with their own params.
-const STATUTORY_TYPES: ReportType[] = ['summary', 'pf', 'esi', 'tds', 'pt', 'lwf'];
-// Attendance shares the statutory types' single month/year picker (no range support), but
-// isn't itself tied to a payroll run, so it's kept out of STATUTORY_TYPES (which also gates the
-// range-mode checkbox — attendance doesn't support ranges).
-const MONTH_YEAR_TYPES: ReportType[] = [...STATUTORY_TYPES, 'attendance'];
+type ReportType = 'summary' | 'pf' | 'esi' | 'tds' | 'pt' | 'lwf' | 'headcount' | 'attrition' | 'attendance' | 'leave-balance' | 'payroll-statement' | 'assets' | 'hiring-incentives';
+// Types whose period is a single month/year, or — when isRangeMode is on — a fromMonth/fromYear
+// to toMonth/toYear range summed per employee (the same enumerateMonthRange mechanism on the
+// backend, shared identically across all of these). headcount/attrition/assets have their own
+// period shape (or none); leave-balance has its own year+optional-month picker below.
+const STATUTORY_TYPES: ReportType[] = ['summary', 'pf', 'esi', 'tds', 'pt', 'lwf', 'payroll-statement', 'attendance', 'hiring-incentives'];
+const MONTH_YEAR_TYPES: ReportType[] = STATUTORY_TYPES;
+
+// FY-aligned quarter presets (Q1 Apr–Jun … Q4 Jan–Mar of the following calendar year), matching
+// Company.financialYearStart's April convention already baked into the rest of the app.
+const QUARTER_PRESETS: { label: string; startMonth: number; endMonth: number; yearOffset: 0 | 1 }[] = [
+  { label: 'Q1 (Apr–Jun)', startMonth: 4, endMonth: 6, yearOffset: 0 },
+  { label: 'Q2 (Jul–Sep)', startMonth: 7, endMonth: 9, yearOffset: 0 },
+  { label: 'Q3 (Oct–Dec)', startMonth: 10, endMonth: 12, yearOffset: 0 },
+  { label: 'Q4 (Jan–Mar)', startMonth: 1, endMonth: 3, yearOffset: 1 },
+];
 
 // ─── Mock data types ───────────────────────────────────────────────────────────
 
@@ -228,7 +236,6 @@ interface AttendanceRow {
 }
 
 interface AttendanceData {
-  daysInMonth: number;
   employees: AttendanceRow[];
   totals: { totalEmployees: number; avgAttendancePercent: number };
 }
@@ -243,11 +250,90 @@ interface LeaveBalanceRow {
   carryForwarded: number;
   used: number;
   remaining: number;
+  takenInMonth?: number;
 }
 
 interface LeaveBalanceData {
   employees: LeaveBalanceRow[];
   byLeaveType: { leaveType: string; totalAllocated: number; used: number; remaining: number }[];
+}
+
+interface PayrollStatementRow {
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  designation: string;
+  department: string;
+  basic: number;
+  dearnessAllowance: number;
+  houseRentAllowance: number;
+  conveyanceAllowance: number;
+  medicalAllowance: number;
+  specialAllowance: number;
+  overtimeAllowance: number;
+  bonus: number;
+  otherEarnings: number;
+  totalEarnings: number;
+  employeePF: number;
+  employerPF: number;
+  employeeESI: number;
+  employerESI: number;
+  tds: number;
+  professionalTax: number;
+  lwf: number;
+  totalDeductions: number;
+  netSalary: number;
+  ctc: number;
+}
+
+interface PayrollStatementData {
+  totalEmployees: number;
+  employees: PayrollStatementRow[];
+  totals: { totalEarnings: number; totalDeductions: number; totalNetSalary: number; totalCTC: number };
+}
+
+interface AssetRow {
+  assetType: string;
+  brand: string;
+  model: string;
+  assetTag: string;
+  condition: string;
+  status: 'in_stock' | 'returned' | 'with_employee';
+  employeeCode: string;
+  employeeName: string;
+  department: string;
+  allocatedDate: string;
+  returnedDate: string;
+}
+
+interface AssetsData {
+  asOf: string;
+  totalAssets: number;
+  byType: { assetType: string; count: number }[];
+  byStatus: { status: string; count: number }[];
+  byCondition: { condition: string; count: number }[];
+  items: AssetRow[];
+}
+
+interface HiringIncentiveRow {
+  recruiterCode: string;
+  recruiterName: string;
+  department: string;
+  candidateName: string;
+  employmentType: string;
+  amount: number;
+  status: string;
+  payMonth: number;
+  payYear: number;
+  eligibleDate: string;
+}
+
+interface HiringIncentivesData {
+  totalIncentives: number;
+  totalAmount: number;
+  byRecruiter: { recruiterCode: string; recruiterName: string; count: number; totalAmount: number }[];
+  byStatus: { status: string; count: number; totalAmount: number }[];
+  incentives: HiringIncentiveRow[];
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -274,8 +360,9 @@ export default function ReportsView() {
   const [fromDate, setFromDate] = useState(todayIso.slice(0, 8) + '01');
   const [toDate, setToDate] = useState(todayIso);
 
-  // Leave Balance's own single-year param.
+  // Leave Balance's own params: year (required) + optional month drill-down.
   const [leaveYear, setLeaveYear] = useState(String(currentYear));
+  const [leaveMonth, setLeaveMonth] = useState(''); // '' = whole year, no drill-down
 
   // Report data states
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
@@ -288,6 +375,9 @@ export default function ReportsView() {
   const [attritionData, setAttritionData] = useState<AttritionData | null>(null);
   const [attendanceData, setAttendanceData] = useState<AttendanceData | null>(null);
   const [leaveBalanceData, setLeaveBalanceData] = useState<LeaveBalanceData | null>(null);
+  const [payrollStatementData, setPayrollStatementData] = useState<PayrollStatementData | null>(null);
+  const [assetsData, setAssetsData] = useState<AssetsData | null>(null);
+  const [hiringIncentivesData, setHiringIncentivesData] = useState<HiringIncentivesData | null>(null);
 
   // Trends tab
   const [trendMonths, setTrendMonths] = useState<TrendMonth[]>([]);
@@ -297,16 +387,14 @@ export default function ReportsView() {
   // for the same report configuration.
   const buildReportQuery = useCallback((type: ReportType) => {
     const params = new URLSearchParams({ type });
-    if (type === 'headcount') {
+    if (type === 'headcount' || type === 'assets') {
       // no date params needed — always "right now"
     } else if (type === 'attrition') {
       params.set('fromDate', fromDate);
       params.set('toDate', toDate);
     } else if (type === 'leave-balance') {
       params.set('year', leaveYear);
-    } else if (type === 'attendance') {
-      params.set('month', month);
-      params.set('year', year);
+      if (leaveMonth) params.set('month', leaveMonth);
     } else if (isRangeMode) {
       params.set('fromMonth', month);
       params.set('fromYear', year);
@@ -317,7 +405,7 @@ export default function ReportsView() {
       params.set('year', year);
     }
     return params;
-  }, [month, year, isRangeMode, toMonth, toYear, fromDate, toDate, leaveYear]);
+  }, [month, year, isRangeMode, toMonth, toYear, fromDate, toDate, leaveYear, leaveMonth]);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -439,11 +527,20 @@ export default function ReportsView() {
         case 'leave-balance':
           setLeaveBalanceData(d as LeaveBalanceData);
           break;
+        case 'payroll-statement':
+          setPayrollStatementData(d as PayrollStatementData);
+          break;
+        case 'assets':
+          setAssetsData(d as AssetsData);
+          break;
+        case 'hiring-incentives':
+          setHiringIncentivesData(d as HiringIncentivesData);
+          break;
       }
 
-      const periodLabel = reportType === 'headcount' ? 'as of today'
+      const periodLabel = reportType === 'headcount' || reportType === 'assets' ? 'as of today'
         : reportType === 'attrition' ? `${fromDate} to ${toDate}`
-          : reportType === 'leave-balance' ? `Year ${leaveYear}`
+          : reportType === 'leave-balance' ? `Year ${leaveYear}${leaveMonth ? ` – ${MONTHS[Number(leaveMonth) - 1]}` : ''}`
             : isRangeMode ? `${MONTHS[Number(month) - 1]} ${year} – ${MONTHS[Number(toMonth) - 1]} ${toYear}`
               : `${MONTHS[Number(month) - 1]} ${year}`;
       toast.success(`${periodLabel} ${reportLabel(reportType)} generated`);
@@ -452,7 +549,7 @@ export default function ReportsView() {
     } finally {
       setLoading(false);
     }
-  }, [month, year, reportType, buildReportQuery, isRangeMode, toMonth, toYear, fromDate, toDate, leaveYear]);
+  }, [month, year, reportType, buildReportQuery, isRangeMode, toMonth, toYear, fromDate, toDate, leaveYear, leaveMonth]);
 
   const handleExport = useCallback(async (type: ReportType, format: 'csv' | 'xlsx' | 'pdf' = 'csv') => {
     try {
@@ -465,9 +562,10 @@ export default function ReportsView() {
       const a = document.createElement('a');
       a.href = url;
       const suffix = type === 'headcount' ? 'headcount'
-        : type === 'attrition' ? `attrition-${fromDate}-to-${toDate}`
-          : type === 'leave-balance' ? `leave-balance-${leaveYear}`
-            : `${type}-${month}-${year}`;
+        : type === 'assets' ? 'assets'
+          : type === 'attrition' ? `attrition-${fromDate}-to-${toDate}`
+            : type === 'leave-balance' ? `leave-balance-${leaveYear}${leaveMonth ? `-${leaveMonth}` : ''}`
+              : `${type}-${month}-${year}`;
       a.download = `${suffix}-report.${format}`;
       document.body.appendChild(a);
       a.click();
@@ -477,7 +575,7 @@ export default function ReportsView() {
     } catch {
       toast.error('Failed to export report');
     }
-  }, [buildReportQuery, month, year, fromDate, toDate, leaveYear]);
+  }, [buildReportQuery, month, year, fromDate, toDate, leaveYear, leaveMonth]);
 
   // A shared 3-button export row (CSV/Excel/PDF) so every report view builds this identically
   // rather than repeating the same three <Button> blocks per type.
@@ -511,6 +609,9 @@ export default function ReportsView() {
       attrition: 'Attrition Report',
       attendance: 'Attendance Report',
       'leave-balance': 'Leave Balance Report',
+      'payroll-statement': 'Payroll Statement',
+      assets: 'Assets Report',
+      'hiring-incentives': 'Hiring Incentives Report',
     };
     return labels[type];
   };
@@ -1116,7 +1217,7 @@ export default function ReportsView() {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-foreground">Attendance Report — {MONTHS[Number(month) - 1]} {year}</h3>
+          <h3 className="text-lg font-semibold text-foreground">Attendance Report — {periodDisplay}</h3>
           <ExportButtons type="attendance" />
         </div>
 
@@ -1197,7 +1298,9 @@ export default function ReportsView() {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-foreground">Leave Balance Report — Year {leaveYear}</h3>
+          <h3 className="text-lg font-semibold text-foreground">
+            Leave Balance Report — Year {leaveYear}{leaveMonth ? ` (drilled into ${MONTHS[Number(leaveMonth) - 1]})` : ''}
+          </h3>
           <ExportButtons type="leave-balance" />
         </div>
 
@@ -1228,6 +1331,7 @@ export default function ReportsView() {
                     <TableHead className="text-right">Carry Fwd</TableHead>
                     <TableHead className="text-right">Used</TableHead>
                     <TableHead className="text-right font-semibold">Remaining</TableHead>
+                    {leaveMonth && <TableHead className="text-right">Taken in {MONTHS[Number(leaveMonth) - 1]}</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1241,10 +1345,275 @@ export default function ReportsView() {
                       <TableCell className="text-right tabular-nums">{row.carryForwarded}</TableCell>
                       <TableCell className="text-right tabular-nums">{row.used}</TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">{row.remaining}</TableCell>
+                      {leaveMonth && <TableCell className="text-right tabular-nums">{row.takenInMonth ?? 0}</TableCell>}
                     </TableRow>
                   ))}
                   {leaveBalanceData.employees.length === 0 && (
-                    <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No leave balances recorded for this year.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={leaveMonth ? 9 : 8} className="h-24 text-center text-muted-foreground">No leave balances recorded for this year.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // ─── Payroll Statement Report ────────────────────────────────────────────────
+
+  const renderPayrollStatementReport = () => {
+    if (!payrollStatementData) return null;
+    const t = payrollStatementData.totals;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">Payroll Statement — {periodDisplay}</h3>
+          <ExportButtons type="payroll-statement" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">Total Earnings</p>
+              <p className="text-lg font-bold">{fmt(t.totalEarnings)}</p>
+            </CardContent>
+          </Card>
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">Total Deductions</p>
+              <p className="text-lg font-bold">{fmt(t.totalDeductions)}</p>
+            </CardContent>
+          </Card>
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">Total Net Salary</p>
+              <p className="text-lg font-bold text-emerald-700">{fmt(t.totalNetSalary)}</p>
+            </CardContent>
+          </Card>
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">Total CTC</p>
+              <p className="text-lg font-bold">{fmt(t.totalCTC)}</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+                    <TableHead className="w-[100px]">Emp Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead className="text-right">Basic</TableHead>
+                    <TableHead className="text-right">HRA</TableHead>
+                    <TableHead className="text-right">Conveyance</TableHead>
+                    <TableHead className="text-right">Medical</TableHead>
+                    <TableHead className="text-right">Special</TableHead>
+                    <TableHead className="text-right">Bonus</TableHead>
+                    <TableHead className="text-right font-semibold">Total Earnings</TableHead>
+                    <TableHead className="text-right">PF</TableHead>
+                    <TableHead className="text-right">ESI</TableHead>
+                    <TableHead className="text-right">TDS</TableHead>
+                    <TableHead className="text-right">PT</TableHead>
+                    <TableHead className="text-right font-semibold">Total Deductions</TableHead>
+                    <TableHead className="text-right font-semibold">Net Salary</TableHead>
+                    <TableHead className="text-right">CTC</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {payrollStatementData.employees.map((row) => (
+                    <TableRow key={row.employeeId}>
+                      <TableCell className="font-mono text-xs">{row.employeeCode}</TableCell>
+                      <TableCell className="font-medium">{row.employeeName}</TableCell>
+                      <TableCell>{row.department}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.basic)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.houseRentAllowance)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.conveyanceAllowance)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.medicalAllowance)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.specialAllowance)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.bonus)}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.totalEarnings)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.employeePF)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.employeeESI)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.tds)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.professionalTax)}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.totalDeductions)}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums text-emerald-700">{fmt(row.netSalary)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(row.ctc)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {payrollStatementData.employees.length === 0 && (
+                    <TableRow><TableCell colSpan={16} className="h-24 text-center text-muted-foreground">No payroll data found for this period.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // ─── Assets Report ───────────────────────────────────────────────────────────
+
+  const assetStatusLabel = (s: string) => s === 'in_stock' ? 'In Stock' : s === 'with_employee' ? 'With Employee' : 'Returned';
+
+  const renderAssetsReport = () => {
+    if (!assetsData) return null;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">Assets Report — as of today</h3>
+          <ExportButtons type="assets" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">Total Assets</p>
+              <p className="text-lg font-bold">{assetsData.totalAssets}</p>
+            </CardContent>
+          </Card>
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground mb-1">By Status</p>
+              <div className="flex flex-wrap gap-1.5">
+                {assetsData.byStatus.map((s) => (
+                  <Badge key={s.status} variant="outline" className="text-xs">{assetStatusLabel(s.status)}: {s.count}</Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground mb-1">By Type</p>
+              <div className="flex flex-wrap gap-1.5">
+                {assetsData.byType.map((s) => (
+                  <Badge key={s.assetType} variant="outline" className="text-xs">{s.assetType}: {s.count}</Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+                    <TableHead>Type</TableHead>
+                    <TableHead>Brand / Model</TableHead>
+                    <TableHead>Asset Tag</TableHead>
+                    <TableHead>Condition</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Allocated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {assetsData.items.map((row, i) => (
+                    <TableRow key={`${row.assetTag}-${i}`}>
+                      <TableCell className="capitalize">{row.assetType}</TableCell>
+                      <TableCell>{[row.brand, row.model].filter(Boolean).join(' ') || '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.assetTag || '—'}</TableCell>
+                      <TableCell className="capitalize">{row.condition || '—'}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={
+                          row.status === 'in_stock' ? 'border-sky-300 text-sky-700 bg-sky-50'
+                            : row.status === 'with_employee' ? 'border-emerald-300 text-emerald-700 bg-emerald-50'
+                              : 'border-amber-300 text-amber-700 bg-amber-50'
+                        }>
+                          {assetStatusLabel(row.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{row.employeeName || '—'}</TableCell>
+                      <TableCell>{row.department || '—'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{new Date(row.allocatedDate).toLocaleDateString('en-IN')}</TableCell>
+                    </TableRow>
+                  ))}
+                  {assetsData.items.length === 0 && (
+                    <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No assets recorded.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // ─── Hiring Incentives Report ────────────────────────────────────────────────
+
+  const renderHiringIncentivesReport = () => {
+    if (!hiringIncentivesData) return null;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">Hiring Incentives Report — {periodDisplay}</h3>
+          <ExportButtons type="hiring-incentives" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">Total Incentives</p>
+              <p className="text-lg font-bold">{hiringIncentivesData.totalIncentives}</p>
+            </CardContent>
+          </Card>
+          <Card className="gap-4">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">Total Amount</p>
+              <p className="text-lg font-bold text-emerald-700">{fmt(hiringIncentivesData.totalAmount)}</p>
+            </CardContent>
+          </Card>
+          <Card className="gap-4 sm:col-span-2">
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground mb-1">By Status</p>
+              <div className="flex flex-wrap gap-1.5">
+                {hiringIncentivesData.byStatus.map((s) => (
+                  <Badge key={s.status} variant="outline" className="text-xs capitalize">{s.status}: {s.count} ({fmt(s.totalAmount)})</Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+                    <TableHead>Recruiter</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Candidate</TableHead>
+                    <TableHead>Employment Type</TableHead>
+                    <TableHead>Pay Period</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {hiringIncentivesData.incentives.map((row, i) => (
+                    <TableRow key={`${row.recruiterCode}-${row.candidateName}-${i}`}>
+                      <TableCell className="font-medium">{row.recruiterName} <span className="text-xs text-muted-foreground font-mono">({row.recruiterCode})</span></TableCell>
+                      <TableCell>{row.department}</TableCell>
+                      <TableCell>{row.candidateName}</TableCell>
+                      <TableCell className="capitalize">{row.employmentType}</TableCell>
+                      <TableCell>{MONTHS[row.payMonth - 1]} {row.payYear}</TableCell>
+                      <TableCell><Badge variant="outline" className="capitalize text-xs">{row.status}</Badge></TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{fmt(row.amount)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {hiringIncentivesData.incentives.length === 0 && (
+                    <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">No hiring incentives found for this period.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -1348,6 +1717,26 @@ export default function ReportsView() {
     ? `${MONTHS[Number(month) - 1]} ${year} – ${MONTHS[Number(toMonth) - 1]} ${toYear}`
     : `${MONTHS[Number(month) - 1]} ${year}`;
 
+  // FY start year is taken from the current "From"/month year field — clicking a preset turns
+  // range mode on and fills the from/to fields, it doesn't require range mode to already be on.
+  const applyQuarterPreset = (preset: (typeof QUARTER_PRESETS)[number]) => {
+    const fyStartYear = Number(year) || currentYear;
+    setIsRangeMode(true);
+    setMonth(String(preset.startMonth));
+    setYear(String(fyStartYear + preset.yearOffset));
+    setToMonth(String(preset.endMonth));
+    setToYear(String(fyStartYear + preset.yearOffset));
+  };
+
+  const applyFullYearPreset = () => {
+    const fyStartYear = Number(year) || currentYear;
+    setIsRangeMode(true);
+    setMonth('4');
+    setYear(String(fyStartYear));
+    setToMonth('3');
+    setToYear(String(fyStartYear + 1));
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -1396,6 +1785,9 @@ export default function ReportsView() {
                       <SelectItem value="attrition">Attrition</SelectItem>
                       <SelectItem value="attendance">Attendance</SelectItem>
                       <SelectItem value="leave-balance">Leave Balance</SelectItem>
+                      <SelectItem value="payroll-statement">Payroll Statement</SelectItem>
+                      <SelectItem value="assets">Assets</SelectItem>
+                      <SelectItem value="hiring-incentives">Hiring Incentives</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1461,10 +1853,22 @@ export default function ReportsView() {
                 )}
 
                 {reportType === 'leave-balance' && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="leave-year" className="text-xs font-medium">Year</Label>
-                    <Input id="leave-year" type="number" min={2020} max={2035} value={leaveYear} onChange={(e) => setLeaveYear(e.target.value)} className="w-[100px]" />
-                  </div>
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="leave-year" className="text-xs font-medium">Year</Label>
+                      <Input id="leave-year" type="number" min={2020} max={2035} value={leaveYear} onChange={(e) => setLeaveYear(e.target.value)} className="w-[100px]" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="leave-month" className="text-xs font-medium">Month (optional)</Label>
+                      <Select value={leaveMonth || 'all'} onValueChange={(v) => setLeaveMonth(v === 'all' ? '' : v)}>
+                        <SelectTrigger id="leave-month" className="w-[160px]"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All months</SelectItem>
+                          {MONTHS.map((m, i) => (<SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
                 )}
 
                 <Button
@@ -1478,10 +1882,23 @@ export default function ReportsView() {
               </div>
 
               {isStatutoryType && (
-                <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
-                  <Checkbox checked={isRangeMode} onCheckedChange={(v) => setIsRangeMode(!!v)} />
-                  Multi-month date range (spans several payroll runs, summed per employee)
-                </label>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
+                    <Checkbox checked={isRangeMode} onCheckedChange={(v) => setIsRangeMode(!!v)} />
+                    Multi-month date range (spans several payroll runs, summed per employee)
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground mr-1">Quick range:</span>
+                    {QUARTER_PRESETS.map((p) => (
+                      <Button key={p.label} type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => applyQuarterPreset(p)}>
+                        {p.label}
+                      </Button>
+                    ))}
+                    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={applyFullYearPreset}>
+                      Full Year (Apr–Mar)
+                    </Button>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -1524,6 +1941,9 @@ export default function ReportsView() {
               {reportType === 'attrition' && renderAttritionReport()}
               {reportType === 'attendance' && renderAttendanceReport()}
               {reportType === 'leave-balance' && renderLeaveBalanceReport()}
+              {reportType === 'payroll-statement' && renderPayrollStatementReport()}
+              {reportType === 'assets' && renderAssetsReport()}
+              {reportType === 'hiring-incentives' && renderHiringIncentivesReport()}
             </>
           )}
         </TabsContent>

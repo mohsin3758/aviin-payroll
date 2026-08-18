@@ -45,6 +45,13 @@ interface EmployeeSelectShape {
 interface ReportDetailRow {
   basic: number;
   dearnessAllowance: number;
+  houseRentAllowance: number;
+  conveyanceAllowance: number;
+  medicalAllowance: number;
+  specialAllowance: number;
+  overtimeAllowance: number;
+  bonus: number;
+  otherEarnings: number;
   employeePF: number;
   employerPF: number;
   employeeESI: number;
@@ -60,6 +67,13 @@ interface ReportDetailRow {
   employee: EmployeeSelectShape;
 }
 
+const SUMMABLE_DETAIL_FIELDS = [
+  "basic", "dearnessAllowance", "houseRentAllowance", "conveyanceAllowance", "medicalAllowance",
+  "specialAllowance", "overtimeAllowance", "bonus", "otherEarnings",
+  "employeePF", "employerPF", "employeeESI", "employerESI", "tds", "professionalTax", "lwf",
+  "grossSalary", "netSalary", "totalDeductions", "totalEarnings", "ctc",
+] as const satisfies readonly (keyof ReportDetailRow)[];
+
 /** Sums PayrollDetail rows for the same employee across every run in a multi-month range.
  * Only sums what actually exists — a joiner/leaver mid-range, or a month never processed,
  * simply contributes nothing for that month, never a synthesized/estimated figure. Filtering
@@ -73,38 +87,11 @@ function aggregateDetailsByEmployee(
   for (const d of allDetails) {
     const existing = byEmployee.get(d.employeeId);
     if (existing) {
-      existing.basic += d.basic;
-      existing.dearnessAllowance += d.dearnessAllowance;
-      existing.employeePF += d.employeePF;
-      existing.employerPF += d.employerPF;
-      existing.employeeESI += d.employeeESI;
-      existing.employerESI += d.employerESI;
-      existing.tds += d.tds;
-      existing.professionalTax += d.professionalTax;
-      existing.lwf += d.lwf;
-      existing.grossSalary += d.grossSalary;
-      existing.netSalary += d.netSalary;
-      existing.totalDeductions += d.totalDeductions;
-      existing.totalEarnings += d.totalEarnings;
-      existing.ctc += d.ctc;
+      for (const field of SUMMABLE_DETAIL_FIELDS) existing[field] += d[field];
     } else {
-      byEmployee.set(d.employeeId, {
-        employee: d.employee,
-        basic: d.basic,
-        dearnessAllowance: d.dearnessAllowance,
-        employeePF: d.employeePF,
-        employerPF: d.employerPF,
-        employeeESI: d.employeeESI,
-        employerESI: d.employerESI,
-        tds: d.tds,
-        professionalTax: d.professionalTax,
-        lwf: d.lwf,
-        grossSalary: d.grossSalary,
-        netSalary: d.netSalary,
-        totalDeductions: d.totalDeductions,
-        totalEarnings: d.totalEarnings,
-        ctc: d.ctc,
-      });
+      const row = { employee: d.employee } as ReportDetailRow;
+      for (const field of SUMMABLE_DETAIL_FIELDS) row[field] = d[field];
+      byEmployee.set(d.employeeId, row);
     }
   }
   return [...byEmployee.values()];
@@ -133,6 +120,12 @@ function flattenReportRows(type: ReportType, data: Record<string, unknown>): Rec
       ...d.byState.map((x) => ({ dimension: "state", key: x.state, count: x.count })),
       ...d.byEmploymentType.map((x) => ({ dimension: "employmentType", key: x.employmentType, count: x.count })),
     ];
+  }
+  if (type === "assets") {
+    return (data.items as Record<string, unknown>[]) ?? [];
+  }
+  if (type === "hiring-incentives") {
+    return (data.incentives as Record<string, unknown>[]) ?? [];
   }
   return (data.employees as Record<string, unknown>[]) ?? [];
 }
@@ -272,6 +265,127 @@ async function handleHeadcountReport(format: ReportFormat): Promise<NextResponse
   return NextResponse.json({ data: reportData });
 }
 
+// --- Assets: always "right now," same reasoning as headcount — an asset's allocation history
+// isn't versioned, only its current employeeId/returnedDate, so this is a live snapshot of the
+// same EmployeeAsset table the Assets screen itself reads (src/app/api/assets/route.ts), not a
+// period-bound figure like payroll.
+async function handleAssetsReport(format: ReportFormat): Promise<NextResponse> {
+  const assets = await db.employeeAsset.findMany({
+    include: { employee: { select: { firstName: true, lastName: true, employeeCode: true, department: true, dateOfExit: true } } },
+    orderBy: { allocatedDate: "desc" },
+  });
+
+  const items = assets.map((a) => ({
+    assetType: a.assetType,
+    brand: a.brand ?? "",
+    model: a.model ?? "",
+    assetTag: a.assetTag ?? "",
+    condition: a.condition ?? "",
+    status: !a.employeeId ? "in_stock" : a.returnedDate ? "returned" : "with_employee",
+    employeeCode: a.employee?.employeeCode ?? "",
+    employeeName: a.employee ? `${a.employee.firstName} ${a.employee.lastName ?? ""}`.trim() : "",
+    department: a.employee?.department ?? "",
+    allocatedDate: a.allocatedDate.toISOString(),
+    returnedDate: a.returnedDate?.toISOString() ?? "",
+  }));
+
+  const countBy = <K extends string>(rows: typeof items, key: (r: (typeof items)[number]) => K) => {
+    const map = new Map<K, number>();
+    for (const r of rows) {
+      const k = key(r);
+      map.set(k, (map.get(k) ?? 0) + 1);
+    }
+    return [...map.entries()].map(([k, count]) => ({ key: k, count }));
+  };
+
+  const reportData = {
+    asOf: new Date().toISOString(),
+    totalAssets: items.length,
+    byType: countBy(items, (r) => r.assetType).map((x) => ({ assetType: x.key, count: x.count })),
+    byStatus: countBy(items, (r) => r.status).map((x) => ({ status: x.key, count: x.count })),
+    byCondition: countBy(items, (r) => r.condition || "unspecified").map((x) => ({ condition: x.key, count: x.count })),
+    items,
+  };
+
+  if (format === "xlsx") return buildXlsxResponse(items, "Assets", "assets-report");
+  if (format === "pdf") return buildPdfResponse(items, "Assets Report", `As of ${new Date(reportData.asOf).toLocaleDateString("en-IN")}`, "assets-report");
+  const csvRes = exportResponse("assets", format, reportData, "assets-report");
+  if (csvRes) return csvRes;
+  return NextResponse.json({ data: reportData });
+}
+
+// --- Hiring Incentives: recruiter payout schedule for a month, or summed across a multi-month
+// range — same enumerateMonthRange mechanism the statutory reports use, but queried directly
+// against HiringIncentive (keyed on payMonth/payYear) rather than PayrollDetail, since an
+// incentive isn't part of the regular monthly payroll run's own detail rows.
+async function handleHiringIncentivesReport(
+  pairs: { month: number; year: number }[],
+  isRangeResult: boolean,
+  format: ReportFormat
+): Promise<NextResponse> {
+  const incentives = await db.hiringIncentive.findMany({
+    where: { OR: pairs.map((p) => ({ payMonth: p.month, payYear: p.year })) },
+    include: {
+      recruiter: { select: { firstName: true, lastName: true, employeeCode: true, department: true } },
+      candidate: { select: { firstName: true, lastName: true } },
+    },
+    orderBy: [{ payYear: "desc" }, { payMonth: "desc" }],
+  });
+
+  const rows = incentives.map((i) => ({
+    recruiterCode: i.recruiter.employeeCode,
+    recruiterName: `${i.recruiter.firstName} ${i.recruiter.lastName ?? ""}`.trim(),
+    department: i.recruiter.department,
+    candidateName: `${i.candidate.firstName} ${i.candidate.lastName ?? ""}`.trim(),
+    employmentType: i.employmentType,
+    amount: i.amount,
+    status: i.status,
+    payMonth: i.payMonth,
+    payYear: i.payYear,
+    eligibleDate: i.eligibleDate.toISOString(),
+  }));
+
+  const byRecruiterMap = new Map<string, { recruiterName: string; count: number; totalAmount: number }>();
+  for (const r of rows) {
+    const existing = byRecruiterMap.get(r.recruiterCode) ?? { recruiterName: r.recruiterName, count: 0, totalAmount: 0 };
+    existing.count += 1;
+    existing.totalAmount += r.amount;
+    byRecruiterMap.set(r.recruiterCode, existing);
+  }
+  const byRecruiter = [...byRecruiterMap.entries()].map(([recruiterCode, v]) => ({ recruiterCode, ...v }));
+
+  const byStatusMap = new Map<string, { count: number; totalAmount: number }>();
+  for (const r of rows) {
+    const existing = byStatusMap.get(r.status) ?? { count: 0, totalAmount: 0 };
+    existing.count += 1;
+    existing.totalAmount += r.amount;
+    byStatusMap.set(r.status, existing);
+  }
+  const byStatus = [...byStatusMap.entries()].map(([status, v]) => ({ status, ...v }));
+
+  const reportData = {
+    isRange: isRangeResult,
+    monthsIncluded: pairs,
+    totalIncentives: rows.length,
+    totalAmount: rows.reduce((s, r) => s + r.amount, 0),
+    byRecruiter,
+    byStatus,
+    incentives: rows,
+  };
+  const filenameBase = `hiring-incentives-report-${pairs[0].month}-${pairs[0].year}`;
+
+  if (format === "xlsx") return buildXlsxResponse(rows, "Hiring Incentives", filenameBase);
+  if (format === "pdf") {
+    const periodLabel = isRangeResult
+      ? `${getMonthName(pairs[0].month)} ${pairs[0].year} – ${getMonthName(pairs[pairs.length - 1].month)} ${pairs[pairs.length - 1].year}`
+      : `${getMonthName(pairs[0].month)} ${pairs[0].year}`;
+    return buildPdfResponse(rows, "Hiring Incentives Report", periodLabel, filenameBase);
+  }
+  const csvRes = exportResponse("hiring-incentives", format, reportData, filenameBase);
+  if (csvRes) return csvRes;
+  return NextResponse.json({ data: reportData });
+}
+
 // --- Attrition: who exited and when, within a date range. Best-effort join against
 // ExitRequest for a reason — an employee can have dateOfExit set without ever going through
 // the formal exit-request flow (e.g. a direct admin edit).
@@ -343,21 +457,15 @@ async function handleAttritionReport(fromDateStr: string, toDateStr: string, for
   return NextResponse.json({ data: reportData });
 }
 
-// --- Attendance: per-employee monthly present/absent/half-day summary. Reuses the EXACT same
-// day-by-day tally payroll itself pays against (src/lib/payroll/attendance-tally.ts) so this
+// --- Attendance: per-employee present/absent/half-day summary for one month, or summed across
+// a multi-month range (a whole year is just a 12-pair range) — reuses the EXACT same day-by-day
+// tally payroll itself pays against (src/lib/payroll/attendance-tally.ts) per month, so this
 // report can never disagree with what employees are actually paid for.
-async function handleAttendanceReport(month: number, year: number, format: ReportFormat): Promise<NextResponse> {
+async function handleAttendanceReport(pairs: { month: number; year: number }[], isRangeResult: boolean, format: ReportFormat): Promise<NextResponse> {
   const companyId = await getDefaultCompanyId();
   const company = await db.company.findUnique({ where: { id: companyId } });
   if (!company) return apiError("Company not found", 404);
 
-  const daysInMonth = getDaysInMonth(month, year);
-  const monthStart = new Date(Date.UTC(year, month - 1, 1));
-  const monthEnd = new Date(Date.UTC(year, month, 1));
-  // Only mandatory holidays auto-credit — same rule as payroll (src/app/api/payroll/route.ts)
-  // so this report can never disagree with what employees are actually paid for.
-  const holidays = await db.holiday.findMany({ where: { companyId: company.id, date: { gte: monthStart, lt: monthEnd }, type: { not: "optional" } } });
-  const holidayDateKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
   const weeklyOffDays = company.weeklyOffDays
     .split(",")
     .map((s) => parseInt(s.trim(), 10))
@@ -365,38 +473,65 @@ async function handleAttendanceReport(month: number, year: number, format: Repor
 
   const employees = await db.employee.findMany({
     where: { companyId: company.id, ...ACTIVE_EMPLOYEE_WHERE },
-    select: {
-      id: true,
-      employeeCode: true,
-      firstName: true,
-      lastName: true,
-      department: true,
-      designation: true,
-      attendance: { where: { date: { gte: monthStart, lt: monthEnd } } },
-    },
+    select: { id: true, employeeCode: true, firstName: true, lastName: true, department: true, designation: true },
   });
 
+  const totalsByEmployee = new Map<string, { presentDays: number; absentDays: number; halfDays: number; overtimeHours: number; totalDaysInPeriod: number }>();
+  for (const emp of employees) {
+    totalsByEmployee.set(emp.id, { presentDays: 0, absentDays: 0, halfDays: 0, overtimeHours: 0, totalDaysInPeriod: 0 });
+  }
+
+  for (const { month, year } of pairs) {
+    const daysInMonth = getDaysInMonth(month, year);
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const monthEnd = new Date(Date.UTC(year, month, 1));
+    // Only mandatory holidays auto-credit — same rule as payroll (src/app/api/payroll/route.ts)
+    // so this report can never disagree with what employees are actually paid for.
+    const holidays = await db.holiday.findMany({ where: { companyId: company.id, date: { gte: monthStart, lt: monthEnd }, type: { not: "optional" } } });
+    const holidayDateKeys = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
+
+    const attendanceByEmployee = await db.attendance.findMany({
+      where: { employeeId: { in: employees.map((e) => e.id) }, date: { gte: monthStart, lt: monthEnd } },
+    });
+    const grouped = new Map<string, typeof attendanceByEmployee>();
+    for (const a of attendanceByEmployee) {
+      const list = grouped.get(a.employeeId) ?? [];
+      list.push(a);
+      grouped.set(a.employeeId, list);
+    }
+
+    for (const emp of employees) {
+      const { presentDays, absentDays, halfDays, overtimeHours } = computeMonthlyAttendance(
+        grouped.get(emp.id) ?? [],
+        daysInMonth,
+        month,
+        year,
+        holidayDateKeys,
+        weeklyOffDays
+      );
+      const running = totalsByEmployee.get(emp.id)!;
+      running.presentDays += presentDays;
+      running.absentDays += absentDays;
+      running.halfDays += halfDays;
+      running.overtimeHours += overtimeHours;
+      running.totalDaysInPeriod += daysInMonth;
+    }
+  }
+
   const rows = employees.map((emp) => {
-    const { presentDays, absentDays, halfDays, overtimeHours } = computeMonthlyAttendance(
-      emp.attendance,
-      daysInMonth,
-      month,
-      year,
-      holidayDateKeys,
-      weeklyOffDays
-    );
+    const t = totalsByEmployee.get(emp.id)!;
     return {
       employeeId: emp.id,
       employeeCode: emp.employeeCode,
       employeeName: `${emp.firstName} ${emp.lastName ?? ""}`.trim(),
       department: emp.department,
       designation: emp.designation,
-      daysInMonth,
-      presentDays,
-      absentDays,
-      halfDays,
-      attendancePercent: daysInMonth > 0 ? Math.round((presentDays / daysInMonth) * 1000) / 10 : 0,
-      overtimeHours: Math.round(overtimeHours * 10) / 10,
+      daysInPeriod: t.totalDaysInPeriod,
+      presentDays: t.presentDays,
+      absentDays: t.absentDays,
+      halfDays: t.halfDays,
+      attendancePercent: t.totalDaysInPeriod > 0 ? Math.round((t.presentDays / t.totalDaysInPeriod) * 1000) / 10 : 0,
+      overtimeHours: Math.round(t.overtimeHours * 10) / 10,
     };
   });
 
@@ -405,11 +540,16 @@ async function handleAttendanceReport(month: number, year: number, format: Repor
     avgAttendancePercent: rows.length > 0 ? Math.round((rows.reduce((s, r) => s + r.attendancePercent, 0) / rows.length) * 10) / 10 : 0,
   };
 
-  const reportData = { month, year, monthName: getMonthName(month), daysInMonth, employees: rows, totals };
-  const filenameBase = `attendance-report-${month}-${year}`;
+  const month = pairs[pairs.length - 1].month;
+  const year = pairs[pairs.length - 1].year;
+  const periodLabel = isRangeResult
+    ? `${getMonthName(pairs[0].month)} ${pairs[0].year} – ${getMonthName(month)} ${year}`
+    : `${getMonthName(month)} ${year}`;
+  const reportData = { isRange: isRangeResult, monthsIncluded: pairs, employees: rows, totals };
+  const filenameBase = `attendance-report-${pairs[0].month}-${pairs[0].year}`;
 
   if (format === "xlsx") return buildXlsxResponse(rows, "Attendance", filenameBase);
-  if (format === "pdf") return buildPdfResponse(rows, "Attendance Report", `${getMonthName(month)} ${year}`, filenameBase);
+  if (format === "pdf") return buildPdfResponse(rows, "Attendance Report", periodLabel, filenameBase);
   const csvRes = exportResponse("attendance", format, reportData, filenameBase);
   if (csvRes) return csvRes;
   return NextResponse.json({ data: reportData });
@@ -418,18 +558,37 @@ async function handleAttendanceReport(month: number, year: number, format: Repor
 // --- Leave Balance: company-wide snapshot of the materialized LeaveBalance table for a given
 // year (defaults to current year) — mirrors GET /api/leaves/balance's own query shape (that
 // route is scoped to one employee; this is the same table across everyone), computing
-// `remaining` the same way the client there already does.
-async function handleLeaveBalanceReport(year: number | undefined, format: ReportFormat): Promise<NextResponse> {
+// `remaining` the same way the client there already does. If `month` is additionally given,
+// each row also gets `takenInMonth` — days from approved LeaveApplications whose start date
+// falls in that month (attributed to the month it started in; a rare month-straddling
+// application isn't split day-by-day — a reasonable simplification for a reporting view, not
+// something payroll itself relies on).
+async function handleLeaveBalanceReport(year: number | undefined, month: number | undefined, format: ReportFormat): Promise<NextResponse> {
   const targetYear = year ?? new Date().getFullYear();
 
   const balances = await db.leaveBalance.findMany({
     where: { year: targetYear },
     include: {
-      leaveType: { select: { name: true } },
+      leaveType: { select: { id: true, name: true } },
       employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: true } },
     },
     orderBy: [{ employee: { employeeCode: "asc" } }, { leaveType: { name: "asc" } }],
   });
+
+  let takenByEmployeeAndType: Map<string, number> | null = null;
+  if (month !== undefined) {
+    const monthStart = new Date(Date.UTC(targetYear, month - 1, 1));
+    const monthEnd = new Date(Date.UTC(targetYear, month, 1));
+    const applications = await db.leaveApplication.findMany({
+      where: { status: "approved", startDate: { gte: monthStart, lt: monthEnd } },
+      select: { employeeId: true, leaveTypeId: true, totalDays: true },
+    });
+    takenByEmployeeAndType = new Map();
+    for (const a of applications) {
+      const key = `${a.employeeId}:${a.leaveTypeId}`;
+      takenByEmployeeAndType.set(key, (takenByEmployeeAndType.get(key) ?? 0) + a.totalDays);
+    }
+  }
 
   const rows = balances.map((b) => ({
     employeeId: b.employee.id,
@@ -441,6 +600,7 @@ async function handleLeaveBalanceReport(year: number | undefined, format: Report
     carryForwarded: b.carryForwarded,
     used: b.used,
     remaining: b.totalAllocated + b.carryForwarded - b.used,
+    ...(takenByEmployeeAndType ? { takenInMonth: takenByEmployeeAndType.get(`${b.employee.id}:${b.leaveType.id}`) ?? 0 } : {}),
   }));
 
   const byLeaveTypeMap = new Map<string, { totalAllocated: number; used: number; remaining: number }>();
@@ -453,11 +613,12 @@ async function handleLeaveBalanceReport(year: number | undefined, format: Report
   }
   const byLeaveType = [...byLeaveTypeMap.entries()].map(([leaveType, totals]) => ({ leaveType, ...totals }));
 
-  const reportData = { year: targetYear, employees: rows, byLeaveType };
-  const filenameBase = `leave-balance-report-${targetYear}`;
+  const reportData = { year: targetYear, month: month ?? null, employees: rows, byLeaveType };
+  const filenameBase = month !== undefined ? `leave-balance-report-${month}-${targetYear}` : `leave-balance-report-${targetYear}`;
+  const periodLabel = month !== undefined ? `${getMonthName(month)} ${targetYear}` : `Year ${targetYear}`;
 
   if (format === "xlsx") return buildXlsxResponse(rows, "Leave Balance", filenameBase);
-  if (format === "pdf") return buildPdfResponse(rows, "Leave Balance Report", `Year ${targetYear}`, filenameBase);
+  if (format === "pdf") return buildPdfResponse(rows, "Leave Balance Report", periodLabel, filenameBase);
   const csvRes = exportResponse("leave-balance", format, reportData, filenameBase);
   if (csvRes) return csvRes;
   return NextResponse.json({ data: reportData });
@@ -481,6 +642,9 @@ export async function GET(request: NextRequest) {
     if (type === "headcount") {
       return handleHeadcountReport(format);
     }
+    if (type === "assets") {
+      return handleAssetsReport(format);
+    }
     if (type === "attrition") {
       if (!parsed.fromDate || !parsed.toDate) {
         return apiError("fromDate and toDate (YYYY-MM-DD) are required for the attrition report.", 400);
@@ -488,17 +652,47 @@ export async function GET(request: NextRequest) {
       return handleAttritionReport(parsed.fromDate, parsed.toDate, format);
     }
     if (type === "attendance") {
-      if (parsed.month === undefined || parsed.year === undefined) {
-        return apiError("month and year are required for the attendance report.", 400);
+      const isAttendanceRange = parsed.fromMonth !== undefined;
+      if (!isAttendanceRange && (parsed.month === undefined || parsed.year === undefined)) {
+        return apiError("month and year (or fromMonth/fromYear/toMonth/toYear for a range) are required for the attendance report.", 400);
       }
-      return handleAttendanceReport(parsed.month, parsed.year, format);
+      let attendancePairs: { month: number; year: number }[];
+      if (isAttendanceRange) {
+        try {
+          attendancePairs = enumerateMonthRange(parsed.fromMonth!, parsed.fromYear!, parsed.toMonth!, parsed.toYear!);
+        } catch (err) {
+          if (err instanceof InvalidRangeError) return apiError(err.message, 400);
+          throw err;
+        }
+      } else {
+        attendancePairs = [{ month: parsed.month!, year: parsed.year! }];
+      }
+      return handleAttendanceReport(attendancePairs, isAttendanceRange, format);
     }
     if (type === "leave-balance") {
-      return handleLeaveBalanceReport(parsed.year, format);
+      return handleLeaveBalanceReport(parsed.year, parsed.month, format);
+    }
+    if (type === "hiring-incentives") {
+      const isIncentiveRange = parsed.fromMonth !== undefined;
+      if (!isIncentiveRange && (parsed.month === undefined || parsed.year === undefined)) {
+        return apiError("month and year (or fromMonth/fromYear/toMonth/toYear for a range) are required for the hiring incentives report.", 400);
+      }
+      let incentivePairs: { month: number; year: number }[];
+      if (isIncentiveRange) {
+        try {
+          incentivePairs = enumerateMonthRange(parsed.fromMonth!, parsed.fromYear!, parsed.toMonth!, parsed.toYear!);
+        } catch (err) {
+          if (err instanceof InvalidRangeError) return apiError(err.message, 400);
+          throw err;
+        }
+      } else {
+        incentivePairs = [{ month: parsed.month!, year: parsed.year! }];
+      }
+      return handleHiringIncentivesReport(incentivePairs, isIncentiveRange, format);
     }
 
-    // Statutory types (pf/esi/tds/pt/lwf/summary): either a single month/year, or a full
-    // from/to range, must be given.
+    // Statutory + payroll-statement types (pf/esi/tds/pt/lwf/summary/payroll-statement): either
+    // a single month/year, or a full from/to range, must be given.
     const isRange = parsed.fromMonth !== undefined;
     if (!isRange && (parsed.month === undefined || parsed.year === undefined)) {
       return apiError("month and year (or fromMonth/fromYear/toMonth/toYear for a range) are required for this report type.", 400);
@@ -735,6 +929,51 @@ export async function GET(request: NextRequest) {
         };
         break;
       }
+
+      case "payroll-statement":
+        reportData = {
+          month,
+          year,
+          monthName: getMonthName(month),
+          company,
+          isRange: isRangeResult,
+          monthsIncluded,
+          totalEmployees: details.length,
+          employees: details.map((d) => ({
+            employeeId: d.employee.id,
+            employeeName: `${d.employee.firstName} ${d.employee.lastName ?? ""}`.trim(),
+            employeeCode: d.employee.employeeCode,
+            designation: d.employee.designation,
+            department: d.employee.department,
+            basic: d.basic,
+            dearnessAllowance: d.dearnessAllowance,
+            houseRentAllowance: d.houseRentAllowance,
+            conveyanceAllowance: d.conveyanceAllowance,
+            medicalAllowance: d.medicalAllowance,
+            specialAllowance: d.specialAllowance,
+            overtimeAllowance: d.overtimeAllowance,
+            bonus: d.bonus,
+            otherEarnings: d.otherEarnings,
+            totalEarnings: d.totalEarnings,
+            employeePF: d.employeePF,
+            employerPF: d.employerPF,
+            employeeESI: d.employeeESI,
+            employerESI: d.employerESI,
+            tds: d.tds,
+            professionalTax: d.professionalTax,
+            lwf: d.lwf,
+            totalDeductions: d.totalDeductions,
+            netSalary: d.netSalary,
+            ctc: d.ctc,
+          })),
+          totals: {
+            totalEarnings: details.reduce((s, d) => s + d.totalEarnings, 0),
+            totalDeductions: details.reduce((s, d) => s + d.totalDeductions, 0),
+            totalNetSalary: details.reduce((s, d) => s + d.netSalary, 0),
+            totalCTC: details.reduce((s, d) => s + d.ctc, 0),
+          },
+        };
+        break;
 
       case "summary":
       default: {

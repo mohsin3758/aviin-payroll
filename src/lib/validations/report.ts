@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 // Backward-compatible superset of the original 6 statutory/compliance types.
-export const REPORT_TYPES = ["pf", "esi", "tds", "pt", "lwf", "summary", "headcount", "attrition", "attendance", "leave-balance"] as const;
+export const REPORT_TYPES = [
+  "pf", "esi", "tds", "pt", "lwf", "summary", "headcount", "attrition", "attendance", "leave-balance",
+  "payroll-statement", "assets", "hiring-incentives",
+] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
 export const REPORT_FORMATS = ["json", "csv", "xlsx", "pdf"] as const;
