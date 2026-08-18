@@ -27,6 +27,27 @@ export async function loadFaceModels(): Promise<void> {
   return modelsLoadedPromise;
 }
 
+// getUserMedia() rejects with a DOMException whose `name` distinguishes the actual cause — but
+// every caller was catching it with a bare `catch {}` and showing one generic "denied or
+// unavailable" message regardless, which made a granted-permission-but-still-failing case (e.g.
+// the camera already locked by another app) indistinguishable from an actual OS/browser denial.
+// Logging the raw error and mapping `name` to a specific message makes each case self-diagnosing.
+export function describeCameraError(err: unknown, cta = 'Try again.'): string {
+  console.error('[camera] getUserMedia failed:', err);
+  const name = err instanceof DOMException ? err.name : undefined;
+  const reason =
+    name === 'NotAllowedError' || name === 'SecurityError'
+      ? 'Camera access was denied. Check your browser and OS camera permissions.'
+      : name === 'NotFoundError' || name === 'OverconstrainedError'
+        ? 'No camera was found on this device.'
+        : name === 'NotReadableError' || name === 'TrackStartError'
+          ? 'The camera is already in use by another app or browser tab (e.g. Zoom, Teams). Close it.'
+          : name === 'AbortError'
+            ? 'Camera failed to start.'
+            : 'Camera access was denied or is unavailable.';
+  return `${reason} ${cta}`;
+}
+
 export type FaceCaptureResult =
   | { ok: true; descriptor: number[] }
   | { ok: false; reason: 'no-face' | 'multiple-faces' | 'error' | 'timeout' };

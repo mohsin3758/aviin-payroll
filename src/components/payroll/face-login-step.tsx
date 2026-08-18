@@ -7,7 +7,7 @@ import { Loader2, ScanFace, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
+import { loadFaceModels, captureFaceDescriptor, describeCameraError } from '@/lib/face-recognition-client';
 import { getBestEffortLocation } from '@/lib/geolocation-client';
 
 // Bounds the login-verification API call so a stalled/slow request fails fast with a clear error
@@ -55,8 +55,8 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
           await videoRef.current.play();
         }
         setCameraReady(true);
-      } catch {
-        if (!cancelled) setCameraError('Camera access was denied or is unavailable. Check your browser permissions and try again.');
+      } catch (err) {
+        if (!cancelled) setCameraError(describeCameraError(err));
       }
       try {
         await loadFaceModels();

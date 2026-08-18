@@ -25,7 +25,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { usePayrollStore } from '@/store/payroll-store';
-import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
+import { loadFaceModels, captureFaceDescriptor, describeCameraError } from '@/lib/face-recognition-client';
 
 // Bounds the face-enrollment API call so a stalled/slow request fails fast with a clear error
 // instead of leaving the "Capture & Enroll" button spinning forever.
@@ -990,8 +990,8 @@ function FaceEnrollmentCard() {
           await videoRef.current.play();
         }
         setCameraReady(true);
-      } catch {
-        if (!cancelled) setCameraError('Camera access was denied or is unavailable. Check your browser permissions and try again.');
+      } catch (err) {
+        if (!cancelled) setCameraError(describeCameraError(err));
       }
       try {
         await loadFaceModels();

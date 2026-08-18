@@ -23,7 +23,7 @@ import {
 import { usePayrollStore } from '@/store/payroll-store';
 import { useSessionContext } from '@/hooks/session-context';
 import { istDateOnly } from '@/lib/date-ist';
-import { loadFaceModels, captureFaceDescriptor } from '@/lib/face-recognition-client';
+import { loadFaceModels, captureFaceDescriptor, describeCameraError } from '@/lib/face-recognition-client';
 
 // Bounds the punch API call the same way captureFaceDescriptor bounds on-device detection — a
 // stalled/slow network request fails fast with a clear error instead of leaving "Finalizing..."
@@ -515,8 +515,8 @@ export default function AttendanceView() {
           await faceVideoRef.current.play();
         }
         setFaceCameraReady(true);
-      } catch {
-        if (!cancelled) setFaceCameraError('Camera access was denied or is unavailable. Use Manual Punch instead.');
+      } catch (err) {
+        if (!cancelled) setFaceCameraError(describeCameraError(err, 'Use Manual Punch instead.'));
       }
       try {
         await loadFaceModels();
