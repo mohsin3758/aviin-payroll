@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 
-export type NotificationCategory = "leave" | "payroll" | "exit" | "onboarding" | "helpdesk" | "attendance" | "general";
+export type NotificationCategory = "leave" | "payroll" | "exit" | "onboarding" | "helpdesk" | "attendance" | "wfh" | "general";
 
 /** Fire-and-forget: a failed notification write must never break the primary request flow. */
 export async function notify(params: {

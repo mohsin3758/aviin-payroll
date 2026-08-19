@@ -24,6 +24,7 @@ export const PAYROLL_FEATURES = [
   "view_assets", // GET /api/assets (company-wide inventory)
   "manage_exit_management", // /api/exit-requests/* except manager-approve
   "manage_leave_management", // /api/leaves/* (hr branch), leave-types, leave-balances, encashment
+  "manage_wfh", // /api/wfh/* (admin/hr/manager branch), approve/reject WFH requests
 ] as const;
 export type PayrollFeature = (typeof PAYROLL_FEATURES)[number];
 

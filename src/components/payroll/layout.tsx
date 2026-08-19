@@ -23,6 +23,7 @@ import {
   LifeBuoy,
   HandCoins,
   Package,
+  Home,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -57,6 +58,8 @@ const navItems: NavItem[] = [
   { id: 'attendance', label: 'Attendance', icon: Fingerprint },
   // Employee applies/tracks leave via My Portal instead; this page is the approval surface.
   { id: 'leaves', label: 'Leave Mgmt', icon: CalendarOff, roles: ['admin', 'hr', 'manager'] },
+  // Employee applies/tracks WFH via My Portal instead; this page is the approval surface.
+  { id: 'wfh-requests', label: 'WFH Requests', icon: Home, roles: ['admin', 'hr', 'manager'] },
   { id: 'payroll', label: 'Payroll', icon: Calculator, roles: ['admin', 'hr'] },
   { id: 'salary-slip', label: 'Salary Slips', icon: FileText, roles: ['admin', 'hr'] },
   { id: 'form16', label: 'Form 16', icon: Award, roles: ['admin', 'hr'] },

@@ -88,6 +88,7 @@ interface AttendanceRecord {
   status: string;
   totalHours: number | null;
   notes: string | null;
+  workMode: string | null; // "wfh" if this day fell inside an approved WfhRequest range
   employee: {
     firstName: string;
     lastName: string;
@@ -1265,9 +1266,16 @@ export default function AttendanceView() {
                         <TableCell className="font-mono text-sm">{formatTime(record.punchOut)}</TableCell>
                         <TableCell className="font-mono text-sm">{record.totalHours != null ? `${record.totalHours}h` : '--'}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={METHOD_BADGE[method] || ''}>
-                            {METHOD_LABEL[method] ?? method}
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className={METHOD_BADGE[method] || ''}>
+                              {METHOD_LABEL[method] ?? method}
+                            </Badge>
+                            {record.workMode === 'wfh' && (
+                              <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800">
+                                WFH
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={statusCfg.className}>
@@ -1334,6 +1342,11 @@ export default function AttendanceView() {
                         <span>Out: <span className="font-mono">{formatTime(record.punchOut)}</span></span>
                         <span>{record.totalHours != null ? `${record.totalHours}h` : '--'}</span>
                         <Badge variant="outline" className={`${METHOD_BADGE[method] || ''} text-[10px]`}>{METHOD_LABEL[method] ?? method}</Badge>
+                        {record.workMode === 'wfh' && (
+                          <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800 text-[10px]">
+                            WFH
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   );

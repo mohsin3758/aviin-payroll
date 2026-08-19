@@ -277,6 +277,7 @@ model Employee {
   salaryStructure        SalaryStructure?
   attendance             Attendance[]
   leaveApplications      LeaveApplication[]
+  wfhRequests            WfhRequest[]
   leaveBalances          LeaveBalance[]
   payrollDetails         PayrollDetail[]
   loans                  EmployeeLoan[]
@@ -528,6 +529,10 @@ model Attendance {
   faceVerified             Boolean   @default(false)
   faceConfidence           Float?
   status                   String    @default("absent") // "present", "absent", "half-day", "holiday", "weekly-off"
+  // "wfh" when this punch fell within an approved WfhRequest range at punch time; null = normal/
+  // office punch. Recomputed fresh on every punch (in and out), never backfilled in bulk — a
+  // request cancelled between punch-in and punch-out won't leave a stale tag on the punch-out.
+  workMode                 String?
   // Sum of every completed session's duration that day (not just the first-in/last-out span) —
   // so a lunch-break-and-back punch cycle counts both halves of the day worked.
   totalHours               Float?
@@ -644,6 +649,30 @@ model LeaveApplication {
 
   employee  Employee  @relation(fields: [employeeId], references: [id])
   leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+// Date-bound WFH request/approval — while an approved request covers a given calendar day,
+// recordPunch() (src/lib/attendance-punch.ts) skips the geofence check for that employee the
+// same way the permanent Employee.exemptFromGeofence toggle does, but only for that day. Status
+// is checked live at punch time, not pre-materialized per day, so approval takes effect
+// immediately and expires naturally at endDate with no batch job involved.
+model WfhRequest {
+  id         String    @id @default(cuid())
+  employeeId String
+  startDate  DateTime // IST-calendar-day normalized via istDateOnly(), inclusive
+  endDate    DateTime // IST-calendar-day normalized via istDateOnly(), inclusive
+  totalDays  Float
+  reason     String?
+  status     String    @default("pending") // "pending", "approved", "rejected", "cancelled"
+  approvedBy String?
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([status])
@@ -838,7 +867,7 @@ model Notification {
   userId    String
   title     String
   message   String
-  category  String   @default("general") // "leave" | "payroll" | "exit" | "onboarding" | "helpdesk" | "general"
+  category  String   @default("general") // "leave" | "payroll" | "exit" | "onboarding" | "helpdesk" | "attendance" | "wfh" | "general"
   link      String? // optional deep-link (a ViewType string)
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())

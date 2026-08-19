@@ -127,6 +127,7 @@ export default function MyPortalView() {
             <TabsTrigger value="documents">Documents</TabsTrigger>
             <TabsTrigger value="attendance">Attendance</TabsTrigger>
             <TabsTrigger value="leaves">Leaves</TabsTrigger>
+            <TabsTrigger value="wfh">WFH</TabsTrigger>
             <TabsTrigger value="holidays">Holidays</TabsTrigger>
             <TabsTrigger value="payslip">Payslips</TabsTrigger>
             <TabsTrigger value="form16">Form 16</TabsTrigger>
@@ -144,6 +145,7 @@ export default function MyPortalView() {
           <TabsContent value="leaves" className="space-y-6">
             <LeavesTab prefillDate={leavePrefillDate} onPrefillConsumed={() => setLeavePrefillDate(null)} />
           </TabsContent>
+          <TabsContent value="wfh" className="space-y-6"><WfhTab /></TabsContent>
           <TabsContent value="holidays" className="space-y-6">
             <HolidaysTab onApplyAsLeave={(date) => { setLeavePrefillDate(date); setActiveTab('leaves'); }} />
           </TabsContent>
@@ -1333,6 +1335,150 @@ function LeavesTab({ prefillDate, onPrefillConsumed }: { prefillDate?: string | 
         </CardContent>
       </Card>
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  WFH Tab                                                            */
+/* ------------------------------------------------------------------ */
+
+interface WfhRequestRow {
+  id: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  reason: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+}
+
+function WfhTab() {
+  const [requests, setRequests] = useState<WfhRequestRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [filterYear, setFilterYear] = useState(() => new Date().getFullYear());
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ year: String(filterYear) });
+      if (filterStatus !== 'all') params.set('status', filterStatus);
+      const res = await fetch(`/api/ess/wfh?${params.toString()}`);
+      const data = await res.json();
+      setRequests(data.data ?? []);
+    } catch { toast.error('Failed to load WFH requests'); } finally { setLoading(false); }
+  }, [filterYear, filterStatus]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const handleApply = async () => {
+    if (!startDate || !endDate) { toast.error('Start and end dates are required'); return; }
+    setApplying(true);
+    try {
+      const res = await fetch('/api/ess/wfh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startDate, endDate, reason: reason.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit request');
+      toast.success('WFH request submitted');
+      setApplyOpen(false); setStartDate(''); setEndDate(''); setReason('');
+      fetchAll();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to submit request'); } finally { setApplying(false); }
+  };
+
+  // The shared /api/wfh/[id] DELETE already covers "self cancels own pending request" via
+  // requirePayrollSelfOrFeature — no dedicated ess/wfh/[id] wrapper route is needed.
+  const handleCancel = async (id: string) => {
+    try {
+      const res = await fetch(`/api/wfh/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to cancel');
+      toast.success('WFH request cancelled');
+      fetchAll();
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Failed to cancel'); }
+  };
+
+  if (loading) return <Skeleton className="h-64 w-full" />;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+        <div>
+          <CardTitle className="text-base">My WFH Requests</CardTitle>
+          <CardDescription>Once approved, your punches are exempt from geofence checks for the approved dates.</CardDescription>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">Status</Label>
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">Year</Label>
+            <Select value={String(filterYear)} onValueChange={(v) => setFilterYear(parseInt(v, 10))}>
+              <SelectTrigger className="h-8 w-[100px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {HOLIDAY_YEAR_OPTIONS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <Dialog open={applyOpen} onOpenChange={setApplyOpen}>
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setApplyOpen(true)}><Plus className="size-4" />Request WFH</Button>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Request WFH</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><Label>Start Date</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label>End Date</Label><Input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} /></div>
+              </div>
+              <div className="space-y-1.5"><Label>Reason</Label><Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setApplyOpen(false)}>Cancel</Button>
+              <Button onClick={handleApply} disabled={applying} className="bg-emerald-600 hover:bg-emerald-700 text-white">Submit</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {requests.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">No WFH requests match these filters.</p>
+        ) : (
+          <div className="divide-y">
+            {requests.map((r) => (
+              <div key={r.id} className="flex items-center justify-between py-2.5 text-sm">
+                <div>
+                  <span className="text-muted-foreground">{fmtDate(r.startDate)} – {fmtDate(r.endDate)} ({r.totalDays}d)</span>
+                  {r.reason && <p className="text-xs text-muted-foreground mt-0.5">{r.reason}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className={badge(r.status)}>{r.status}</Badge>
+                  {(r.status === 'pending' || r.status === 'approved') && (
+                    <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleCancel(r.id)}>Cancel</Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

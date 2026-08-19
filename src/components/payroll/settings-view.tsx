@@ -175,6 +175,7 @@ const PAYROLL_FEATURES = [
   "manage_loans", "send_payslips", "manage_form16", "view_reports", "manage_hiring_incentives",
   "view_employees", "create_employee", "edit_employee", "manage_employee_assets",
   "manage_onboarding", "view_assets", "manage_exit_management", "manage_leave_management",
+  "manage_wfh",
 ] as const;
 type PayrollFeature = (typeof PAYROLL_FEATURES)[number];
 
@@ -196,6 +197,7 @@ const PAYROLL_FEATURE_LABELS: Record<PayrollFeature, string> = {
   view_assets: "View asset inventory",
   manage_exit_management: "Manage exit requests",
   manage_leave_management: "Manage leave",
+  manage_wfh: "Manage WFH requests",
 };
 
 const FEATURE_GROUPS: { label: string; features: PayrollFeature[] }[] = [
@@ -205,6 +207,7 @@ const FEATURE_GROUPS: { label: string; features: PayrollFeature[] }[] = [
   { label: "Assets", features: ["view_assets"] },
   { label: "Exit Management", features: ["manage_exit_management"] },
   { label: "Leave Management", features: ["manage_leave_management"] },
+  { label: "WFH Management", features: ["manage_wfh"] },
 ];
 
 interface LinkableEmployee {

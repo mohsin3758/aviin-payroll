@@ -24,6 +24,7 @@ const HelpDeskView = lazy(() => import('@/components/payroll/helpdesk-view'));
 const HiringIncentivesView = lazy(() => import('@/components/payroll/hiring-incentives-view'));
 const CandidatesView = lazy(() => import('@/components/payroll/candidates-view'));
 const AssetsView = lazy(() => import('@/components/payroll/assets-view'));
+const WfhRequestsView = lazy(() => import('@/components/payroll/wfh-requests-view'));
 
 function LoadingFallback() {
   return (
@@ -60,6 +61,7 @@ function ViewRenderer() {
       {activeView === 'hiring-incentives' && <HiringIncentivesView key={key} />}
       {activeView === 'candidates' && <CandidatesView key={key} />}
       {activeView === 'assets' && <AssetsView key={key} />}
+      {activeView === 'wfh-requests' && <WfhRequestsView key={key} />}
     </Suspense>
   );
 }

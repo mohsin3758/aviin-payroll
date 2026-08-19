@@ -16,7 +16,8 @@ export type ViewType =
   | 'helpdesk'
   | 'hiring-incentives'
   | 'candidates'
-  | 'assets';
+  | 'assets'
+  | 'wfh-requests';
 
 interface PayrollStore {
   activeView: ViewType;

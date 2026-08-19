@@ -6,6 +6,18 @@ import { isValidDescriptor, matchFaceDescriptors } from "@/lib/face-match";
 import type { SessionPayload } from "@/lib/auth";
 import type { Attendance } from "@prisma/client";
 
+/** True if `date` (an istDateOnly()-normalized day) falls inside an approved WfhRequest range
+ * for this employee — the live source of truth for "is this employee WFH today," checked fresh
+ * on every punch rather than cached anywhere, so approval takes effect immediately and expires
+ * naturally at the request's endDate with no batch job involved. */
+async function isApprovedWfhDay(employeeId: string, date: Date): Promise<boolean> {
+  const match = await db.wfhRequest.findFirst({
+    where: { employeeId, status: "approved", startDate: { lte: date }, endDate: { gte: date } },
+    select: { id: true },
+  });
+  return match != null;
+}
+
 export interface PunchSession {
   punchIn: string; // ISO
   punchOut: string | null; // ISO, or null while this session is still open
@@ -135,15 +147,20 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
 
   // Effective geofence target: the employee's individually-assigned branch (officeLocation)
   // if they have one, else Company's own officeLatitude/officeLongitude (the implicit default
-  // "head office"). exemptFromGeofence (Work From Home) skips this whole section — no distance
-  // computed, never blocked, regardless of company-wide enforcement.
+  // "head office"). exemptFromGeofence (a permanent, manually-toggled WFH exemption) and an
+  // approved WfhRequest covering today (a date-bound one, requested/approved through the WFH
+  // workflow) both skip this whole section identically — no distance computed, never blocked,
+  // regardless of company-wide enforcement.
   const effectiveOfficeLatitude = employee.officeLocation?.latitude ?? company?.officeLatitude ?? null;
   const effectiveOfficeLongitude = employee.officeLocation?.longitude ?? company?.officeLongitude ?? null;
   const effectiveGeofenceRadiusMeters = employee.officeLocation?.radiusMeters ?? company?.geofenceRadiusMeters ?? null;
 
+  const today = istDateOnly();
+  const wfhToday = await isApprovedWfhDay(employeeId, today);
+
   let geofence: { distanceMeters: number | null; shouldReject: boolean; reason?: string } = { distanceMeters: null, shouldReject: false };
 
-  if (!employee.exemptFromGeofence) {
+  if (!employee.exemptFromGeofence && !wfhToday) {
     // evaluateGeofence itself never rejects on missing punch coordinates (by design — a
     // login/logout-triggered punch never has any) but that same leniency, applied to an
     // interactive face/manual punch, meant enforcement could be silently bypassed just by
@@ -173,7 +190,6 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
     }
   }
 
-  const today = istDateOnly();
   const now = new Date();
 
   const existingRecord = await db.attendance.findUnique({
@@ -205,6 +221,7 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
             longitude: longitude ?? existingRecord.longitude,
             locationAccuracy: accuracy ?? existingRecord.locationAccuracy,
             distanceFromOfficeMeters: geofence.distanceMeters ?? existingRecord.distanceFromOfficeMeters,
+            workMode: wfhToday ? "wfh" : null,
           },
           include: { employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
         })
@@ -217,6 +234,7 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
             faceVerified,
             faceConfidence,
             status: "present",
+            workMode: wfhToday ? "wfh" : null,
             punchSessions: JSON.stringify(updatedSessions),
             ipAddress: ipAddress || null,
             deviceInfo: deviceInfo || null,
@@ -273,6 +291,9 @@ export async function recordPunch(params: RecordPunchParams): Promise<RecordPunc
       longitude: longitude ?? existingRecord.longitude,
       locationAccuracy: accuracy ?? existingRecord.locationAccuracy,
       distanceFromOfficeMeters: geofence.distanceMeters ?? existingRecord.distanceFromOfficeMeters,
+      // Recomputed fresh rather than carried over from the punch-in record, so a request
+      // cancelled/expired between punch-in and punch-out doesn't leave a stale "wfh" tag.
+      workMode: wfhToday ? "wfh" : null,
     },
     include: { employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
   });
