@@ -7,7 +7,7 @@ import { Loader2, ScanFace, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { loadFaceModels, captureFaceDescriptor, describeCameraError } from '@/lib/face-recognition-client';
+import { loadFaceModels, captureFaceDescriptor, captureFaceDescriptorForEnrollment, describeCameraError } from '@/lib/face-recognition-client';
 import { getBestEffortLocation } from '@/lib/geolocation-client';
 
 // Bounds the login-verification API call so a stalled/slow request fails fast with a clear error
@@ -32,6 +32,7 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
   const [modelsReady, setModelsReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [captureProgress, setCaptureProgress] = useState<{ frame: number; total: number } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -81,14 +82,22 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
   const handleCapture = async () => {
     if (!videoRef.current) return;
     setSubmitting(true);
+    setCaptureProgress(null);
     try {
-      const result = await captureFaceDescriptor(videoRef.current);
+      // Verify (already enrolled) stays a fast single-frame capture — it just needs to compare
+      // against the stored reference. Enrolling stores that reference for every future login/
+      // punch, so it captures several frames and averages them (see face-recognition-client.ts)
+      // to avoid one bad frame becoming the permanent baseline someone gets locked out against.
+      const result = enrolled
+        ? await captureFaceDescriptor(videoRef.current)
+        : await captureFaceDescriptorForEnrollment(videoRef.current, (frame, total) => setCaptureProgress({ frame, total }));
       if (!result.ok) {
         toast.error(
           result.reason === 'no-face' ? 'No face detected — center your face in the frame and try again.'
             : result.reason === 'multiple-faces' ? 'More than one face detected — make sure only you are in frame.'
               : result.reason === 'timeout' ? 'Detection timed out — try again.'
-                : 'Capture failed. Try again.'
+                : result.reason === 'inconsistent' ? 'Hold still — your face moved too much during capture. Try again without moving.'
+                  : 'Capture failed. Try again.'
         );
         return;
       }
@@ -129,6 +138,7 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
       toast.error(err instanceof Error ? err.message : 'Face verification failed');
     } finally {
       setSubmitting(false);
+      setCaptureProgress(null);
     }
   };
 
@@ -171,12 +181,14 @@ export default function FaceLoginStep({ pendingToken, enrolled, onSuccess, onBac
       {cameraReady && !modelsReady && !cameraError && (
         <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="size-3.5 animate-spin" />Loading face recognition models…</p>
       )}
-      <p className="text-xs text-muted-foreground">Look straight at the camera in good lighting, with only your face in frame.</p>
+      <p className="text-xs text-muted-foreground">
+        {enrolled ? 'Look straight at the camera in good lighting, with only your face in frame.' : 'Look straight at the camera in good lighting. Capture takes a few quick frames — hold still.'}
+      </p>
       <div className="flex justify-between">
         <Button type="button" variant="ghost" onClick={handleBack} disabled={submitting}>Back</Button>
         <Button type="button" onClick={handleCapture} disabled={!cameraReady || !modelsReady || submitting} className="bg-emerald-600 hover:bg-emerald-700 text-white">
           {submitting ? <Loader2 className="size-4 animate-spin" /> : <ScanFace className="size-4" />}
-          {enrolled ? 'Verify My Face' : 'Capture & Enroll'}
+          {submitting && captureProgress ? `Capturing ${captureProgress.frame}/${captureProgress.total}…` : enrolled ? 'Verify My Face' : 'Capture & Enroll'}
         </Button>
       </div>
     </div>

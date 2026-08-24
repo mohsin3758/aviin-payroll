@@ -25,7 +25,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { usePayrollStore } from '@/store/payroll-store';
-import { loadFaceModels, captureFaceDescriptor, describeCameraError } from '@/lib/face-recognition-client';
+import { loadFaceModels, captureFaceDescriptorForEnrollment, describeCameraError } from '@/lib/face-recognition-client';
 
 // Bounds the face-enrollment API call so a stalled/slow request fails fast with a clear error
 // instead of leaving the "Capture & Enroll" button spinning forever.
@@ -951,6 +951,7 @@ function FaceEnrollmentCard() {
   const [modelsReady, setModelsReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const [captureProgress, setCaptureProgress] = useState<{ frame: number; total: number } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1018,14 +1019,16 @@ function FaceEnrollmentCard() {
   const handleCapture = async () => {
     if (!videoRef.current) return;
     setCapturing(true);
+    setCaptureProgress(null);
     try {
-      const result = await captureFaceDescriptor(videoRef.current);
+      const result = await captureFaceDescriptorForEnrollment(videoRef.current, (frame, total) => setCaptureProgress({ frame, total }));
       if (!result.ok) {
         toast.error(
           result.reason === 'no-face' ? 'No face detected — center your face in the frame and try again.'
             : result.reason === 'multiple-faces' ? 'More than one face detected — make sure only you are in frame.'
               : result.reason === 'timeout' ? 'Detection timed out — try again.'
-                : 'Capture failed. Try again.'
+                : result.reason === 'inconsistent' ? 'Hold still — your face moved too much during capture. Try again without moving.'
+                  : 'Capture failed. Try again.'
         );
         return;
       }
@@ -1056,6 +1059,7 @@ function FaceEnrollmentCard() {
       toast.error(err instanceof Error ? err.message : 'Failed to enroll');
     } finally {
       setCapturing(false);
+      setCaptureProgress(null);
     }
   };
 
@@ -1150,12 +1154,12 @@ function FaceEnrollmentCard() {
               {cameraReady && !modelsReady && !cameraError && (
                 <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="size-3.5 animate-spin" />Loading face recognition models…</p>
               )}
-              <p className="text-xs text-muted-foreground">Look straight at the camera in good lighting, with only your face in frame, then capture.</p>
+              <p className="text-xs text-muted-foreground">Look straight at the camera in good lighting, with only your face in frame. Capture takes a few quick frames — hold still.</p>
               <DialogFooter>
                 <Button variant="outline" onClick={closeDialog} disabled={capturing}>Cancel</Button>
                 <Button onClick={handleCapture} disabled={!cameraReady || !modelsReady || capturing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                   {capturing ? <Loader2 className="size-4 animate-spin" /> : <ScanFace className="size-4" />}
-                  Capture &amp; Enroll
+                  {capturing && captureProgress ? `Capturing ${captureProgress.frame}/${captureProgress.total}…` : 'Capture & Enroll'}
                 </Button>
               </DialogFooter>
             </div>
