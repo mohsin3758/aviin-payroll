@@ -9,7 +9,10 @@ import { checkRateLimit } from "@/lib/rate-limit";
 // load-bearing: it must NOT also match the plural admin-only "/api/onboarding-invites" list —
 // startsWith requires an exact character match, and "s" != "/" at that position, so the admin
 // routes stay behind the normal session check below.
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/seed", "/api/onboarding-invite/"];
+// Contractor Workforce: /api/workforce/t/ (contractor signed link), /api/workforce/c/ (client
+// representative signed link) and /api/whatsapp/webhook (Meta) each authenticate themselves — by
+// token, or by X-Hub-Signature-256 — inside the route. The trailing slashes are load-bearing, as above.
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/seed", "/api/onboarding-invite/", "/api/workforce/t/", "/api/workforce/c/", "/api/whatsapp/webhook"];
 // Root health check has no sensitive data.
 const PUBLIC_EXACT = ["/api"];
 

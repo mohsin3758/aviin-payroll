@@ -80,3 +80,51 @@ export async function sendWhatsappTemplate(
   }
   return { messageId: body?.messages?.[0]?.id ?? "unknown" };
 }
+
+export interface GenericTemplateSend {
+  to: string;
+  templateName: string;
+  language: string;
+  /** Positional body variables {{1}}, {{2}}, ... as plain text. */
+  bodyParams: string[];
+  /** Payloads returned to the webhook when the recipient taps a quick-reply button, in button order. */
+  quickReplyPayloads?: string[];
+  /** The variable part of a dynamic URL button (the template holds the fixed base URL). */
+  urlSuffix?: string;
+}
+
+/**
+ * Sends ANY approved template, including quick-reply and URL buttons. Used by the Contractor
+ * Workforce module; the original sendWhatsappTemplate above (leave approvals) is unchanged.
+ */
+export async function sendWhatsappTemplateGeneric(
+  config: EffectiveWhatsappConfig,
+  send: GenericTemplateSend
+): Promise<{ messageId: string }> {
+  const components: Record<string, unknown>[] = [];
+  if (send.bodyParams.length > 0) {
+    components.push({ type: "body", parameters: send.bodyParams.map((text) => ({ type: "text", text })) });
+  }
+  (send.quickReplyPayloads ?? []).forEach((payload, index) => {
+    components.push({ type: "button", sub_type: "quick_reply", index: String(index), parameters: [{ type: "payload", payload }] });
+  });
+  if (send.urlSuffix) {
+    components.push({ type: "button", sub_type: "url", index: String((send.quickReplyPayloads ?? []).length), parameters: [{ type: "text", text: send.urlSuffix }] });
+  }
+
+  const res = await fetch(`https://graph.facebook.com/v21.0/${config.phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${config.accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: toWhatsappNumber(send.to),
+      type: "template",
+      template: { name: send.templateName, language: { code: send.language }, components },
+    }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new WhatsappSendError(body?.error?.message || `WhatsApp send failed (${res.status})`, body);
+  }
+  return { messageId: body?.messages?.[0]?.id ?? "unknown" };
+}

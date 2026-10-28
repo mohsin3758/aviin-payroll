@@ -134,6 +134,10 @@ model Company {
   whatsappAccessToken           String?
   whatsappLeaveApprovalTemplate String?  @default("leave_approved")
   whatsappTemplateLanguage      String?  @default("en_US")
+  // Contractor Workforce inbound webhook (set via /api/workforce/whatsapp-secrets, never returned by GET):
+  // appSecret verifies X-Hub-Signature-256; verifyToken answers Meta's GET handshake.
+  whatsappAppSecret             String?
+  whatsappVerifyToken           String?
   // Office geofencing for attendance punches, all optional/opt-in: with no office coordinates
   // set, punches never capture/require location. enforceGeofence defaults false — coordinates
   // and radius can be configured (and location silently logged) without ever blocking a punch
@@ -167,6 +171,7 @@ model Company {
   holidays    Holiday[]
   bankFormats BankFormat[]
   candidates  Candidate[]
+  clients     Client[]
 }
 
 // A named branch/office location employees can be individually assigned to for geofencing,
@@ -302,6 +307,7 @@ model Employee {
   regularizations        AttendanceRegularizationRequest[]
   faceEnrollment         FaceEnrollment?
   onboardingInvite       OnboardingInvite?
+  assignments            Assignment[]
 }
 
 // One declaration per employee per financial year — drives the old tax regime's real
@@ -1050,4 +1056,412 @@ model EmployeeShift {
   shift    Shift    @relation(fields: [shiftId], references: [id])
 
   @@index([employeeId])
+}
+
+// ============================================================================
+// Contractor Workforce Management (see docs/CONTRACTOR_MONITORING_SPEC.md)
+// ADDITIVE ONLY: the container runs `prisma db push --accept-data-loss` on every boot, so
+// nothing below may rename/drop an existing column or table.
+// ============================================================================
+
+// Feature flags, all default OFF. scopeKey is "company" | "client:<id>" | "project:<id>" —
+// a single string rather than nullable clientId/projectId columns, because SQLite treats NULLs
+// as distinct in unique indexes and would allow duplicate company-level rows.
+model FeatureFlag {
+  id        String   @id @default(cuid())
+  key       String
+  scopeKey  String   @default("company")
+  enabled   Boolean  @default(false)
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([key, scopeKey])
+  @@index([key])
+}
+
+// A real client entity. Employee.client / Candidate.client stay as legacy free text; see
+// LegacyClientMap for the reviewed mapping from those strings to a Client.
+model Client {
+  id             String   @id @default(cuid())
+  code           String   @unique // "CL-001"
+  companyId      String
+  name           String
+  // Lower-cased, punctuation/suffix-stripped name used for duplicate detection.
+  normalizedName String
+  active         Boolean  @default(true)
+  timezone       String   @default("Asia/Kolkata")
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company  Company         @relation(fields: [companyId], references: [id])
+  contacts ClientContact[]
+  projects Project[]
+  holidays ClientHoliday[]
+
+  @@unique([companyId, normalizedName])
+  @@index([companyId])
+}
+
+model ClientContact {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  phone     String?
+  email     String?
+  kind      String   @default("representative") // "representative" | "coordinator" | "billing"
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client      Client       @relation(fields: [clientId], references: [id])
+  assignments Assignment[]
+
+  @@index([clientId])
+}
+
+// One row per distinct legacy free-text client string, mapped to a Client by an admin. Nothing
+// is guessed automatically and the historical Employee/Candidate rows are never altered.
+model LegacyClientMap {
+  id          String    @id @default(cuid())
+  rawName     String    @unique
+  clientId    String?
+  status      String    @default("unmapped") // "unmapped" | "mapped" | "duplicate" | "ignored"
+  sourceCount Int       @default(0) // how many Employee/Candidate rows carry this string
+  mappedBy    String?
+  mappedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status])
+}
+
+model Project {
+  id        String    @id @default(cuid())
+  clientId  String
+  name      String
+  active    Boolean   @default(true)
+  startDate DateTime?
+  endDate   DateTime?
+  workMode  String    @default("remote") // "remote" | "onsite" | "hybrid"
+  location  String?
+  timezone  String? // null = inherit the client's
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  client      Client       @relation(fields: [clientId], references: [id])
+  assignments Assignment[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+}
+
+// Rule/policy overrides. scopeKey is "company" | "client:<id>" | "project:<id>" |
+// "assignment:<id>"; `values` is a JSON object of only the keys overridden at that level.
+// Effective value resolution (per key): assignment -> project -> client -> company -> built-in default.
+model SettingsPolicy {
+  id        String   @id @default(cuid())
+  scopeKey  String   @unique
+  values    String   @default("{}")
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A contractor placed on a project. The person stays an Employee row; this adds the placement.
+// User-id columns (coordinators) are plain strings validated in the API layer, to avoid adding
+// multiple named back-relations onto the central User model.
+model Assignment {
+  id                    String    @id @default(cuid())
+  employeeId            String
+  projectId             String
+  clientRepContactId    String?
+  resourceCoordinatorId String? // User.id
+  clientCoordinatorId   String? // User.id (Aviin staff liaising with the client)
+  kamId                 String? // User.id
+  startDate             DateTime
+  endDate               DateTime?
+  workMode              String    @default("remote") // "remote" | "onsite" | "hybrid"
+  location              String?
+  timezone              String    @default("Asia/Kolkata")
+  tier                  String    @default("full_time") // "full_time" | "hourly"
+  expectedHoursPerDay   Float?
+  expectedHoursPerWeek  Float?
+  workingDays           String    @default("1,2,3,4,5") // 0=Sunday..6=Saturday
+  contractType          String    @default("exclusive") // "exclusive" | "non_exclusive" | "restricted"
+  declarationAt         DateTime?
+  declarationNote       String?
+  // How this placement is paid, set per client/project deal: "monthly" (payRate = flat monthly
+  // fee, reduced for unpaid days), "daily" (payRate per payable day) or "hourly" (payRate per
+  // approved hour). Used only to PRE-FILL a suggested alternate-pay entry (units + rateOverride)
+  // for an admin to confirm in the existing Alternate Pay dialog; it never feeds payroll itself.
+  payType               String    @default("monthly")
+  payRate               Float?
+  // For payType "monthly": what a day is worth. "calendar" = fee / calendar days in the month
+  // (30 or 31, weekly offs paid); "working" = fee / the client's working days in the month
+  // (e.g. 20, 21 or 22, from the assignment's workingDays minus client holidays).
+  monthlyDayBasis       String    @default("working")
+  status               String    @default("planned") // "planned" | "active" | "paused" | "ended"
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  employee   Employee       @relation(fields: [employeeId], references: [id])
+  project    Project        @relation(fields: [projectId], references: [id])
+  clientRep  ClientContact? @relation(fields: [clientRepContactId], references: [id])
+  dailyStatuses DailyStatus[]
+
+  @@index([employeeId])
+  @@index([projectId])
+  @@index([status])
+}
+
+// A client-specific holiday calendar. The company-wide Holiday table stays as is; a contractor's
+// "working days" for the monthly-fee basis (20/21/22) depends on THEIR client's holidays.
+model ClientHoliday {
+  id        String   @id @default(cuid())
+  clientId  String
+  date      DateTime // IST calendar day normalized to UTC midnight, like Holiday.date
+  name      String
+  createdAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id])
+
+  @@unique([clientId, date])
+  @@index([clientId])
+}
+
+// ---------------------------------------------------------------------------
+// Contractor Workforce: daily loop, messaging, exceptions, sign-off (Phase 1-2)
+// ---------------------------------------------------------------------------
+
+// One row per assignment per IST day. State is recomputed by the attendance rules engine
+// (src/lib/workforce/attendance-rules.ts); evaluation keeps the last result for audit/explanation.
+model DailyStatus {
+  id                    String    @id @default(cuid())
+  assignmentId          String
+  date                  DateTime // IST calendar day normalized to UTC midnight (istDateOnly)
+  state                 String    @default("pending") // pending|present|late|half_day|absent|leave|holiday|weekly_off
+  checkInAt             DateTime?
+  checkInChannel        String? // whatsapp|web|portal|missed_call|coordinator
+  checkOutAt            DateTime?
+  hoursWorked           Float?
+  lateMinutes           Int       @default(0)
+  pulsesSent            Int       @default(0)
+  pulsesAnswered        Int       @default(0)
+  pulsesExcused         Int       @default(0)
+  eodMode               String? // web_link|whatsapp_flow|free_text
+  eodCompleted          String?
+  eodInProgress         String?
+  eodBlockers           String?
+  eodHours              Float?
+  eodTomorrow           String?
+  eodRaw                String?
+  eodAt                 DateTime?
+  approvedOvertimeHours Float     @default(0)
+  // Set by a coordinator after a call (e.g. contractor was on leave): feeds the rules engine.
+  leaveOverride         String? // paid|unpaid
+  coordinatorNote       String?
+  clientConfirm         String    @default("none") // none|confirmed|disputed
+  clientConfirmAt       DateTime?
+  clientConfirmNote     String?
+  evaluation            String? // JSON snapshot of the rules-engine DayResult
+  closed                Boolean   @default(false)
+  closedAt              DateTime?
+  locked                Boolean   @default(false)
+  attendanceId          String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  assignment  Assignment   @relation(fields: [assignmentId], references: [id])
+  corrections Correction[]
+  disputes    Dispute[]
+
+  @@unique([assignmentId, date])
+  @@index([date])
+  @@index([state])
+}
+
+// Every automated or inbound message: the audit trail AND the idempotency guard (idempotencyKey
+// is unique, so a restart or a duplicate webhook can never send or record the same thing twice).
+model WorkforceMessage {
+  id                String    @id @default(cuid())
+  idempotencyKey    String    @unique
+  assignmentId      String?
+  employeeId        String?
+  contactId         String?
+  direction         String // out|in
+  type              String // CHECK_IN, LATE_REMINDER, ... or INBOUND
+  channel           String    @default("whatsapp")
+  template          String?
+  priority          Int       @default(5)
+  date              DateTime?
+  scheduledAt       DateTime  @default(now())
+  sentAt            DateTime?
+  status            String    @default("queued") // queued|sent|delivered|read|failed|replied|suppressed
+  suppressReason    String?
+  failureReason     String?
+  retryCount        Int       @default(0)
+  correlationId     String
+  providerMessageId String?
+  payload           String?
+  createdAt         DateTime  @default(now())
+
+  @@index([assignmentId, date])
+  @@index([providerMessageId])
+  @@index([status])
+}
+
+// The exception engine's record. A call task is simply an exception with needsCall=true.
+model ExceptionCase {
+  id           String    @id @default(cuid())
+  dedupeKey    String    @unique // e.g. "missing_checkin:<assignmentId>:<date>" so a tick never raises it twice
+  type         String
+  severity     Int // 0-5
+  assignmentId String?
+  employeeId   String?
+  projectId    String?
+  ownerId      String? // User.id responsible
+  date         DateTime
+  status       String    @default("open") // open|in_progress|waiting_contractor|waiting_client|resolved|escalated|dismissed
+  title        String
+  detail       String?
+  needsCall    Boolean   @default(false)
+  slaDueAt     DateTime?
+  callOutcome  String? // called|connected|no_answer|callback_requested|leave|emergency|client_issue|technical_issue|other
+  callNote     String?
+  calledAt     DateTime?
+  calledBy     String?
+  resolution   String?
+  resolvedAt   DateTime?
+  resolvedBy   String?
+  history      String    @default("[]") // JSON array of {at, by, action, note}
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status, severity])
+  @@index([ownerId, status])
+  @@index([assignmentId, date])
+}
+
+model Correction {
+  id              String   @id @default(cuid())
+  dailyStatusId   String
+  requestedBy     String // User.id
+  approvedBy      String?
+  originalValue   String // JSON
+  newValue        String // JSON
+  reason          String
+  clientConfirmed Boolean  @default(false)
+  adminOverride   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  dailyStatus DailyStatus @relation(fields: [dailyStatusId], references: [id])
+
+  @@index([dailyStatusId])
+}
+
+model Dispute {
+  id            String    @id @default(cuid())
+  dailyStatusId String
+  raisedBy      String // contractor|client|system
+  reason        String
+  comment       String?
+  status        String    @default("open") // open|resolved|rejected
+  resolvedBy    String?
+  resolution    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  dailyStatus DailyStatus @relation(fields: [dailyStatusId], references: [id])
+
+  @@index([status])
+  @@index([dailyStatusId])
+}
+
+// Pay/contract-affecting proposals. NOTHING here is applied automatically: an admin approves,
+// rejects or modifies each one (with a reason) before it can influence payroll.
+model Suggestion {
+  id            String    @id @default(cuid())
+  kind          String // deduction|warning|replacement|payroll_blocker|prefill
+  employeeId    String
+  assignmentId  String
+  year          Int
+  month         Int
+  detail        String // JSON
+  status        String    @default("pending_admin") // pending_admin|approved|rejected|modified
+  decidedBy     String?
+  decidedReason String?
+  decidedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([assignmentId, year, month, kind])
+  @@index([status])
+}
+
+model ClientSignOff {
+  id                String    @id @default(cuid())
+  projectId         String
+  year              Int
+  month             Int
+  status            String    @default("pending") // pending|signed
+  signedByContactId String?
+  signedAt          DateTime?
+  note              String?
+  createdAt         DateTime  @default(now())
+
+  @@unique([projectId, year, month])
+}
+
+model MonthLock {
+  id        String   @id @default(cuid())
+  projectId String
+  year      Int
+  month     Int
+  lockedAt  DateTime @default(now())
+  lockedBy  String
+
+  @@unique([projectId, year, month])
+}
+
+// Signed links for people with no login (contractor web check-in / end-of-day form, client
+// representative confirmation). Only the hash is stored, like OnboardingInvite.
+model ActionToken {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique
+  purpose      String // contractor|client
+  assignmentId String?
+  contactId    String?
+  projectId    String?
+  date         DateTime?
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+
+  @@index([purpose, expiresAt])
+}
+
+// Single row the in-process worker updates every tick, so the UI can warn "automation not running".
+model WorkerHeartbeat {
+  id         String   @id // always "worker"
+  lastTickAt DateTime
+  lastTickMs Int      @default(0)
+  lastError  String?
+  tickCount  Int      @default(0)
+}
+
+// A client representative's own view of a contractor: "on track?" and an optional 1-5 rating.
+// Feeds the reliability score's Delivery and Client-feedback components (no client-tool integration).
+model ClientFeedback {
+  id           String   @id @default(cuid())
+  assignmentId String
+  contactId    String
+  onTrack      Boolean?
+  rating       Int?
+  comment      String?
+  weekOf       DateTime // Monday (UTC midnight) of the week the feedback is about
+  createdAt    DateTime @default(now())
+
+  @@unique([assignmentId, contactId, weekOf])
+  @@index([assignmentId])
 }
