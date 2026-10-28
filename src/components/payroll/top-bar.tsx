@@ -42,6 +42,8 @@ const viewTitles: Record<string, string> = {
   reports: 'Compliance Reports',
   helpdesk: 'Help Desk',
   settings: 'Company Settings',
+  workforce: 'Contractor Workforce',
+  'my-workday': 'My Work Day',
 };
 
 interface NotificationRow {
