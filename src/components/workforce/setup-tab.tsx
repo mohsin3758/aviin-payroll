@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash2, Link2 } from 'lucide-react';
+import { Plus, Trash2, Link2, ShieldCheck } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -151,6 +151,13 @@ function AssignmentsSection() {
   };
   const edit = (a: any) => setForm({ ...BLANK, id: a.id, employeeId: a.employeeId, projectId: a.projectId, startDate: a.startDate.slice(0, 10), endDate: a.endDate?.slice(0, 10) ?? '', tier: a.tier, contractType: a.contractType, payType: a.payType, payRate: a.payRate ? String(a.payRate) : '', monthlyDayBasis: a.monthlyDayBasis, workMode: a.workMode, status: a.status, resourceCoordinatorId: a.resourceCoordinatorId ?? '', clientCoordinatorId: a.clientCoordinatorId ?? '', kamId: a.kamId ?? '', clientRepContactId: a.clientRepContactId ?? '' });
   const link = async (id: string) => { try { const l = await wf<{ url: string }>(`/api/workforce/assignments/${id}/link`, { method: 'POST' }); await navigator.clipboard?.writeText(l.url).catch(() => undefined); toast.success('Contractor link copied (valid 36 hours)', { description: l.url }); } catch (e) { toast.error((e as Error).message); } };
+  const clientLink = async (a: any) => {
+    try {
+      const l = await wf<{ url: string }>('/api/workforce/client-link', { method: 'POST', json: { contactId: a.clientRepContactId, projectId: a.projectId } });
+      await navigator.clipboard?.writeText(l.url).catch(() => undefined);
+      toast.success('Client confirmation link copied (valid 72 hours). Send it only to that client representative.', { description: l.url });
+    } catch (e) { toast.error((e as Error).message); }
+  };
   const staffOpts = useMemo(() => staff.map((s): [string, string] => [s.id, `${s.name} (${s.role})`]), [staff]);
 
   return (
@@ -164,7 +171,8 @@ function AssignmentsSection() {
             <TableCell className="text-xs capitalize">{a.tier.replace('_', ' ')} · {a.contractType.replace('_', ' ')}</TableCell>
             <TableCell className="text-xs">{a.payRate ? `${inr(a.payRate)} ${a.payType}${a.payType === 'monthly' ? ` (${a.monthlyDayBasis})` : ''}` : <span className="text-red-600">No rate</span>}</TableCell>
             <TableCell><Badge variant="outline" className="capitalize">{a.status}</Badge></TableCell>
-            <TableCell className="space-x-1 text-right"><Button size="sm" variant="outline" onClick={() => edit(a)}>Edit</Button><Button size="icon" variant="ghost" title="Copy contractor link" onClick={() => link(a.id)}><Link2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></CardContent></Card>
+            <TableCell className="space-x-1 text-right"><Button size="sm" variant="outline" onClick={() => edit(a)}>Edit</Button><Button size="icon" variant="ghost" title="Copy contractor link" onClick={() => link(a.id)}><Link2 className="h-4 w-4" /></Button>
+              <Button size="icon" variant="ghost" title={a.clientRepContactId ? 'Copy client confirmation link' : 'Set a client representative to get a client link'} disabled={!a.clientRepContactId} onClick={() => clientLink(a)}><ShieldCheck className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></CardContent></Card>
 
       <Dialog open={!!form} onOpenChange={(o) => !o && setForm(null)}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">

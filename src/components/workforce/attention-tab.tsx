@@ -42,6 +42,7 @@ export default function AttentionTab() {
   const [outcome, setOutcome] = useState('connected');
   const [note, setNote] = useState('');
   const [leaveOverride, setLeaveOverride] = useState('none');
+  const [disputeOutcome, setDisputeOutcome] = useState('');
   const [staff, setStaff] = useState<{ id: string; name: string; role: string }[]>([]);
   const [newOwner, setNewOwner] = useState('');
   const [busy, setBusy] = useState(false);
@@ -111,7 +112,7 @@ export default function AttentionTab() {
                         {i.phone && <Button size="sm" variant="outline" asChild><a href={`tel:+91${i.phone.replace(/\D/g, '').slice(-10)}`}><Phone className="mr-1 h-4 w-4" />Call</a></Button>}
                         {i.phone && <Button size="sm" variant="outline" asChild><a href={`https://wa.me/91${i.phone.replace(/\D/g, '').slice(-10)}`} target="_blank" rel="noreferrer"><MessageCircle className="mr-1 h-4 w-4" />WhatsApp</a></Button>}
                         <Button size="sm" variant="outline" onClick={() => { setOutcome('connected'); setNote(''); setDialog({ kind: 'contacted', item: i }); }}>Mark contacted</Button>
-                        <Button size="sm" onClick={() => { setNote(''); setLeaveOverride('none'); setDialog({ kind: 'resolve', item: i }); }}><CheckCircle2 className="mr-1 h-4 w-4" />Resolve</Button>
+                        <Button size="sm" onClick={() => { setNote(''); setLeaveOverride('none'); setDisputeOutcome(''); setDialog({ kind: 'resolve', item: i }); }}><CheckCircle2 className="mr-1 h-4 w-4" />Resolve</Button>
                         <Button size="sm" variant="outline" onClick={() => act(i, { action: 'escalate' }, 'Escalated')}><ArrowUpCircle className="mr-1 h-4 w-4" />Escalate</Button>
                         {canReassign && <Button size="sm" variant="outline" onClick={() => { setNewOwner(''); setNote(''); setDialog({ kind: 'reassign', item: i }); }}><UserCog className="mr-1 h-4 w-4" />Reassign</Button>}
                       </div>
@@ -139,7 +140,14 @@ export default function AttentionTab() {
                       <SelectContent>{OUTCOMES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select>
                   </div>
                 )}
-                {dialog.kind === 'resolve' && (
+                {dialog.kind === 'resolve' && dialog.item.type === 'client_dispute' && (
+                  <div className="space-y-1.5"><Label>Decision</Label>
+                    <Select value={disputeOutcome} onValueChange={setDisputeOutcome}><SelectTrigger><SelectValue placeholder="Was the client right?" /></SelectTrigger>
+                      <SelectContent><SelectItem value="upheld">Client was right (upheld)</SelectItem><SelectItem value="rejected">The record stands (rejected)</SelectItem></SelectContent></Select>
+                    <p className="text-xs text-slate-500">If the client was right, correct the day first from the Live board. A month cannot be locked while a dispute is open.</p>
+                  </div>
+                )}
+                {dialog.kind === 'resolve' && dialog.item.type !== 'client_dispute' && (
                   <div className="space-y-1.5"><Label>If the contractor was on leave</Label>
                     <Select value={leaveOverride} onValueChange={setLeaveOverride}><SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -159,11 +167,11 @@ export default function AttentionTab() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
-                <Button disabled={busy || (dialog.kind === 'resolve' && note.trim().length < 3) || (dialog.kind === 'reassign' && !newOwner)}
+                <Button disabled={busy || (dialog.kind === 'resolve' && (note.trim().length < 3 || (dialog.item.type === 'client_dispute' && !disputeOutcome))) || (dialog.kind === 'reassign' && !newOwner)}
                   onClick={() => dialog.kind === 'contacted'
                     ? act(dialog.item, { action: 'contacted', outcome, note: note || undefined }, 'Call logged')
                     : dialog.kind === 'resolve'
-                      ? act(dialog.item, { action: 'resolve', note, ...(leaveOverride !== 'none' ? { leaveOverride, outcome: 'leave' } : {}) }, 'Resolved')
+                      ? act(dialog.item, { action: 'resolve', note, ...(dialog.item.type === 'client_dispute' ? { disputeOutcome } : {}), ...(leaveOverride !== 'none' && dialog.item.type !== 'client_dispute' ? { leaveOverride, outcome: 'leave' } : {}) }, 'Resolved')
                       : act(dialog.item, { action: 'reassign', ownerId: newOwner, note: note || undefined }, 'Reassigned')}>
                   Save
                 </Button>

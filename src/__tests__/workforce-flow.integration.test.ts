@@ -224,13 +224,17 @@ describe("Contractor workforce: daily loop, client confirmation, month lock (req
     const open = await call("GET", "/api/workforce/disputes", manager);
     const d = open.json.data.find((x: { dailyStatusId: string }) => x.dailyStatusId === days["2026-09-30"]);
     expect(d).toBeTruthy();
-    const resolved = await call("PATCH", `/api/workforce/disputes/${d.id}`, manager, { outcome: "upheld", resolution: "Checked with the contractor: left at 1 pm as recorded" });
-    expect(resolved.status).toBe(200);
-    // The dispute also raised a call-queue item; the coordinator clears it.
+    // The dispute also raised a call-queue item. Resolving THAT item is how the coordinator settles it,
+    // and it must say whether the client was right, which also closes the dispute record.
     const queue = await call("GET", "/api/workforce/attention", manager);
     const ex = queue.json.data.items.find((i: { type: string }) => i.type === "client_dispute");
     expect(ex).toBeTruthy();
-    expect((await call("PATCH", `/api/workforce/exceptions/${ex.id}`, manager, { action: "resolve", note: "Settled with the client" })).status).toBe(200);
+    const noDecision = await call("PATCH", `/api/workforce/exceptions/${ex.id}`, manager, { action: "resolve", note: "Settled with the client" });
+    expect(noDecision.status).toBe(400); // a dispute needs a decision
+    const settled = await call("PATCH", `/api/workforce/exceptions/${ex.id}`, manager, { action: "resolve", note: "Checked with the contractor: left at 1 pm as recorded", disputeOutcome: "rejected" });
+    expect(settled.status).toBe(200);
+    const stillOpen = await call("GET", "/api/workforce/disputes", manager);
+    expect(stillOpen.json.data.some((x: { dailyStatusId: string }) => x.dailyStatusId === days["2026-09-30"])).toBe(false);
   });
 
   it("the month can be signed off by the client, then locked by an admin only; locking creates suggestions, not payments", async () => {

@@ -19,6 +19,8 @@ const bodySchema = z.discriminatedUnion("action", [
     outcome: z.enum(OUTCOMES).optional(),
     // When the contractor turned out to be on leave, record it so the day isn't counted absent.
     leaveOverride: z.enum(["paid", "unpaid"]).optional(),
+    // Required when resolving a "Client disputed" item: was the client right (upheld) or does the record stand?
+    disputeOutcome: z.enum(["upheld", "rejected"]).optional(),
   }),
   z.object({ action: z.literal("escalate"), note: z.string().trim().max(1000).optional() }),
   z.object({ action: z.literal("reassign"), ownerId: z.string().min(1), note: z.string().trim().max(500).optional() }),
@@ -47,7 +49,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       const waiting = body.outcome === "no_answer" || body.outcome === "callback_requested";
       data = { callOutcome: body.outcome, callNote: body.note ?? null, calledAt: now, calledBy: session.userId, status: waiting ? "waiting_contractor" : "in_progress" };
     } else if (body.action === "resolve") {
+      if (ex.type === "client_dispute" && !body.disputeOutcome) {
+        return apiError("Say whether the client was right (upheld) or the record stands (rejected).", 400);
+      }
       entry("resolved", body.note);
+      if (ex.type === "client_dispute" && body.disputeOutcome) {
+        // The exception's key is "client_dispute:<disputeId>": settle that dispute so it no longer blocks the month.
+        const disputeId = ex.dedupeKey.split(":")[1];
+        const dispute = disputeId ? await db.dispute.findUnique({ where: { id: disputeId } }) : null;
+        if (dispute && dispute.status === "open") {
+          await db.dispute.update({
+            where: { id: dispute.id },
+            data: { status: body.disputeOutcome === "upheld" ? "resolved" : "rejected", resolution: body.note, resolvedBy: session.userId, resolvedAt: now },
+          });
+          const stillOpen = await db.dispute.count({ where: { dailyStatusId: dispute.dailyStatusId, status: "open" } });
+          if (stillOpen === 0) {
+            await db.dailyStatus.update({ where: { id: dispute.dailyStatusId }, data: { clientConfirm: "confirmed", clientConfirmNote: `Dispute resolved: ${body.note}`.slice(0, 500) } });
+          }
+        }
+      }
       data = { status: "resolved", resolution: body.note, resolvedAt: now, resolvedBy: session.userId, ...(body.outcome ? { callOutcome: body.outcome } : {}) };
       if (body.leaveOverride && ex.assignmentId) {
         const day = await db.dailyStatus.findUnique({ where: { assignmentId_date: { assignmentId: ex.assignmentId, date: ex.date } } });
